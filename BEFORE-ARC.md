@@ -1,0 +1,187 @@
+# BEFORE-ARC Experiment Settings
+The experiment settings are described in each study section below for the BEFORE-ARC data environment.
+<br>
+
+There are three problems that can be considered:
+- Image (grid) generation
+  - A sample contains an input (grid) image and the output is an image obtained by a ground-truth AVR transformation of the input image.
+
+<br>
+
+- Image (grid) generation with demonstrations
+  - A sample contains an input (grid) image with also $k=2$ demonstration examples (i.e., input-output pairs representing the AVR transformation to learn) concatenated, and the output is an image obtained by a ground-truth AVR transformation of the input image.
+
+<br>
+
+- Categorical prediction given a set of images: MCQ
+  - A sample contains an input (grid) image with also $k$ images concatenated and the output is a categorical value indicating which of the $k$ images is the correct result of the ground-truth AVR transformation.
+<br>
+<br>
+
+→ We only consider the first problem. Note that the first and the second problem are similar.
+
+A transformation is associated to a task. A transformation is either a primitive (i.e., Translate-Up, Translate-Down, Translate-Right, Translate-Left, Rot-90, Mirror-Horizontal, Mirror-Vertical, Crop-Top, Crop-Bottom, Crop-Left, Crop-Right) or a composition of primitive transformations.
+<br>
+
+Constraints of the BEFORE-ARC data environment, maintained uniformly across samples, are:
+- Objects' size is smaller than 6 pixels in rows and columns  
+- Objects are single colored 
+- Objects are 8-connected (not 4-connected)
+- Objects are not allowed to touch 
+- Demonstration examples are 2 by default (except ICL)
+<br>
+
+<br>
+
+The considered varying parameters are:
+- Grid size 
+- Number of objects (where the def. of an object is w.r.t. the above constraints)
+- For ICL: Number of demonstrations
+
+
+## Systematic Generalization
+Consider the elementary/primitive transformations Translate-Up and Rot-90. They represent tasks. 
+<br>
+
+We justify not selecting the other elementary transformations by assuming that results for the selected transformations would directly transfer to the ones not selected. We also note resources constraints.
+
+**Experiment setting 1: Number of Objects Difficulty**<br>
+Fix the grid size to $(10,10)$.
+<br>
+
+For each task considered:
+- Train on $N_{train}$ samples with $nb\_objects \in \{1,2\}$
+- Test on $N_{test}$ samples with $nb\_objects \in \{3,4\}$
+
+<br>
+
+**Experiment setting 2: Grid Size Difficulty**<br>
+Fix the number of objects per image to $2$.
+<br>
+
+For each task considered:
+- Train on $N_{train}$ samples with $grid\_size \in \{(10, 10), (11, 10), ..., (12,12)\}$
+- Test on $N_{test}$ samples with $grid\_size \in \{(13, 13), (14, 13), ..., (16,16)\}$
+
+
+## Compositionality
+When fixing the variable parameters, we justify our choice of $2$ for the number of objects and $(10,10)$ for the grid size by stating that a reasonably small and fixed cardinality is enough for the experiments to highlight meaningful results. We also note the resources constraints. 
+<br>
+
+Consider all the $T_{elem} = 11$ elementary/primitive transformations and the related composite pair for each combination of depth $1$. This yields $T_{composite} = T_{elem}^2 = 121$ composite tasks. 
+<br>
+
+
+**Experiment setting 1: Composition from Elementary to Composite**<br>
+Fix the number of objects to $2$ and the grid size to $(10,10)$.
+<br>
+
+For each pair of elementary tasks in the set of tasks that are elementary tasks making up their associated composite task:
+- Train on $N_{train}$ samples from the relevant elementary tasks
+- Test on $N_{test}$ samples from the associated composite task
+
+<br>
+
+**Experiment setting 2: Decomposition from Composite to Elementary**<br>
+Fix the number of objects to $2$ and the grid size to $(10,10)$.
+<br>
+
+For each composite task in the set of tasks that are composite tasks associated with the composition of two elementary tasks:
+- Train on $N_{train}$ samples from the composite task
+- Test on $N_{test}$ samples from the associated elementary tasks
+
+<br>
+
+
+**Experiment setting 3: From Composite to Unseen Composite**<br>
+Fix the number of objects to $2$ and the grid size to $(10,10)$.
+<br>
+
+For each composite task that is the depth $1$ composition of two elementary transformations:
+- Train on $N_{train}$ samples from all the relevant composite tasks except one
+- Test on $N_{test}$ samples from the relevant composite task not seen during training
+
+<br>
+
+**Experiment setting 4: From Composite and Restricted Elementary to Unseen Composite**<br>
+Fix the number of objects to $2$ and the grid size to $(10,10)$.
+<br>
+
+For each elementary task and composite task that is the depth $1$ composition of two elementary transformations:
+- Train on $N_{train}$ samples from all the relevant tasks except one composite task and the elementary tasks composing it
+- Test on $N_{test}$ samples from the relevant composite task and elementary tasks composing it not seen during training
+
+
+## Sample-Efficiency
+Consider $4$ (i.e., Translate-Up, Rot-90, Mirror-Horizontal, Crop-Top) of the elementary/primitive transformations. They represent tasks. 
+<br>
+
+We justify not selecting the other elementary transformations by assuming that results for the selected transformations would directly transfer to the not selected ones, as well as noting resources constraints.
+<br>
+
+We have to decide on one of the following modalities that will decide on a single experiment setting below:
+
+- Train separately on datasets of size $N_1, ..., N_k$ (e.g. $N_1=100, N_2=1000, ..., N=100000$) different samples respectively and write the best performance for each dataset size. We use early stopping or save the best checkpoint.
+
+- Train on a dataset of sufficiently large $N$ (e.g. $N=100000$) samples and report the model performance when $n_1, n_2=..., n_k$ (e.g. $n_1=100, n_2=1000, ..., n_k=100000$) **different** samples have been seen.
+
+- Train on a dataset of fairly large $N$ (e.g. $N=50000$) samples and report the model performance when $n_1, n_2=..., n_k$ (e.g. $n_1=100, n_2=1000, ..., n_k=100000$) samples have been seen.
+
+- Train on a dataset of fairly large $N$ (e.g. $N=50000$) samples and report the number of steps a model has performed to reach its best performance. 
+<br>
+
+→ We decide to consider the first modality for the following experiment settings.
+
+<br>
+
+**Experiment setting 1: Varying Number $N$ of Samples**<br>
+Fix the number of objects to $2$ and the grid size to $(10,10)$.
+<br>
+
+For each task considered and each $N \in \{100, 1000, 2500, 5000, 10000, 25000, 50000, 100000\}$:
+- Train on $N_{train} = N$ samples
+- Test on $N_{test}$ samples with the best model checkpoint obtained during training
+
+<br>
+
+**Experiment setting 2: Best Performance across $N$ Different Samples**<br>
+Fix the number of objects to $2$ and the grid size to $(10,10)$.
+<br>
+
+Fix a sufficiently large $N=100000$. Consider $n_i \in \{100, 1000, 2500, 5000, 10000, 25000, 50000, 100000\}$.
+<br>
+
+For each task considered:
+- Train on $N_{train} = N$ samples
+- Test on $N_{test}$ samples after the model has seen $n_i$ **different** samples during training
+
+<br>
+
+**Experiment setting 3: Best Performance across $N$ Samples**<br>
+Fix the number of objects to $2$ and the grid size to $(10,10)$.
+<br>
+
+Fix a fairly large $N=50000$.
+<br>
+
+For each task considered:
+- Train on $N_{train} = N$ samples until convergence of the model
+- Test on $N_{test}$ samples with the best model checkpoint obtained during training and report how many samples had been seen by that model checkpoint
+
+<br>
+
+**Experiment setting 4: Best Performance across $S$ Steps**<br>
+Fix the number of objects to $2$ and the grid size to $(10,10)$.
+<br>
+
+Fix a fairly large $N=50000$.
+<br>
+
+For each task considered:
+- Train on $N_{train} = N$ samples until convergence of the model
+- Test on $N_{test}$ samples with the best model checkpoint obtained during training and report how many steps had been performed by that model checkpoint
+
+
+
+## ICL
+See later.
