@@ -50,8 +50,8 @@ Fix the grid size to $(10,10)$.
 <br>
 
 For each task considered:
-- Train on $N_{train}$ samples with $nb\_objects \in \{1,2\}$
-- Test on $N_{test}$ samples with $nb\_objects \in \{3,4\}$
+- Train on $N_{train}$ samples with $nb\_ objects \in \{1,2\}$
+- Test on $N_{test}$ samples with $nb\_ objects \in \{3,4\}$
 
 <br>
 
@@ -60,8 +60,8 @@ Fix the number of objects per image to $2$.
 <br>
 
 For each task considered:
-- Train on $N_{train}$ samples with $grid\_size \in \{(10, 10), (11, 10), ..., (12,12)\}$
-- Test on $N_{test}$ samples with $grid\_size \in \{(13, 13), (14, 13), ..., (16,16)\}$
+- Train on $N_{train}$ samples with $grid\_ size \in \{(10, 10), (11, 10), ..., (12,12)\}$
+- Test on $N_{test}$ samples with $grid\_ size \in \{(13, 13), (14, 13), ..., (16,16)\}$
 
 
 ## Compositionality

@@ -10,7 +10,7 @@ The problem considered is:
 
 <br>
 
-Note that $k$ can be changed in the code in the file tasks.py (or generalization_tasks.py) through the variable $n\_samples$.
+Note that $k$ can be changed in the code in the file tasks.py (or generalization_tasks.py) through the variable $n\_ samples$.
 
 A rule is associated to a task. There are elementary rules and composite ones. The composite rules are either roughly the result of a combination (e.g., task_pos_contact or task_size_count_2), or they are a "standalone" more complex rule (e.g., task_sym_mir). If a task name contains an index at the end of its name, it is an additional rule variant of a "rough" composition of elementary rules.
 <br>
