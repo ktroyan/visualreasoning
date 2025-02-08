@@ -18,7 +18,7 @@ There are three problems that can be considered:
 <br>
 <br>
 
-→ We only consider the first problem. Note that the first and the second problem are similar.
+→ We only consider the first problem. Note that the first and the second problem are similar as long as the type of transformation/rule to perform is specified when needed.
 
 A transformation is associated to a task. A transformation is either a primitive (i.e., Translate-Up, Translate-Down, Translate-Right, Translate-Left, Rot-90, Mirror-Horizontal, Mirror-Vertical, Crop-Top, Crop-Bottom, Crop-Left, Crop-Right) or a composition of primitive transformations.
 <br>
