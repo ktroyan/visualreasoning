@@ -25,7 +25,10 @@ The considered varying parameters are:
 render the pruned range empty" and "...in many cases, some degrees of freedom are not independent.". Hence, we can create two or three difficulty levels by using the intervals $interval_{1} = [0, 0.7], interval_{2} = [0.7, 1]$ or $interval_{1} = [0, 1/3], interval_{2} = [1/3, 2/3], interval_{3} = [2/3, 1]$, respectively.
 
 ## Systematic Generalization
-Sample $T=10$ tasks from the $400$ tasks. This can be done either completely randomly or randomly for a subset of tasks where the tasks are selected according to some criterion. Moreover, we justify selecting $T$ tasks randomly by stating that there is no explicit structure or hierarchy in the $400$ ARC tasks and sampling randomly for $T$ large enough (e.g., $T=10$) should yield results representative of what would be obtained on average on the whole set of $400$ tasks.
+Sample $T=10$ tasks randomly from the $400$ tasks.
+<br>
+
+Note that the sampling can be done either completely randomly or randomly for a subset of tasks where the tasks are selected according to some criterion. Moreover, we justify selecting $T$ tasks randomly by stating that there is no explicit structure or hierarchy in the $400$ ARC tasks and sampling randomly for $T$ large enough (e.g., $T=10$) should yield results representative of what would be obtained on average on the whole set of $400$ tasks.
 <br>
 
 For example, the tasks have something in common with the tasks of the other data environments. <br>
@@ -55,7 +58,10 @@ None.
 There is no direct way to obtain compositions from the RE-ARC generator, especially since there is no clear/explicit elementary/primitive transformation.
 
 ## Sample-Efficiency
-Select $T=10$ tasks randomly from the $400$ tasks and generate the samples with a low level of difficulty/complexity of $interval = [0, 0.4]$. The idea is that a sample would represent a task closer to "elementary" tasks &ndash; which is also the choice we made in the CVR and BEFORE-ARC data environments &ndash; in order to avoid confounding the learning performance with the difficulty of the tasks (e.g., if the tasks are "composite" as opposed to "elementary"). Moreover, we justify selecting $T$ tasks randomly by stating that there is no explicit structure or hierarchy in the $400$ ARC tasks and sampling randomly for $T$ large enough (e.g., $T=10$) should yield results representative of what would be obtained on average on the whole set of $400$ tasks.
+Select $T=10$ tasks randomly from the $400$ tasks and generate the samples with a low level of difficulty/complexity of $interval = [0, 0.4]$.
+<br>
+
+The idea is that a sample would represent a task closer to "elementary" tasks &ndash; which is also the choice we made in the CVR and BEFORE-ARC data environments &ndash; in order to avoid confounding the learning performance with the difficulty of the tasks (e.g., if the tasks are "composite" as opposed to "elementary"). Moreover, we justify selecting $T$ tasks randomly by stating that there is no explicit structure or hierarchy in the $400$ ARC tasks and sampling randomly for $T$ large enough (e.g., $T=10$) should yield results representative of what would be obtained on average on the whole set of $400$ tasks.
 <br>
 
 We have to decide on one of the following modalities that will decide on a single associated experiment setting below:

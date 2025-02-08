@@ -30,19 +30,19 @@ The considered varying parameters are:
 
 
 ## Systematic Generalization
-CVR does not allow a straightforward controlled modification of the level of difficulty/complexity of the generated samples. However, it it possible to generate data said to be of higher difficulty by using their default code (see generalization_tasks.py). The authors of CVR state that "A higher number of random parameters results in a higher difficulty.". Thus, they allow to create a Systematic Generalization test set by using the generalization_tasks.py file where the sets of fixed and random parameters are changed compared to that in tasks.py used for standard in-domain testing (i.e., where the samples seen during training are of same difficulty as those seen at test time).
-<br>
-
-Consequently, there is no direct or simple way to generate samples for the Systematic Generalization study for a difficulty-split based on the number of objects (→ there is no explicit and consistent parameter for that across all the tasks) or the grid size (→ image dimension in this case, which can in fact easily be defined but does not seem relevant due to how Vision Transformers would process such images with patches leading to downsampling and thus a somehwat useless change of image size).
-<br>
-
-We consider $T=2$ of the $9$ elementary tasks.
+Consider $T_{elem}=2$ of the $9$ elementary tasks.
 <br>
 
 The elementary rules/tasks considered are: Pos and Rot. If time allows, we will consider more elementary tasks in addtion (e.g., Count and Color).
 <br>
 
 We justify the choice of elementary tasks by stating that the increased complexity of considering composite tasks could confound the study of the ability of the model to generalize OOD in case the failure would stem from the complexity of the composite samples instead of the increased difficulty of the systematic generalization test set. Moreover, we only consider $2$ of the elementary tasks due to limited resources.
+<br>
+
+CVR does not allow a straightforward controlled modification of the level of difficulty/complexity of the generated samples. However, it it possible to generate data said to be of higher difficulty by using their default code (see generalization_tasks.py). The authors of CVR state that "A higher number of random parameters results in a higher difficulty.". Thus, they allow to create a Systematic Generalization test set by using the generalization_tasks.py file where the sets of fixed and random parameters are changed compared to that in tasks.py used for standard in-domain testing (i.e., where the samples seen during training are of same difficulty as those seen at test time).
+<br>
+
+Consequently, there is no direct or simple way to generate samples for the Systematic Generalization study for a difficulty-split based on the number of objects (→ there is no explicit and consistent parameter for that across all the tasks) or the grid size (→ image dimension in this case, which can in fact easily be defined but does not seem relevant due to how Vision Transformers would process such images with patches leading to downsampling and thus a somehwat useless change of image size).
 
 <br>
 
