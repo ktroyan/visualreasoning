@@ -36,7 +36,15 @@ CVR does not allow a straightforward controlled modification of the level of dif
 Consequently, there is no direct or simple way to generate samples for the Systematic Generalization study for a difficulty-split based on the number of objects (→ there is no explicit and consistent parameter for that across all the tasks) or the grid size (→ image dimension in this case, which can in fact easily be defined but does not seem relevant due to how Vision Transformers would process such images with patches leading to downsampling and thus a somehwat useless change of image size).
 <br>
 
-We consider all the $T=9$ elementary tasks. We justify the choice of $9$ elementary tasks by stating that the increased complexity of considering composite tasks could confound the study of the ability of the model to generalize OOD in case the failure would stem from the complexity of the composite samples instead of the increased difficulty of the systematic generalization test set.
+We consider $T=2$ of the $9$ elementary tasks.
+<br>
+
+The elementary rules/tasks considered are: Pos and Rot. If time allows, we will consider more elementary tasks in addtion (e.g., Count and Color).
+<br>
+
+We justify the choice of elementary tasks by stating that the increased complexity of considering composite tasks could confound the study of the ability of the model to generalize OOD in case the failure would stem from the complexity of the composite samples instead of the increased difficulty of the systematic generalization test set. Moreover, we only consider $2$ of the elementary tasks due to limited resources.
+
+<br>
 
 **Experiment setting 1: Various Parameters Randomness Difficulty**<br>
 For each task considered:
@@ -47,9 +55,15 @@ For each task considered:
 
 
 ## Compositionality
-Consider all the $T_{elem} = 9$ elementary tasks and a related composite pair for each combination of depth $1$. This yields $T_{composite} = T_{elem}^2 = 81$ composite tasks selected. Note that we do not write "the" related composite pair as there can apparently be more than one &ndash;  the composite task name would contain an index at its end.
+Consider $T_{elem} = 4$ of the $9$ elementary tasks and a related composite pair for each combination of depth $1$. This yields $T_{composite} = T_{elem}^2 = 16$ composite tasks selected.
 <br>
 
+The elementary rules/tasks considered are: Pos, Rot, Count and Color. If time allows, we will consider more tasks in addition.
+<br>
+
+Note that we do not write "the" related composite pair as there can apparently be more than one &ndash;  the composite task name would contain an index at its end and not all elementary pairs have an associated "pure" composition, hence we select the composite task with the lower index (or none).
+
+<br>
 
 **Experiment setting 1: Composition from Elementary to Composite**<br>
 For each pair of elementary tasks in the set of tasks that are elementary tasks making up their associated composite task:
@@ -76,14 +90,20 @@ For each composite task that is the depth $1$ composition of two elementary rule
 **Experiment setting 4: From Composite and Restricted Elementary to Unseen Composite**<br>
 For each elementary task and composite task that is the depth $1$ composition of two elementary rules:
 - Train on $N_{train}$ samples from all the relevant tasks except one composite task and the elementary tasks composing it
-- Test on $N_{test}$ samples from the relevant composite task and elementary tasks composing it not seen during training
+- Test on $N_{test}$ samples from the relevant composite task not seen during training
 
 
 ## Sample-Efficiency
-Consider the $T_{elem} = 9$ elementary tasks.
+Consider $T_{elem} = 2$ of the $9$ elementary tasks.
 <br>
 
-We have to decide on one of the following modalities that will decide on a single experiment setting below:
+The elementary rules/tasks considered are: Pos and Rot. If time allows, we will consider more elementary tasks in addition (e.g., Count and Color).
+<br>
+
+We justify the choice of elementary tasks by stating that considering composite tasks would not provide consequent insights on the sample-efficiency ability of the model given that we know from the other experiments part of the Compositionality study that the model can learn to some extent the composite samples from the elementary ones. Moreover, we only consider $2$ of the elementary tasks due to limited resources.
+<br>
+
+We have to decide on one of the following modalities that will decide on a single associated experiment setting below:
 - Train separately on datasets of size $N_1, ..., N_k$ (e.g. $N_1=100, N_2=500, ..., N=10000$) different samples respectively and write the best performance for each dataset size. We use early stopping or save the best checkpoint.
 
 - Train on a dataset of sufficiently large $N$ (e.g. $N=10000$) samples and report the model performance when $n_1, n_2=..., n_k$ (e.g. $n_1=100, n_2=500, ..., n_k=10000$) **different** samples have been seen.

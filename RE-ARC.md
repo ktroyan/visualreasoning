@@ -20,12 +20,12 @@ Constraints of the RE-ARC data environment are:
 
 The considered varying parameters are:
 - Difficulty interval (specified by a lower bound and upper bound), where the closer to $0$, the less difficult the sample, the closer to $1$, the more difficult the sample.
-  - The difficulty interval impacts cardinalities - used as proxy for the difficulty/complexity of a sample - of sampled parameters such as grid height, grid width, number of symbols, number of objects, sizes of objects, number of symbols per object, distances "to travel" for an object, etc. However, the aforementioned parameters do not necessarily appear in all tasks.
+  - The difficulty interval impacts cardinalities &ndash; used as proxy for the difficulty/complexity of a sample &ndash; of sampled parameters such as grid height, grid width, number of symbols, number of objects, sizes of objects, number of symbols per object, distances "to travel" for an object, etc. However, the aforementioned parameters do not necessarily appear in all tasks.
   - The difficulty intervals considered when creating "levels" of difficulty/complexity should be very few, as otherwise "...the ranges of possible values may be too small and would
-render the pruned range empty" and "...in many cases, some degrees of freedom are not independent.". Hence, we can create two or three difficulty levels by using the intervals $interval_{1} = [0, 1/2], interval_{2} = [1/2, 1]$ or $interval_{1} = [0, 1/3], interval_{2} = [1/3, 2/3], interval_{3} = [2/3, 1]$, respectively.
+render the pruned range empty" and "...in many cases, some degrees of freedom are not independent.". Hence, we can create two or three difficulty levels by using the intervals $interval_{1} = [0, 0.7], interval_{2} = [0.7, 1]$ or $interval_{1} = [0, 1/3], interval_{2} = [1/3, 2/3], interval_{3} = [2/3, 1]$, respectively.
 
 ## Systematic Generalization
-Sample $T=10$ tasks from the $400$ tasks. This can be done either completely randomly or randomly for a subset of tasks where the tasks are selected according to some criterion.
+Sample $T=10$ tasks from the $400$ tasks. This can be done either completely randomly or randomly for a subset of tasks where the tasks are selected according to some criterion. Moreover, we justify selecting $T$ tasks randomly by stating that there is no explicit structure or hierarchy in the $400$ ARC tasks and sampling randomly for $T$ large enough (e.g., $T=10$) should yield results representative of what would be obtained on average on the whole set of $400$ tasks.
 <br>
 
 For example, the tasks have something in common with the tasks of the other data environments. <br>
@@ -33,17 +33,17 @@ For example, the tasks have something in common with the tasks of the other data
 Another example would be to select the tasks for which the difficulty/complexity level (defined through an interval $[lb, ub]$) mainly impact the grid size (this would actually be all the tasks) and the number of objects, as that's what is considered in BEFORE-ARC for the study of Systematic Generalization. We would thus consider tasks in a similar mode as the ones in BEFORE-ARC, hence allowing a possibly more related comparison across data environments.
 <br>
 
-Moreover, we note that we could instead use some difficulty metric post data generation in order to create the datasets of different difficulty.
+Moreover, we note that we could instead use some difficulty metric post data generation in order to create the datasets of different difficulty, but choosing the interval difficulty using cardinality of parameters as a proxy for difficulty makes sense and is straightforward.
 
 <br>
 
 **Experiment setting 1: Various Parameters Cardinality Difficulty**<br>
-Define the two intervals $interval_{1} = [0, 1/2], interval_{2} = [1/2, 1]$, which determine the two levels of difficulty/complexity. 
+Define the two intervals $interval_{1} = [0, 0.7], interval_{2} = [0.7, 1]$, which determine the two levels of difficulty/complexity. 
 <br>
 
 For each task considered:
-- Train on $N_{train}$ samples generated with $interval_{1} = [0, 1/2]$
-- Test on $N_{test}$ samples generated with $interval_{2} = [1/2, 1]$
+- Train on $N_{train}$ samples generated with $interval_{1} = [0, 0.7]$
+- Test on $N_{test}$ samples generated with $interval_{2} = [0.7, 1]$
 
 <br>
 
@@ -55,10 +55,10 @@ None.
 There is no direct way to obtain compositions from the RE-ARC generator, especially since there is no clear/explicit elementary/primitive transformation.
 
 ## Sample-Efficiency
-Select $T=10$ tasks randomly from the $400$ tasks and generate the samples with a low level of difficulty/complexity of $interval = [0, 0.25]$. The idea is that the samples would induce tasks closer to "elementary" tasks, as chosen in the CVR and BEFORE-ARC data environments. Moreover, we justify selecting $T$ tasks randomly by stating that there is no explicit structure or hierarchy in the $400$ ARC tasks and sampling randomly for $T$ large enough (e.g., $T=10$) should yield results representative of the whole set of $400$ tasks.
+Select $T=10$ tasks randomly from the $400$ tasks and generate the samples with a low level of difficulty/complexity of $interval = [0, 0.4]$. The idea is that a sample would represent a task closer to "elementary" tasks &ndash; which is also the choice we made in the CVR and BEFORE-ARC data environments &ndash; in order to avoid confounding the learning performance with the difficulty of the tasks (e.g., if the tasks are "composite" as opposed to "elementary"). Moreover, we justify selecting $T$ tasks randomly by stating that there is no explicit structure or hierarchy in the $400$ ARC tasks and sampling randomly for $T$ large enough (e.g., $T=10$) should yield results representative of what would be obtained on average on the whole set of $400$ tasks.
 <br>
 
-We have to decide on one of the following modalities that will decide on a single experiment setting below:
+We have to decide on one of the following modalities that will decide on a single associated experiment setting below:
 - Train separately on datasets of size $N_1, ..., N_k$ (e.g. $N_1=100, N_2=1000, ..., N=100000$) different samples respectively and write the best performance for each dataset size. We use early stopping or save the best checkpoint.
 
 - Train on a dataset of sufficiently large $N$ (e.g. $N=100000$) samples and report the model performance when $n_1, n_2=..., n_k$ (e.g. $n_1=100, n_2=1000, ..., n_k=100000$) **different** samples have been seen.

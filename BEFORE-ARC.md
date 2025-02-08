@@ -68,11 +68,13 @@ For each task considered:
 When fixing the variable parameters, we justify our choice of $2$ for the number of objects and $(10,10)$ for the grid size by stating that a reasonably small and fixed cardinality is enough for the experiments to highlight meaningful results. We also note the resources constraints. 
 <br>
 
-Consider all the $T_{elem} = 11$ elementary/primitive transformations and the related composite pair for each combination of depth $1$. This yields $T_{composite} = T_{elem}^2 = 121$ composite tasks. 
+Consider $T_{elem} = 4$ of the $11$ elementary/primitive transformations and the related composite pair for each combination of depth $1$. This yields $T_{composite} = T_{elem}^2 = 16$ composite tasks. The primitive transformations considered are: Translate-Up, Rot-90, Mirror-Hor and Crop-Top.
 <br>
 
+Note that "depth $1$" means that two primitive transformations are composed. Hence, the composition of two primitive transformations is said to be of depth $1$. Consequently, the composition of a composite transformation, resulting from the composition of two primitive transformations, with a primitive transformation is said to be of depth $2$. Essentially, a primitive transformation has no depth, and the depth of a composition is the number of times that a primitive transformation is applied to an initial transformation in order to obtain the composite transformation.
+<br>
 
-**Experiment setting 1: Composition from Elementary to Composite**<br>
+**Experiment setting 1: Composition from Elementary Tasks to Composite**<br>
 Fix the number of objects to $2$ and the grid size to $(10,10)$.
 <br>
 
@@ -82,7 +84,7 @@ For each pair of elementary tasks in the set of tasks that are elementary tasks 
 
 <br>
 
-**Experiment setting 2: Decomposition from Composite to Elementary**<br>
+**Experiment setting 2: Decomposition from Composite to Elementary Tasks**<br>
 Fix the number of objects to $2$ and the grid size to $(10,10)$.
 <br>
 
@@ -93,7 +95,7 @@ For each composite task in the set of tasks that are composite tasks associated 
 <br>
 
 
-**Experiment setting 3: From Composite to Unseen Composite**<br>
+**Experiment setting 3: From Composite Tasks to Unseen Composite**<br>
 Fix the number of objects to $2$ and the grid size to $(10,10)$.
 <br>
 
@@ -103,14 +105,24 @@ For each composite task that is the depth $1$ composition of two elementary tran
 
 <br>
 
-**Experiment setting 4: From Composite and Restricted Elementary to Unseen Composite**<br>
+**Experiment setting 4: From Composite Tasks and Restricted Elementary Tasks to Unseen Composite**<br>
 Fix the number of objects to $2$ and the grid size to $(10,10)$.
 <br>
 
 For each elementary task and composite task that is the depth $1$ composition of two elementary transformations:
 - Train on $N_{train}$ samples from all the relevant tasks except one composite task and the elementary tasks composing it
-- Test on $N_{test}$ samples from the relevant composite task and elementary tasks composing it not seen during training
+- Test on $N_{test}$ samples from the relevant composite task not seen during training
 
+<br>
+
+**Experiment setting 5: From Composite Tasks to Deeper Composite Tasks**<br>
+Fix the number of objects to $2$ and the grid size to $(10,10)$.
+
+For each composite task that is the depth $1$ or depth $2$ of the same elementary transformations:
+- Train on $N_{train}$ samples from all the relevant composite tasks of depth $1$
+- Test on $N_{test}$ samples from the relevant composite tasks of depth $2$ not seen during training
+
+Note that the Experiment Setting 5 can also be seen as a Systematic Generalization study, but in the context of Compositionality.
 
 ## Sample-Efficiency
 Consider $4$ (i.e., Translate-Up, Rot-90, Mirror-Horizontal, Crop-Top) of the elementary/primitive transformations. They represent tasks. 
@@ -119,7 +131,7 @@ Consider $4$ (i.e., Translate-Up, Rot-90, Mirror-Horizontal, Crop-Top) of the el
 We justify not selecting the other elementary transformations by assuming that results for the selected transformations would directly transfer to the not selected ones, as well as noting resources constraints.
 <br>
 
-We have to decide on one of the following modalities that will decide on a single experiment setting below:
+We have to decide on one of the following modalities that will decide on a single associated experiment setting below:
 
 - Train separately on datasets of size $N_1, ..., N_k$ (e.g. $N_1=100, N_2=1000, ..., N=100000$) different samples respectively and write the best performance for each dataset size. We use early stopping or save the best checkpoint.
 

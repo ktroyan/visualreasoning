@@ -63,9 +63,29 @@ Each item (i.e., experiment setting) in the table below yields a number of exper
 
 | Modalities | CVR | RE-ARC | BEFORE-ARC |
 |------------|-----|--------|------------|
-| **Generalization** | ❓ | ✅ | ✅ |
+| **Generalization** | ✅* | ✅ | ✅ |
 | **Compositionality** | ✅ | ❌ | ✅ |
 | **Sample-Efficiency** &nbsp; &nbsp;| ✅ | ✅ | ✅ |
 | **ICL** | ❓  | ❓ | ❓ |
 
----
+<br>
+
+\* We use the generalization test set defaulting from CVR. However, we argue that it is not a good generalization split as the parameters cannot be controlled *in a simple and straightforward way* (e.g., we cannot set the number of objects), making the increased difficulty of the samples in the generalization test set hard to grasp and use meaningfully.
+
+# Summary of Experiments
+
+| | Compositionality | Sample-Efficiency | Generalization |
+|-------------------|-----------------|------------------|---------------|
+| **RE-ARC**       | ❌  | **Problem:** <br> Image (grid) Generation with Learn/Apply <br> <br> **Setting 1*** with 10 different tasks sampled randomly  | **Problem:** <br> Image (grid) Generation with Learn/Apply <br> <br> **Setting 1** with 10 different tasks sampled randomly  |
+| **BEFORE-ARC**   | **Problems:** <br> - Image (grid) Generation with Task Index Vector <br> - Image (grid) Generation with fixed number of Demonstrations <br> <br> Using Demonstrations Examples or using Task Index Vector to let the model know what transformation to consider. <br> <br> **Tasks:** <br>Translate-Up, Rot-90, Mirror-Hor, Crop-Top and their depth 1 composition <br> <br> **Setting 1** with tasks in Tasks <br> <br> **Setting 2** with tasks in Tasks <br><br> **Setting 3**** with tasks in Tasks <br><br> **Setting 5** with tasks in Tasks as well as the depth $2$ compositions of the primitive tasks in Tasks | **Problem:** <br> Image (grid) Generation with Learn/Apply <br> <br> **Tasks:** <br> Translate-Up, Rot-90 (and, if time allows, Mirror-Hor and Crop-Top) <br> <br> **Setting 1*** with tasks in Tasks  | **Problem:** <br> Image (grid) Generation with Learn/Apply <br> <br> **Tasks:** <br> Translate-Up, Rot-90 (and, if time allows, Mirror-Hor and Crop-Top) <br> <br> **Setting 1** with tasks in Tasks <br> <br> **Setting 2** with tasks in Tasks |
+| **CVR**         | **Problem:** <br> Classification with Task Index Vector <br> Using Task Index Vector to let the model know what rule to consider. <br><br> **Tasks:** <br> Pos, Rot, Count, Color and their depth 1 combination (with lower index in the composite task name) <br><br> **Setting 1** with tasks in Tasks <br> <br> **Setting 2** with tasks in Tasks <br><br> **Setting 3**** with tasks in Tasks | **Problem:** <br> Classification with Learn/Apply <br><br> **Tasks:** <br> Pos, Rot (and, if time allows, Count and Color) <br><br> **Setting 1*** with tasks in Tasks <br> |   **Problem:** <br> Classification with Learn/Apply <br><br> **Tasks:** <br> Pos, Rot (and, if time allows, Count and Color) <br><br> **Setting 1** with tasks in Tasks |
+
+### Notes
+
+\* But we should also save the results for Setting 2.
+
+\*\* Add a flag in the code so that Setting 4 (for which the only difference with Setting 3 is that it only considers the elementary transformations/tasks part of the composite transformations/tasks on which the model is trained but not the elementary transformations/tasks part of the composite transformation/task that the model has to predict).
+
+The table above refers to the Markdown files (CVR.md, RE-ARC.md, BEFORE-ARC.md) uploaded on this repo ("visualreasoning").
+
+Regarding the Problems for BEFORE-ARC that involve image generation, we could consider an MCQ mode or a "predict the transformation(s)" mode. This would be easier for the model than having demonstration examples as context input and would also show what can be done with BEFORE-ARC.
