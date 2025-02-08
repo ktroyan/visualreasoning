@@ -55,7 +55,7 @@ For each task considered:
 
 
 ## Compositionality
-Consider $T_{elem} = 4$ of the $9$ elementary tasks and a related composite pair for each combination of depth $1$. This yields $T_{composite} = T_{elem}^2 = 16$ composite tasks selected.
+Consider $T_{elem} = 4$ of the $9$ elementary tasks and a related composite pair for each combination of depth $1$. This yields $T_{composite} = \sum_{i = 1}^{T_{elem}} i = \frac{T_{elem}^2 + T_{elem}}{2} = 10$ composite tasks selected, since the rules' order does not matter, we consider all unique pairs between the tasks, and repetitions are allowed.
 <br>
 
 The elementary rules/tasks considered are: Pos, Rot, Count and Color. If time allows, we will consider more tasks in addition.

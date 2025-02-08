@@ -70,16 +70,18 @@ For each task considered:
 
 
 ## Compositionality
-Consider $T_{elem} = 4$ of the $11$ elementary/primitive transformations and the related composite pair for each combination of depth $1$. This yields $T_{composite} = T_{elem}^2 = 16$ composite tasks.
+Consider $T_{elem} = 4$ of the $11$ elementary/primitive transformations and the related composite pair for each combination of depth $1$ and of depth $2$. This yields $T_{composite_1} = \sum_{i = 1}^{T_{elem}} i = \frac{T_{elem}^2 + T_{elem}}{2} = 10$ and $T_{composite_2} = \frac{T_{elem} \cdot (T_{elem} + 1) \cdot (T_{elem} + 2)}{6} = 20$ composite tasks selected, since the rules' order does not matter, we consider all unique tuples between the tasks, and repetitions are allowed.
 <br>
 
 The primitive transformations considered are: Translate-Up, Rot-90, Mirror-Hor and Crop-Top. If time allows, we will consider more tasks in addition.
 <br>
 
-Note that "depth $1$" means that two primitive transformations are composed. Hence, the composition of two primitive transformations is said to be of depth $1$. Consequently, the composition of a composite transformation, resulting from the composition of two primitive transformations, with a primitive transformation is said to be of depth $2$. Essentially, a primitive transformation has no depth, and the depth of a composition is the number of times that a primitive transformation is applied to an initial transformation in order to obtain the composite transformation.
+Note that "depth $1$" means that two primitive transformations are composed. Hence, the composition of two primitive transformations is said to be of depth $1$. Consequently, the composition of a composite transformation, resulting from the composition of two primitive transformations, with a primitive transformation is said to be of depth $2$. Essentially, a primitive transformation has no depth, and the depth of a composition is the number of times that a primitive transformation is applied to an initial transformation in order to obtain the resulting composite transformation.
 <br>
 
 When fixing the variable parameters, we justify our choice of $2$ for the number of objects and $(10,10)$ for the grid size by stating that a reasonably small and fixed cardinality is enough for the experiments to highlight meaningful results. We also note the resources constraints. 
+<br>
+
 <br>
 
 **Experiment setting 1: Composition from Elementary Tasks to Composite**<br>
@@ -127,8 +129,8 @@ For each elementary task and composite task that is the depth $1$ composition of
 Fix the number of objects to $2$ and the grid size to $(10,10)$.
 
 For each composite task that is the depth $1$ or depth $2$ of the same elementary transformations:
-- Train on $N_{train}$ samples from all the relevant composite tasks of depth $1$
-- Test on $N_{test}$ samples from the relevant composite tasks of depth $2$ not seen during training
+- Train on $N_{train}$ samples from the relevant composite tasks of depth $1$
+- Test on $N_{test}$ samples from the relevant composite tasks of depth $2$ (none were seen during training)
 
 Note that the Experiment Setting 5 can also be seen as a Systematic Generalization study, but in the context of Compositionality.
 
