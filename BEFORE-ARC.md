@@ -159,7 +159,7 @@ We have to decide on one of the following modalities that will decide on a singl
 
 <br>
 
-**Experiment setting 1: Varying Number $N$ of Samples**<br>
+**Experiment setting 1: Best Performance for Varying Number $N$ of Samples**<br>
 Fix the number of objects to $2$ and the grid size to $(10,10)$.
 <br>
 

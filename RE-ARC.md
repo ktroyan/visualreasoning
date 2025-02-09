@@ -78,7 +78,7 @@ We have to decide on one of the following modalities that will decide on a singl
 
 <br>
 
-**Experiment setting 1: Varying Number $N$ of Samples**<br>
+**Experiment setting 1: Best Performance for Varying Number $N$ of Samples**<br>
 For each task considered and each $N \in \{100, 1000, 2500, 5000, 10000, 25000, 50000, 100000\}$:
 - Train on $N_{train} = N$ samples
 - Test on $N_{test}$ samples with the best model checkpoint obtained during training

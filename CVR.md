@@ -15,6 +15,9 @@ Note that $k$ can be changed in the code in the file tasks.py (or generalization
 A rule is associated to a task. There are elementary rules and composite ones. The composite rules are either roughly the result of a combination (e.g., task_pos_contact or task_size_count_2), or they are a "standalone" more complex rule (e.g., task_sym_mir). If a task name contains an index at the end of its name, it is an additional rule variant of a "rough" composition of elementary rules.
 <br>
 
+Note that we changed the task names of two tasks due to what seems to be inconsistencies: task 53 "task_pos_col_1" to "task_pos_color_1" and task 54 "task_pos_col_2" to "task_pos_color_2".
+<br>
+
 Constraints of the CVR data environment are:
 - ...
 - ...
@@ -117,15 +120,15 @@ We have to decide on one of the following modalities that will decide on a singl
 
 <br>
 
-**Experiment setting 1: Varying Number $N$ of Samples**<br>
-For each task considered and each $N \in \{100, 250, 500, 1000, 2500, 5000, 10000\}$:
+**Experiment setting 1: Best Performance for Varying Number $N$ of Samples**<br>
+For each task considered and each $N \in \{100, 500, 1000, 2500, 5000, 10000\}$:
 - Train on $N_{train} = N$ samples
 - Test on $N_{test}$ samples with the best model checkpoint obtained during training
 
 <br>
 
 **Experiment setting 2: Best Performance across $N$ Different Samples**<br>
-Fix a sufficiently large $N=10000$. Consider $n_i \in \{100, 250, 500, 1000, 2500, 5000, 10000\}$.
+Fix a sufficiently large $N=10000$. Consider $n_i \in \{100, 500, 1000, 2500, 5000, 10000\}$.
 <br>
 
 For each task considered:
