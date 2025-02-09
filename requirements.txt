@@ -1,0 +1,17 @@
+scikit-learn
+scipy
+numpy
+Pillow  # for PIL (deprecated, Pillow replaced it)
+opencv-python
+matplotlib
+pandas
+pytorch-lightning
+timm
+PyYAML
+tensorboard
+tensorboardX
+wandb
+--extra-index-url https://download.pytorch.org/whl/cu118
+torch
+torchvision
+torchaudio
