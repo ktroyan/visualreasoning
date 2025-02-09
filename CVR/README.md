@@ -8,6 +8,6 @@ The original and official repository can be found [here](https://github.com/serr
 Associated paper: [A Benchmark for Efficient and Compositional Visual Reasoning](https://arxiv.org/abs/2206.05379)
 
  
-# Licence
+# License
 
 CVR is released under the Apache License, Version 2.0.
