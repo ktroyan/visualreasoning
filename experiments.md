@@ -53,7 +53,10 @@ Some experiment settings are approximately shared across data environments, some
 <br>
 
 ### Experiments
-An experiment/run/training is a single program run performed for a given model, data environment, experiment setting, train set, and test set.
+An experiment for a tuple (data environment, experiment setting, train set, and test set) is a specific configuration where the Experiment Setting's parameters of interest are set for that experiment. Hence, the folder $experiment\_i$ in $experiment\_setting\_j$ contains the dataset splits (i.e., train, val, test, and eventually gen_test).
+
+### Runs
+A run is a single program run performed for a given model and experiment.
 
 
 <br>
