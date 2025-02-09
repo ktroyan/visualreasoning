@@ -1,3 +1,23 @@
+### General
+
+## venv
+vis-reas_venv/
+
+### CVR ###
+/CVR/generated_data
+/CVR/final_datasets
+
+
+### RE-ARC ###
+/RE-ARC/generated_data
+/RE-ARC/arc_original
+
+### BEFORE-ARC ###
+/BEFORE-ARC
+
+
+##########
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
