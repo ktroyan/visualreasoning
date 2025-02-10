@@ -90,7 +90,7 @@ For each composite task that is the depth $1$ composition of two elementary rule
 
 <br>
 
-**Experiment setting 4: From Composite and Restricted Elementary to Unseen Composite**<br>
+**[Not Considered] Experiment setting 4: From Composite and Restricted Elementary to Unseen Composite**<br>
 For each elementary task and composite task that is the depth $1$ composition of two elementary rules:
 - Train on $N_{train}$ samples from all the relevant tasks except one composite task and the elementary tasks composing it
 - Test on $N_{test}$ samples from the relevant composite task not seen during training
@@ -107,11 +107,9 @@ We justify the choice of elementary tasks by stating that considering composite 
 <br>
 
 We have to decide on one of the following modalities that will decide on a single associated experiment setting below:
-- Train separately on datasets of size $N_1, ..., N_k$ (e.g. $N_1=100, N_2=500, ..., N=10000$) different samples respectively and write the best performance for each dataset size. We use early stopping or save the best checkpoint.
+- Train separately on datasets of size $N_1, ..., N_k$ (e.g. $N_1=100, N_2=500, ..., N=10000$) different samples respectively and write the best performance for each dataset size. We train until convergence and use early stopping or save the best checkpoint.
 
 - Train on a dataset of sufficiently large $N$ (e.g. $N=10000$) samples and report the model performance when $n_1, n_2=..., n_k$ (e.g. $n_1=100, n_2=500, ..., n_k=10000$) **different** samples have been seen.
-
-- Train on a dataset of fairly large $N$ (e.g. $N=5000$) samples and report the model performance when $n_1, n_2=..., n_k$ (e.g. $n_1=100, n_2=1000, ..., n_k=10000$) samples have been seen.
 
 - Train on a dataset of fairly large $N$ (e.g. $N=5000$) samples and report the number of steps a model has performed to reach its best performance. 
 <br>
@@ -122,12 +120,12 @@ We have to decide on one of the following modalities that will decide on a singl
 
 **Experiment setting 1: Best Performance for Varying Number $N$ of Samples**<br>
 For each task considered and each $N \in \{100, 500, 1000, 2500, 5000, 10000\}$:
-- Train on $N_{train} = N$ samples
+- Train on $N_{train} = N$ samples until convergence
 - Test on $N_{test}$ samples with the best model checkpoint obtained during training
 
 <br>
 
-**Experiment setting 2: Best Performance across $N$ Different Samples**<br>
+**[Considered within 1] Experiment setting 2: Best Performance across $N$ Different Samples**<br>
 Fix a sufficiently large $N=10000$. Consider $n_i \in \{100, 500, 1000, 2500, 5000, 10000\}$.
 <br>
 
@@ -137,17 +135,7 @@ For each task considered:
 
 <br>
 
-**Experiment setting 3: Best Performance across $N$ Samples**<br>
-Fix a fairly large $N=5000$.
-<br>
-
-For each task considered:
-- Train on $N_{train} = N$ samples until convergence of the model
-- Test on $N_{test}$ samples with the best model checkpoint obtained during training and report how many samples had been seen by that model checkpoint
-
-<br>
-
-**Experiment setting 4: Best Performance across $S$ Steps**<br>
+**[Not Considered] Experiment setting 3: Best Performance across $S$ Steps**<br>
 Fix a fairly large $N=5000$.
 <br>
 
