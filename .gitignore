@@ -4,13 +4,7 @@
 vis-reas_venv/
 
 ### Files at root
-main.py
-inference.py
-utils.py
-/configs
-/models
-/datasets
-/networks
+
 
 
 ### CVR ###
@@ -19,11 +13,13 @@ utils.py
 
 
 ### RE-ARC ###
+/RE-ARC/arc_original
 /RE-ARC/generated_data
 /RE-ARC/generated_data_lb0_ub04
 /RE-ARC/generated_data_lb0_ub07
 /RE-ARC/generated_data_lb07_ub1
-/RE-ARC/arc_original
+/RE-ARC/final_datasets
+
 
 ### BEFORE-ARC ###
 /BEFORE-ARC
