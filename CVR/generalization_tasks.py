@@ -12,7 +12,7 @@ import math
 import cv2
 
 from shape import Shape
-from utils import *
+from utility.utils import *
 
 render = render_cv
 

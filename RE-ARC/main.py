@@ -9,8 +9,8 @@ import random
 import dsl
 from dsl import *
 
-import utils
-from utils import *
+import utility.utils as utils
+from utility.utils import *
 
 import generators
 import verifiers
