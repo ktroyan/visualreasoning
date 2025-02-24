@@ -1,0 +1,15 @@
+resume_training: false
+model_ckpt_path: ''  # NOTE: specify the path to the checkpoint to load for the complete predictive model
+backbone_ckpt_path: ''  # NOTE: specify the path to the checkpoint to load for the backbone model
+freeze_backbone: false
+# Callbacks
+early_stopping: 0
+use_progress_bar: true
+refresh_rate: 0 # NOTE: every how many number of batches to refresh the TQDM. 0 for no refresh
+es_patience: 40
+# Trainer
+gpus: 1
+max_epochs: 3
+log_every_n_steps: 1
+ckpt_period: 1  # NOTE: every how many epochs are the checkpoints saved when running the Trainer()
+# flush_logs_every_n_steps: 100

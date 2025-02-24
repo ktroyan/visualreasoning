@@ -4,15 +4,17 @@
 vis-reas_venv/
 
 ### Files at root
-
+notes.txt
 
 
 ### CVR ###
 /CVR/generated_data
 /CVR/final_datasets
+/CVR/experiments
 
 
 ### RE-ARC ###
+/RE-ARC
 /RE-ARC/arc_original
 /RE-ARC/generated_data
 /RE-ARC/generated_data_lb0_ub04

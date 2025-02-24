@@ -1,0 +1,3 @@
+experiments_dir: './CVR/experiments'
+exp_summary_results_dir: './exp_summary_results'
+exp_logger: 'wandb' # choices: wandb, otherwise tensorboard

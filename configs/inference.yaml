@@ -1,0 +1,2 @@
+# If inference.py is run as a script
+inference_model_ckpt_path: ''
