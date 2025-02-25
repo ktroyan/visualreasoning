@@ -137,10 +137,13 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
 
-    # Frequently changing CLI arguments
+    # Mandatory CLI arguments
+    parser.add_argument('--inference_model_ckpt', type=str, required=True, help='path to a model checkpoint to be used for inference')
+
+    # Configs and CLI arguments (frequently changing arguments)
     parser.add_argument('--seed', type=int, default=None, help='seed for reproducibility')
-    
-    # Consistent CLI arguments
+
+    # Configs arguments (consistent arguments)
     parser.add_argument("--general_config", default="./configs/general.yaml", help="from where to load the general YAML config", metavar="FILE")
     parser.add_argument("--data_config", default="./configs/data.yaml", help="from where to load the YAML config of the chosen data", metavar="FILE")
     parser.add_argument("--model_config", default="./configs/model.yaml", help="from where to load the YAML config of the chosen model", metavar="FILE")
@@ -169,6 +172,7 @@ if __name__ == '__main__':
     model_args = get_config_specific_args_from_args(args, args.model_config)
     model = model_module(**model_args)   # initializing the model
 
-    # NOTE: the model initialized should match the model checkpoint used for inference
-
-    test_results = main(args, datamodule, model, args.inference_model_ckpt_path, exp_logger=None)
+    # --> FIXME: currently, the model initialized should match the model checkpoint used for inference.
+    # We should for example add the model class with the correct args (used to created the instance of the model checkpoint) used to the checkpoint folder so that a checkpoint can be loaded properly
+    # Then we will be able to load a model from a checkpoint and use it for inference. Maybe a better way to solve the issue?
+    test_results = main(args, datamodule, model, args.inference_model_ckpt, exp_logger=None)

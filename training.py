@@ -259,12 +259,12 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
 
-    # Frequently changing CLI arguments
+    # Configs and CLI arguments (frequently changing arguments)
     parser.add_argument('--seed', type=int, default=None, help='seed for reproducibility')
     parser.add_argument('--max_epochs', type=int, default=None, help='maximum number of epochs to be performed during training of the model')
     parser.add_argument('--resume_training', action='store_true', help='whether to resume training from a given checkpoint')
 
-    # Consistent CLI arguments
+    # Configs arguments (consistent arguments)
     parser.add_argument("--general_config", default="./configs/general.yaml", help="from where to load the general YAML config", metavar="FILE")
     parser.add_argument("--data_config", default="./configs/data.yaml", help="from where to load the YAML config of the chosen data", metavar="FILE")
     parser.add_argument("--model_config", default="./configs/model.yaml", help="from where to load the YAML config of the chosen model", metavar="FILE")

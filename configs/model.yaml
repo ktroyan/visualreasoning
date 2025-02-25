@@ -1,5 +1,5 @@
 model_module: 'CVRModel'
-model_backbone: 'vanilla_vit_small'  # it can be: vanilla_vit_small, vanilla_vit_base, resnet18, resnet50
+model_backbone: 'vanilla_vit_base'  # it can be: vanilla_vit_base, resnet18, resnet50
 pretrained: null
 n_tasks: 103    # NOTE: this is used for the task embedding (i.e., to inform the model through an embedding of which tasks to consider)
 use_task_embedding: false

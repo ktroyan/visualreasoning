@@ -6,7 +6,7 @@ from torch.nn import functional as F
 from torchvision import models
 
 # Personal codebase dependencies
-from networks.vanilla_vits import get_vanilla_vit_small, get_vanilla_vit_base
+from networks.vanilla_vits import get_vanilla_vit_base
 from utility.logging import logger
 
 
@@ -103,7 +103,8 @@ class VisReasModel(pl.LightningModule):
 
         if dataloader_idx == 0:
             y_hat, y = self.shared_step(batch)
-            loss = F.cross_entropy(y_hat, y, reduction='none').float().mean().unsqueeze(0)
+            per_sample_loss = F.cross_entropy(y_hat, y, reduction='none').float()   # loss for each sample of the batch
+            loss = per_sample_loss.mean().unsqueeze(0)
             preds = torch.argmax(y_hat, dim=1)
             acc = (y == preds).float().mean().unsqueeze(0)
 
@@ -117,9 +118,10 @@ class VisReasModel(pl.LightningModule):
 
         elif dataloader_idx == 1:
             y_hat, y = self.shared_step(batch)
-            loss = F.cross_entropy(y_hat, y, reduction='none').float().mean().unsqueeze(0)
-            acc = (y == torch.argmax(y_hat, dim=1)).float().mean().unsqueeze(0)
+            per_sample_loss = F.cross_entropy(y_hat, y, reduction='none').float()   # loss for each sample of the batch
+            loss = per_sample_loss.mean().unsqueeze(0)
             preds = torch.argmax(y_hat, dim=1)
+            acc = (y == preds).float().mean().unsqueeze(0)
 
             self.gen_test_preds.append(preds)
             self.gen_test_labels.append(y)
@@ -250,11 +252,6 @@ class CVRModel(VisReasModel):
             self.model_backbone = models.resnet50(progress=False, weights=self.hparams.pretrained)
             nb_features = self.model_backbone.fc.in_features
             self.model_backbone.fc = nn.Identity()
-
-        elif model_backbone == "vanilla_vit_small":
-            self.model_backbone = get_vanilla_vit_small(self.backbone_network_config, img_size=128)
-            nb_features = self.model_backbone.embed_dim
-            self.model_backbone.head = nn.Identity()
 
         elif model_backbone == "vanilla_vit_base":
             self.model_backbone = get_vanilla_vit_base(self.backbone_network_config, img_size=128)

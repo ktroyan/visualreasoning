@@ -4,7 +4,7 @@
 # This source code is licensed under the license found in the
 # LICENSE file in the root directory of this source tree.
 
-# NOTE: the latest code can be found at https://github.com/facebookresearch/moco-v3/blob/main/vits.py
+# NOTE: the latest Facebook Research code can be found at https://github.com/facebookresearch/moco-v3/blob/main/vits.py
 
 import math
 import torch
@@ -16,8 +16,7 @@ from timm.models.vision_transformer import VisionTransformer, _cfg, init_weights
 from timm.layers import PatchEmbed
 
 __all__ = [
-    'get_vanilla_vit_small',
-    'get_vanilla_vit_base',
+    'get_vanilla_vit_base'
 ]
 
 class VanillaVit(VisionTransformer):
@@ -40,7 +39,7 @@ class VanillaVit(VisionTransformer):
             nn.init.zeros_(self.patch_embed.proj.bias)
 
     # 2D sin-cos PE
-    # NOTE: taken from CVR code
+    # NOTE: taken from CVR code and so Facebook Research repo (https://github.com/facebookresearch/moco-v3/blob/main/vits.py)
     def build_2d_sincos_position_embedding(self, temperature=10000.):
         h, w = self.patch_embed.grid_size
         grid_w = torch.arange(w, dtype=torch.float32)
@@ -57,7 +56,6 @@ class VanillaVit(VisionTransformer):
 
         # NOTE: https://github.com/facebookresearch/moco-v3/issues/36Note
         assert self.num_prefix_tokens == 1, 'Assuming one and only one token, [cls]'
-        # assert self.num_tokens == 1, 'Assuming one and only one token, [cls]'
         pe_token = torch.zeros([1, 1, self.embed_dim], dtype=torch.float32)
         self.pos_embed = nn.Parameter(torch.cat([pe_token, pos_emb], dim=1))
         self.pos_embed.requires_grad = False
@@ -75,21 +73,6 @@ def get_vanilla_vit_base(bb_net_config, **kwargs):
         norm_layer=partial(nn.LayerNorm, eps=1e-6), 
         **kwargs)
 
-    # TODO: should we use that default config? Does not seem useful
-    model.default_cfg = _cfg()
-    return model
-
-# NOTE: the only difference with base vanilla vit is the embedding dimension
-def get_vanilla_vit_small(bb_net_config, **kwargs):
-
-    model = VanillaVit(
-        patch_size=bb_net_config['patch_size'], 
-        embed_dim=bb_net_config['embed_dim'], 
-        depth=bb_net_config['depth'], 
-        num_heads=bb_net_config['num_heads'], 
-        mlp_ratio=bb_net_config['mlp_ratio'], 
-        qkv_bias=bb_net_config['qkv_bias'],
-        norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
-    
+    # TODO: should we use that default config? Does not seem useful, as it is devised for 1K-ImageNet
     model.default_cfg = _cfg()
     return model
