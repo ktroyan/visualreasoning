@@ -14,6 +14,15 @@ class VisReasModel(pl.LightningModule):
     def __init__(self):
         super().__init__()
 
+        self.train_preds = []
+        self.train_labels = []
+        self.val_preds = []
+        self.val_labels = []
+        self.test_preds = []
+        self.test_labels = []
+        self.gen_test_preds = []
+        self.gen_test_labels = []
+
         self.test_step_results = [] # NOTE: this is needed to store the results of the test step for each batch (i.e., at each step), and display the final results at the end of the epoch
         self.gen_test_step_results = [] # NOTE: this is needed to store the results of the generalization test step for each batch (i.e., at each step), and display the final results at the end of the epoch
 
@@ -33,7 +42,7 @@ class VisReasModel(pl.LightningModule):
 
         x_shape = x.shape    # bs x nb_images in the sample (4) x channels (3) x H (128) x W (128)
 
-        logger.debug(f"Actual model input x has dimensions: {x_shape}")
+        # logger.debug(f"Actual model input x has dimensions: {x_shape}")
 
         # Create artificial labels. That is, randomly permute the images in each sample so that the odd image is not always the last one (which we don't want the model to learn)
         nb_images_in_one_sample = 4 
@@ -43,7 +52,7 @@ class VisReasModel(pl.LightningModule):
         perms = perms.flatten()
         x = x.reshape([x_shape[0]*nb_images_in_one_sample, x_shape[2], x_shape[3], x_shape[4]])[perms].reshape([x_shape[0], nb_images_in_one_sample, x_shape[2], x_shape[3], x_shape[4]])
 
-        logger.debug(f"Actual model input x after reshaping has dimensions: {x.size()}")    # NOTE: size should be [batch_size, nb_images_in_one_sample, nb_of_channels, img_height, img_width])
+        # logger.debug(f"Actual model input x after reshaping has dimensions: {x.size()}")    # NOTE: size should be [batch_size, nb_images_in_one_sample, nb_of_channels, img_height, img_width])
 
         # Enter the model forward pass function
         if self.use_task_embedding: # NOTE: this is used to indicate to the model which task it has to consider
@@ -51,7 +60,8 @@ class VisReasModel(pl.LightningModule):
         else:
             y_hat = self(x)
 
-        logger.debug(f"Labels y: {y}")
+        # logger.debug(f"Shape of y_hat: {y_hat.shape}")
+        # logger.debug(f"Shape of y: {y.shape}")
 
         return y_hat, y
 
@@ -61,23 +71,31 @@ class VisReasModel(pl.LightningModule):
 
         loss = F.cross_entropy(y_hat, y)    # compute the loss (averaged over the batch)
         preds = torch.argmax(y_hat, dim=1)  # predictions of the model for each sample of the batch
+
         acc = (torch.sum((y == preds)).float() / len(y))  # compute the accuracy (averaged over the batch)
 
-        logs = {"loss": loss, "acc": acc}
+        logs = {"loss": loss, "acc": acc, 'preds': preds, 'y': y}
 
         return loss, logs
 
     def training_step(self, batch, batch_idx):
         loss, logs = self.step(batch, batch_idx)
-        self.log_dict({f"metrics/train_{k}": v for k,v in logs.items()}, prog_bar=True, on_step=True, logger=True, on_epoch=True)    # NOTE: this is monitored for best checkpoint and early stopping
+
+        self.train_preds.append(logs.pop('preds'))
+        self.train_labels.append(logs.pop('y'))
+
+        self.log_dict({f"metrics/train_{k}": v for k,v in logs.items()}, prog_bar=True, logger=True, on_step=True, on_epoch=True)    # NOTE: this is monitored for best checkpoint and early stopping
         
         return loss
 
     def validation_step(self, batch, batch_idx):
-
         loss, logs = self.step(batch, batch_idx)
-        self.log_dict({f"metrics/val_{k}": v for k, v in logs.items()}, prog_bar=True, on_step=True, logger=True, on_epoch=True)    # NOTE: this is monitored for best checkpoint and early stopping
-        self.log_dict({"learning_rate": self.lr_schedulers().get_last_lr()[-1]}, prog_bar=True, on_step=True, logger=True, on_epoch=True)    # NOTE: this is monitored for best checkpoint and early stopping. This yields learning_rate in the logs
+
+        self.val_preds.append(logs.pop('preds'))
+        self.val_labels.append(logs.pop('y'))
+
+        self.log_dict({f"metrics/val_{k}": v for k, v in logs.items()}, prog_bar=True, logger=True, on_step=True, on_epoch=True)    # NOTE: this is monitored for best checkpoint and early stopping
+        self.log_dict({"learning_rate": self.lr_schedulers().get_last_lr()[-1]}, prog_bar=True, logger=True, on_step=True, on_epoch=True)    # NOTE: this is monitored for best checkpoint and early stopping. This yields learning_rate in the logs
 
         return loss
 
@@ -86,7 +104,11 @@ class VisReasModel(pl.LightningModule):
         if dataloader_idx == 0:
             y_hat, y = self.shared_step(batch)
             loss = F.cross_entropy(y_hat, y, reduction='none').float().mean().unsqueeze(0)
-            acc = (y == torch.argmax(y_hat, dim=1)).float().mean().unsqueeze(0)
+            preds = torch.argmax(y_hat, dim=1)
+            acc = (y == preds).float().mean().unsqueeze(0)
+
+            self.test_preds.append(preds)
+            self.test_labels.append(y)
 
             logs = {"loss": loss, "acc": acc}
             results = {f"test_{k}": v for k, v in logs.items()}
@@ -97,6 +119,10 @@ class VisReasModel(pl.LightningModule):
             y_hat, y = self.shared_step(batch)
             loss = F.cross_entropy(y_hat, y, reduction='none').float().mean().unsqueeze(0)
             acc = (y == torch.argmax(y_hat, dim=1)).float().mean().unsqueeze(0)
+            preds = torch.argmax(y_hat, dim=1)
+
+            self.gen_test_preds.append(preds)
+            self.gen_test_labels.append(y)
 
             # TODO: currently in the code we assume that if there is only one dataloader, it will be considered as a test dataloader and not a gen test dataloader even though the data may be of systematic generalization. Fix this to be better maybe?
             logs = {"loss": loss, "acc": acc}
@@ -153,8 +179,24 @@ class VisReasModel(pl.LightningModule):
         Returns:
             optimizer_config (dict): A dictionary containing the optimizer and the learning rate scheduler to be used during training.
         """
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.wd)
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10)
+
+        # Define the optimizer
+        if self.hparams.optimizer == 'Adam':
+            optimizer = torch.optim.Adam(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.wd)
+        
+        elif self.hparams.optimizer == 'AdamW':
+            optimizer = torch.optim.AdamW(self.parameters(), lr=self.hparams.lr, weight_decay=self.hparams.wd)
+        
+        else:
+            raise ValueError(f"Unknown optimizer given: {self.hparams.optimizer}")
+
+        # Define the learning rate scheduler
+        if self.hparams.scheduler == 'ReduceLROnPlateau':
+            scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10)
+        
+        elif self.hparams.scheduler == 'CosineAnnealingLR':
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
+
         optimizer_config = {
             "optimizer": optimizer,
             "lr_scheduler": {
@@ -192,30 +234,30 @@ class CVRModel(VisReasModel):
 
         self.backbone_network_config = get_backbone_network_config(self.hparams)
 
-        num_classes = 1     # NOTE: this value is not used as we replace the last layer of the backbone model with an Identity layer to get the features. That is, the backbone acts as an encoder
+        self.num_classes = 4    # NOTE: this should be equal to the number of images within one sample, as they define the number of classes for the odd-one-out problem
         self.mlp_dim = mlp_dim
         self.mlp_hidden_dim = mlp_hidden_dim
         self.use_task_embedding = use_task_embedding
 
-        self.nb_images_in_one_sample = 4    # NOTE: this should be the number of classes in the complete model
+        self.nb_images_in_one_sample = 4
 
         if model_backbone == "resnet18":
-            self.model_backbone = models.resnet18(progress=False, weights=self.hparams.pretrained, num_classes=num_classes)
+            self.model_backbone = models.resnet18(progress=False, weights=self.hparams.pretrained)
             nb_features = self.model_backbone.fc.in_features
             self.model_backbone.fc = nn.Identity()
 
         elif model_backbone == "resnet50":
-            self.model_backbone = models.resnet50(progress=False, weights=self.hparams.pretrained, num_classes=num_classes)
+            self.model_backbone = models.resnet50(progress=False, weights=self.hparams.pretrained)
             nb_features = self.model_backbone.fc.in_features
             self.model_backbone.fc = nn.Identity()
 
         elif model_backbone == "vanilla_vit_small":
-            self.model_backbone = get_vanilla_vit_small(self.backbone_network_config, img_size=128, stop_grad_conv1=True)
+            self.model_backbone = get_vanilla_vit_small(self.backbone_network_config, img_size=128)
             nb_features = self.model_backbone.embed_dim
             self.model_backbone.head = nn.Identity()
 
         elif model_backbone == "vanilla_vit_base":
-            self.model_backbone = get_vanilla_vit_base(self.backbone_network_config, img_size=128, stop_grad_conv1=True)
+            self.model_backbone = get_vanilla_vit_base(self.backbone_network_config, img_size=128)
             nb_features = self.model_backbone.embed_dim
             self.model_backbone.head = nn.Identity()
 
@@ -245,38 +287,67 @@ class CVRModel(VisReasModel):
         if self.hparams.use_batchnorm:
             self.batch_norm = nn.BatchNorm1d(nb_features)
 
-        self.mlp = nn.Sequential(nn.Linear(nb_features+task_embedding_dim, self.mlp_hidden_dim),
-                                 self.activation, 
-                                 nn.Linear(self.mlp_hidden_dim, self.mlp_dim))    # NOTE: no Softmax needed here as it is included in the cross-entropy loss function
+        # NOTE: the approach here from the CVR code is to give feature embeddings (obtained from the backbone model)
+        # to the MLP head which will then create latent embeddings that are used to compute the pairwise dot products
+        # for some sort of contrastive learning. That is why the num_classes variable is not used as the output dimension of the MLP head
+        if self.hparams.use_dp_sim:
+            self.mlp = nn.Sequential(nn.Linear(nb_features+task_embedding_dim, self.mlp_hidden_dim),
+                                    self.activation, 
+                                    nn.Linear(self.mlp_hidden_dim, self.mlp_dim))    # NOTE: no Softmax needed here as it is included in the cross-entropy loss function
+
+        else:
+            self.mlp = nn.Sequential(nn.Linear(nb_features+task_embedding_dim, self.mlp_hidden_dim),
+                                    self.activation, 
+                                    nn.Linear(self.mlp_hidden_dim, self.num_classes))    # NOTE: no Softmax needed here as it is included in the cross-entropy loss function
 
     def forward(self, x, sample_task_name=None):
 
         x_shape = x.shape
-        
-        # Reshape so that the 4 images within a sample are put on the batch size dimension so that the model can process the batched samples which should have three dimensions max. (in addition to considering the batch size) ?
+
+        # Reshape so that the 4 images within a sample are put on the batch size dimension so that the model can process the batched samples which should have three dimensions max. (in addition to considering the batch size). That is, the 4 images wihin a sample are processed at the same time, as we should.
         x = x.reshape([x_shape[0]*self.nb_images_in_one_sample, x_shape[2], x_shape[3], x_shape[4]])
 
         # Forward pass through the model backbone
         x = self.model_backbone(x)
-
-        # Handle the task embedding if needed
-        if sample_task_name is not None:
-            x_task = self.task_embedding(sample_task_name.repeat_interleave(4))     # repeat_interleave(4) is used to repeat 4 times the elements in the tensor sample_task_name? The output x_task is a tensor of shape (batch_size * 4, embedding_dim) ?
-            logger.debug(f"Shape of x_task: {x_task.size()}")
-            x = torch.cat([x, x_task], 1)
-            logger.debug(f"Shape of x after concatenation with task embedding x_task: {x.size()}")
-
-        # Forward pass through the model head
-        x = self.mlp(x)
-
-        # Normalize the output
-        x = nn.functional.normalize(x, dim=1)
-
-        # Compute pairwise dot products between the 4 images within each sample?
-        x = x.reshape([-1, self.nb_images_in_one_sample, self.mlp_dim])    # reshape to have the 4 images in the sample dimension?
-        x = (x[:, :, None, :] * x[:, None, :, :]).sum(3).sum(2)     # using None allows to add a dimension of size 1 at the specified position (i.e., 2nd and 3rd dimensions here). sum(3) sums across the features dimension, and sum(2) sums across the dimension with the number of images in the sample (so across the images comparisons)
         
-        # Perform some sort of contrastive learning where lower value means better match?
-        x = -x
+        if self.hparams.use_dp_sim:
+
+            # Handle the task embedding if needed
+            if sample_task_name is not None:
+                x_task = self.task_embedding(sample_task_name.repeat_interleave(self.nb_images_in_one_sample))     # repeat_interleave(4) is used to repeat 4 times the elements in the tensor sample_task_name? The output x_task is a tensor of shape (batch_size * 4, embedding_dim) ?
+                logger.debug(f"Shape of x_task: {x_task.size()}")
+                x = torch.cat([x, x_task], 1)
+                logger.debug(f"Shape of x after concatenation with task embedding x_task: {x.size()}")
+
+            # Forward pass through the model head to get latent embeddings
+            x = self.mlp(x)
+
+            # Normalize the latent embeddings
+            x = nn.functional.normalize(x, dim=1)
+
+            # Compute pairwise dot products between the 4 [latent embeddings of the] images within each sample of the batch
+            x = x.reshape([-1, self.nb_images_in_one_sample, self.mlp_dim])    # reshape to have the 4 [latent embeddings of the] images in the sample dimension
+            x = (x[:, :, None, :] * x[:, None, :, :]).sum(3).sum(2)     # using None allows to add a dimension of size 1 at the specified position (i.e., 2nd and 3rd dimensions here). sum(3) sums across the features dimension, and sum(2) sums across the dimension with the number of images in the sample (so across the images comparisons)
+            
+            # To signify some sort of contrastive learning where lower value means better match?
+            x = -x
+        
+        else:
+
+            # Reshape back to group the 4 images within a single sample, for each sample of the batch
+            x = x.reshape(x_shape[0], self.nb_images_in_one_sample, -1)  # [batch_size, 4, nb_features]
+
+            # Aggregate features
+            # TODO: see what approach would be appropriate here
+            x = x.mean(dim=1)  # [batch_size, nb_features]. Average pooling
+            # x = x.max(dim=1)[0]  # [batch_size, nb_features]. Max pooling
+
+            # logger.warning(f"Shape of x after backbone and pooling: {x.size()}")
+
+            # Forward pass through the model head
+            x = self.mlp(x)
+
+            # logger.warning(f"Shape of x after MLP head: {x.size()}")
+            # logger.warning(f"x: {x}")
 
         return x

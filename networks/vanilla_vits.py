@@ -5,8 +5,6 @@
 # LICENSE file in the root directory of this source tree.
 
 # NOTE: the latest code can be found at https://github.com/facebookresearch/moco-v3/blob/main/vits.py
-# The CVR authors used FAIR code in 2022.
-# I also modified the code.
 
 import math
 import torch
@@ -14,7 +12,7 @@ import torch.nn as nn
 from functools import partial, reduce
 from operator import mul
 
-from timm.models.vision_transformer import VisionTransformer, _cfg
+from timm.models.vision_transformer import VisionTransformer, _cfg, init_weights_vit_moco
 from timm.layers import PatchEmbed
 
 __all__ = [
@@ -23,7 +21,7 @@ __all__ = [
 ]
 
 class VanillaVit(VisionTransformer):
-    def __init__(self, stop_grad_conv1=False, **kwargs):
+    def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
         # Use fixed 2D sin-cos position embedding
@@ -31,28 +29,18 @@ class VanillaVit(VisionTransformer):
 
         # Weights initialization
         for name, m in self.named_modules():
-            if isinstance(m, nn.Linear):
-                if 'qkv' in name:
-                    # treat the weights of Q, K, V separately
-                    val = math.sqrt(
-                        6. / float(m.weight.shape[0] // 3 + m.weight.shape[1]))
-                    nn.init.uniform_(m.weight, -val, val)
-                else:
-                    nn.init.xavier_uniform_(m.weight)
-                nn.init.zeros_(m.bias)
-        nn.init.normal_(self.cls_token, std=1e-6)
+            init_weights_vit_moco(m, name)
+            # self.init_weights_vit_timm(m, name)
 
+        # NOTE: Path embedding initialization as per CVR code
         if isinstance(self.patch_embed, PatchEmbed):
             # xavier_uniform initialization
-            val = math.sqrt(
-                6. / float(3 * reduce(mul, self.patch_embed.patch_size, 1) + self.embed_dim))
+            val = math.sqrt(6. / float(3 * reduce(mul, self.patch_embed.patch_size, 1) + self.embed_dim))
             nn.init.uniform_(self.patch_embed.proj.weight, -val, val)
             nn.init.zeros_(self.patch_embed.proj.bias)
 
-            if stop_grad_conv1:
-                self.patch_embed.proj.weight.requires_grad = False
-                self.patch_embed.proj.bias.requires_grad = False
-
+    # 2D sin-cos PE
+    # NOTE: taken from CVR code
     def build_2d_sincos_position_embedding(self, temperature=10000.):
         h, w = self.patch_embed.grid_size
         grid_w = torch.arange(w, dtype=torch.float32)
@@ -87,6 +75,7 @@ def get_vanilla_vit_base(bb_net_config, **kwargs):
         norm_layer=partial(nn.LayerNorm, eps=1e-6), 
         **kwargs)
 
+    # TODO: should we use that default config? Does not seem useful
     model.default_cfg = _cfg()
     return model
 

@@ -99,11 +99,19 @@ def main(args, datamodule, model, model_ckpt_path=None, exp_logger=None):
         # log_message += f"Model: {model}\n"
         logger.info(log_message)
 
-    logger.info(f"Model hyperparameters for inference:\n{model.hparams} \n")
+    logger.info(f"Model hyperparameters of the model used for inference:\n{model.hparams} \n")
 
     # Testing
-    trainer.test(model=model, datamodule=datamodule, verbose=True)  # NOTE: if more than one test dataloader was created in the datamodule, all the test dataloaders will all be used for testing
+    trainer.test(model=model, datamodule=datamodule, verbose=True)  # NOTE: if more than one test dataloader was created in the datamodule, all the test dataloaders will be used for testing
    
+    if args.inference_verbose == 1:
+        logger.info(f"Test predictions: {model.test_preds}")
+        logger.info(f"Test labels: {model.test_labels}")
+
+        if args.use_gen_test_set:
+            logger.info(f"Sys-gen test predictions: {model.gen_test_preds}")
+            logger.info(f"Sys-gen test labels: {model.gen_test_labels}")
+
     test_results = model.test_results
     processed_test_results = process_test_results(args, test_results, test_type="test", exp_logger=None)
 
@@ -122,7 +130,6 @@ def main(args, datamodule, model, model_ckpt_path=None, exp_logger=None):
 
     return all_test_results
 
-# TODO: check if using this file as a script works
 if __name__ == '__main__':
     logger.info(f"inference.py process ID: {os.getpid()}")
 
@@ -161,8 +168,6 @@ if __name__ == '__main__':
     logger.info(f"Model module: {model_module}")
     model_args = get_config_specific_args_from_args(args, args.model_config)
     model = model_module(**model_args)   # initializing the model
-    logger.trace(f"Model for training: {model} \n")
-    logger.info(f"Model hyperparameters for training:\n{model.hparams} \n")
 
     # NOTE: the model initialized should match the model checkpoint used for inference
 

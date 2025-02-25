@@ -1,2 +1,3 @@
-# If inference.py is run as a script
-inference_model_ckpt_path: ''
+inference_verbose: 1  # verbosity level: 0 for no verbose, 1 for most verbose
+## If inference.py is run as a script
+inference_model_ckpt_path: 'CVR\experiments\experiment_3_25_02_05_36\epoch=0-step=32.ckpt'

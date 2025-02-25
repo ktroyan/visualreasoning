@@ -8,5 +8,8 @@ mlp_dim: 128
 mlp_hidden_dim: 2048
 activation: 'relu'
 use_batchnorm: false
+optimizer: 'Adam' # it can be: Adam, AdamW, SGD
+scheduler: 'ReduceLROnPlateau' # it can be: ReduceLROnPlateau, StepLR, MultiStepLR, ExponentialLR, CosineAnnealingLR
 lr: 0.001
 wd: 0.001
+use_dp_sim: true

@@ -78,7 +78,8 @@ class MetricsCallback(Callback):
 
         self.metrics.append(epoch_metrics)
 
-        if self.verbose:
+
+        if self.verbose >= 1:
             epoch_metrics = trainer.callback_metrics
 
             logger.info(f"Considering the metrics: {epoch_metrics.keys()}")
@@ -96,6 +97,19 @@ class MetricsCallback(Callback):
             logger.info(f"Learning rate used at epoch {trainer.current_epoch}: {pl_model_module.lr_schedulers().get_last_lr()}")    # this yields learning_rate_epoch in the logs
             logger.info(log_message)
 
+        if self.verbose >= 2:
+            # Log the predicted labels and the true labels for training and validation
+            logger.info(f"Epoch train predictions: \n{pl_model_module.train_preds}")
+            logger.info(f"Epoch train labels: \n{pl_model_module.train_labels}")
+            logger.info(f"Epoch val predictions: \n{pl_model_module.val_preds}")
+            logger.info(f"Epoch val labels: \n{pl_model_module.val_labels}")
+
+        # Reset the predictions and labels list for the next epoch
+        pl_model_module.train_preds = []
+        pl_model_module.train_labels = []
+        pl_model_module.val_preds = []
+        pl_model_module.val_labels = []
+
         # NOTE: info on the PTL module
         # logger.info(f"Class of the pl model module: {pl_model_module.__class__}")   # e.g.: CVRModel (which inherits from VisReasModel which inherits from pl.LightningModule)
         # logger.info(f"Attributes of the instance of the pl model module: {pl_model_module.__dict__}")    
@@ -109,7 +123,7 @@ def init_callbacks(args, training_folder):
     model_checkpoint = pl.callbacks.ModelCheckpoint(dirpath=training_folder, 
                                                     save_top_k=1, 
                                                     mode='max', 
-                                                    monitor='metrics/val_acc', # 'metrics/val_acc'
+                                                    monitor='metrics/val_acc', # 'metrics/val_loss'
                                                     every_n_epochs=args.ckpt_period, 
                                                     save_last=True)
 
@@ -126,7 +140,7 @@ def init_callbacks(args, training_folder):
         callbacks['progress_bar'] = progress_bar
 
     # Metrics callback
-    metrics_callback = MetricsCallback(verbose=True)
+    metrics_callback = MetricsCallback(verbose=args.metrics_callback_verbose)
     callbacks['metrics_callback'] = metrics_callback
 
     return callbacks
@@ -157,6 +171,7 @@ def train(args, model, datamodule, callbacks, exp_logger=None, checkpoint_path=N
                          max_epochs=args.max_epochs,
                          devices=args.gpus,
                          accelerator='auto',
+                        #  precision=16,
                          gradient_clip_val=None,
                          num_sanity_val_steps=0, 
                          enable_progress_bar=True,
@@ -214,15 +229,14 @@ def main(args, training_folder, datamodule, model, exp_logger=None):
     best_val_acc = np.nanmax(metrics['metrics/val_acc'] + [0])
     best_epoch = (np.nanargmax(metrics['metrics/val_acc'] + [0]) + 1) * args.ckpt_period
 
-    log_message = "All training metrics: \n"
+    log_message = "All epoch training metrics: \n"
     for k, v in metrics.items():
         log_message += f"{k}: {v}" + "\n"
     logger.info(log_message)
 
-    # Access the wandb experiment and save the logs for the metrics and results
+    # Access the wandb experiment and save the logs for the model hyperparameters and additional results (than those already logged with log_dict() in the model file)
     if exp_logger:
         exp_logger.log_hyperparams(model.hparams)
-        exp_logger.experiment.log({f"metrics/{k}": v for k, v in metrics.items()})
         exp_logger.experiment.log({'best_epoch': best_epoch, 'best_val_acc': best_val_acc})
 
     train_results = {
@@ -238,7 +252,6 @@ def main(args, training_folder, datamodule, model, exp_logger=None):
 
     return trainer, best_model, best_model_ckpt_path, train_results
 
-# TODO: check if using this file as a script works
 if __name__ == '__main__':
     logger.info(f"training.py process ID: {os.getpid()}")
 
@@ -286,4 +299,4 @@ if __name__ == '__main__':
     logger.trace(f"Model for training: {model} \n")
     logger.info(f"Model hyperparameters for training:\n{model.hparams} \n")
 
-    trainer, best_model, best_model_ckpt_path = main(args, training_folder, datamodule, model, exp_logger=None)
+    trainer, best_model, best_model_ckpt_path, train_results = main(args, training_folder, datamodule, model, exp_logger=None)
