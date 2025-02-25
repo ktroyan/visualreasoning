@@ -5,12 +5,14 @@ vis-reas_venv/
 
 ### Files at root
 notes.txt
+lightning_logs/
 
 
 ### CVR ###
 /CVR/generated_data
 /CVR/final_datasets
 /CVR/experiments
+/CVR/training
 
 
 ### RE-ARC ###
