@@ -1,9 +1,7 @@
 model_module: 'CVRModel'
 model_backbone: 'vanilla_vit_base'  # it can be: vanilla_vit_base, resnet18, resnet50
 pretrained: null
-n_tasks: 103    # NOTE: this is used for the task embedding (i.e., to inform the model through an embedding of which tasks to consider)
 use_task_embedding: false
-task_embedding_dim: 128
 mlp_dim: 128
 mlp_hidden_dim: 2048
 activation: 'relu'
@@ -12,4 +10,3 @@ optimizer: 'Adam' # it can be: Adam, AdamW, SGD
 scheduler: 'ReduceLROnPlateau' # it can be: ReduceLROnPlateau, StepLR, MultiStepLR, ExponentialLR, CosineAnnealingLR
 lr: 0.001
 wd: 0.001
-use_dp_sim: true

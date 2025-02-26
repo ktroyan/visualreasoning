@@ -6,6 +6,7 @@ import numpy as np
 import torch
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import Callback, TQDMProgressBar
+from typing import Any, Dict, List, Tuple
 
 # Personal codebase dependencies
 import data
@@ -82,7 +83,7 @@ class MetricsCallback(Callback):
         if self.verbose >= 1:
             epoch_metrics = trainer.callback_metrics
 
-            logger.info(f"Considering the metrics: {epoch_metrics.keys()}")
+            # logger.info(f"Considering the metrics: {epoch_metrics.keys()}")
             log_message = ""
 
             # TODO: when would we need to use .mean() ? So far it is equivalent to not taking the mean.
@@ -110,7 +111,6 @@ class MetricsCallback(Callback):
         pl_model_module.val_preds = []
         pl_model_module.val_labels = []
 
-        # NOTE: info on the PTL module
         # logger.info(f"Class of the pl model module: {pl_model_module.__class__}")   # e.g.: CVRModel (which inherits from VisReasModel which inherits from pl.LightningModule)
         # logger.info(f"Attributes of the instance of the pl model module: {pl_model_module.__dict__}")    
 
@@ -131,7 +131,8 @@ def init_callbacks(args, training_folder):
 
     # Early stopping callback
     if args.early_stopping != 0:
-        early_stopping = pl.callbacks.EarlyStopping(monitor='metrics/val_acc', mode='max', patience=args.es_patience, stopping_threshold=0.99, strict=False) #0.99
+        early_stopping = pl.callbacks.EarlyStopping(monitor='metrics/val_acc', mode='max', patience=args.es_patience, strict=True, verbose=True)   # we can use stopping_threshold=0.99 to stop when the accuracy metric reaches 0.99
+        # early_stopping = pl.callbacks.EarlyStopping(monitor='metrics/val_loss', mode='min', patience=args.es_patience, strict=True, verbose=True)   # we can use stopping_threshold=0.99 to stop when the accuracy metric reaches 0.99
         callbacks['early_stopping'] = early_stopping
 
     # Progress bar callback
@@ -145,7 +146,7 @@ def init_callbacks(args, training_folder):
 
     return callbacks
 
-def get_already_trained_model(experiments_dir, exp_dir, model_ckpt_path):
+def get_already_trained_model(experiments_dir, model_ckpt_path):
     if model_ckpt_path != '':
         ckpt_path = model_ckpt_path
         logger.info(f'Resuming training from given checkpoint {ckpt_path}')
@@ -155,7 +156,7 @@ def get_already_trained_model(experiments_dir, exp_dir, model_ckpt_path):
         if ckpt_path:
             logger.info(f'Resuming training from last found checkpoint {ckpt_path} in {experiments_dir}')
         else:
-            logger.info(f"No already trained moedl checkpoint found in {experiments_dir}. Training from scratch..?")
+            logger.info(f"No already trained model checkpoint found in {experiments_dir}. Training from scratch..?")
     
     return ckpt_path
 
@@ -165,13 +166,14 @@ def train(args, model, datamodule, callbacks, exp_logger=None, checkpoint_path=N
     callbacks_list = list(callbacks.values())    # convert the dict of callbacks to a list of callbacks so that it can be passed to the Trainer()
 
     # Training
-    trainer = pl.Trainer(num_nodes=1,
+    trainer = pl.Trainer(default_root_dir=exp_logger.save_dir if exp_logger else None,
+                         num_nodes=1,
                          logger=exp_logger, 
                          callbacks=callbacks_list, 
                          max_epochs=args.max_epochs,
                          devices=args.gpus,
                          accelerator='auto',
-                        #  precision=16,
+                         precision=args.trainer_precision,
                          gradient_clip_val=None,
                          num_sanity_val_steps=0, 
                          enable_progress_bar=True,
@@ -205,7 +207,7 @@ def main(args, training_folder, datamodule, model, exp_logger=None):
     # Resume training with a model checkpoint or load a backbone model checkpoint
     ckpt_path = None
     if args.resume_training:
-        ckpt_path = get_already_trained_model(args.experiments_dir, args.exp_dir, args.model_ckpt_path)
+        ckpt_path = get_already_trained_model(args.experiments_dir, args.model_ckpt_path)
     else:
         if args.backbone_ckpt_path != '':
             model.load_backbone_weights(args.backbone_ckpt_path)
@@ -267,7 +269,9 @@ if __name__ == '__main__':
     # Configs arguments (consistent arguments)
     parser.add_argument("--general_config", default="./configs/general.yaml", help="from where to load the general YAML config", metavar="FILE")
     parser.add_argument("--data_config", default="./configs/data.yaml", help="from where to load the YAML config of the chosen data", metavar="FILE")
-    parser.add_argument("--model_config", default="./configs/model.yaml", help="from where to load the YAML config of the chosen model", metavar="FILE")
+    parser.add_argument("--model_shared_config", default="./configs/model_shared.yaml", help="from where to load the YAML config of the chosen model", metavar="FILE")
+    args = parse_args_and_configs(parser, argv)
+    parser.add_argument("--model_config", default=f"./configs/models/{args.model_module}.yaml", help="from where to load the YAML config of the chosen model", metavar="FILE")
     parser.add_argument("--training_config", default="./configs/training.yaml", help="from where to load the YAML config of training-related arguments", metavar="FILE")
     args = parse_args_and_configs(parser, argv)
     parser.add_argument("--network_config", default=f"./configs/networks/{args.model_backbone}.yaml", help="from where to load the YAML config of the chosen neural network", metavar="FILE")
@@ -295,6 +299,8 @@ if __name__ == '__main__':
     model_module = vars(models)[args.model_module]
     logger.info(f"Model module: {model_module}")
     model_args = get_config_specific_args_from_args(args, args.model_config)
+    model_shared_args = get_config_specific_args_from_args(args, args.model_shared_config)
+    model_args.update(model_shared_args)
     model = model_module(**model_args)   # initializing the model
     logger.trace(f"Model for training: {model} \n")
     logger.info(f"Model hyperparameters for training:\n{model.hparams} \n")

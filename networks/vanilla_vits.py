@@ -31,7 +31,10 @@ class VanillaVit(VisionTransformer):
             init_weights_vit_moco(m, name)
             # self.init_weights_vit_timm(m, name)
 
-        # NOTE: Path embedding initialization as per CVR code
+        # NOTE: not sure if needed or already done by init_weights_vit_moco
+        nn.init.normal_(self.cls_token, std=1e-6)
+
+        # NOTE: Patch embedding initialization as per CVR code and thus from the Facebook Research repo (https://github.com/facebookresearch/moco-v3/blob/main/vits.py)
         if isinstance(self.patch_embed, PatchEmbed):
             # xavier_uniform initialization
             val = math.sqrt(6. / float(3 * reduce(mul, self.patch_embed.patch_size, 1) + self.embed_dim))
@@ -39,7 +42,7 @@ class VanillaVit(VisionTransformer):
             nn.init.zeros_(self.patch_embed.proj.bias)
 
     # 2D sin-cos PE
-    # NOTE: taken from CVR code and so Facebook Research repo (https://github.com/facebookresearch/moco-v3/blob/main/vits.py)
+    # NOTE: taken and updated from CVR code and thus from the Facebook Research repo (https://github.com/facebookresearch/moco-v3/blob/main/vits.py)
     def build_2d_sincos_position_embedding(self, temperature=10000.):
         h, w = self.patch_embed.grid_size
         grid_w = torch.arange(w, dtype=torch.float32)
@@ -51,8 +54,7 @@ class VanillaVit(VisionTransformer):
         omega = 1. / (temperature**omega)
         out_w = torch.einsum('m,d->md', [grid_w.flatten(), omega])
         out_h = torch.einsum('m,d->md', [grid_h.flatten(), omega])
-        pos_emb = torch.cat([torch.sin(out_w), torch.cos(
-            out_w), torch.sin(out_h), torch.cos(out_h)], dim=1)[None, :, :]
+        pos_emb = torch.cat([torch.sin(out_w), torch.cos(out_w), torch.sin(out_h), torch.cos(out_h)], dim=1)[None, :, :]
 
         # NOTE: https://github.com/facebookresearch/moco-v3/issues/36Note
         assert self.num_prefix_tokens == 1, 'Assuming one and only one token, [cls]'
@@ -61,12 +63,13 @@ class VanillaVit(VisionTransformer):
         self.pos_embed.requires_grad = False
 
 
-def get_vanilla_vit_base(bb_net_config, **kwargs):    
+def get_vanilla_vit_base(bb_net_config, img_size, **kwargs):    
 
     model = VanillaVit(
+        img_size=img_size,
         patch_size=bb_net_config['patch_size'], 
         embed_dim=bb_net_config['embed_dim'], 
-        depth=bb_net_config['depth'], 
+        depth=bb_net_config['depth'],
         num_heads=bb_net_config['num_heads'], 
         mlp_ratio=bb_net_config['mlp_ratio'], 
         qkv_bias=bb_net_config['qkv_bias'],
@@ -74,5 +77,7 @@ def get_vanilla_vit_base(bb_net_config, **kwargs):
         **kwargs)
 
     # TODO: should we use that default config? Does not seem useful, as it is devised for 1K-ImageNet
-    model.default_cfg = _cfg()
+    default_cfg = _cfg()
+
+    model.default_cfg = default_cfg
     return model

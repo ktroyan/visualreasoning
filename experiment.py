@@ -8,6 +8,7 @@ import pytorch_lightning as pl
 from pytorch_lightning.loggers.tensorboard import TensorBoardLogger
 from pytorch_lightning.loggers.wandb import WandbLogger
 import wandb
+from typing import Any, Dict, List, Tuple
 
 # Personal codebase dependencies
 import data
@@ -22,7 +23,8 @@ torch.backends.cudnn.deterministic = False
 torch.set_float32_matmul_precision('medium')
 
 
-def main():
+def main() -> None:
+    """ Main function to run an experiment """
 
     logger.info("*** Experiment started ***")
     exp_start_time = time.time()
@@ -38,13 +40,16 @@ def main():
     parser.add_argument('--max_epochs', type=int, default=None, help='maximum number of epochs to be performed during training of the model')
     parser.add_argument('--use_gen_test_set', action='store_true', help='whether to use the systematic generalization test set')
     parser.add_argument('--test_in_and_out_domain', action='store_true', help='whether to test on both in and out of domain test sets, given that a sys-gen test set is provided')
+    parser.add_argument('--use_task_embeddings', action='store_true', help='whether to use task embeddings to allow the model to know which transformation/task to consider')
 
     # Configs arguments (consistent arguments)
     parser.add_argument("--general_config", default="./configs/general.yaml", help="from where to load the general YAML config", metavar="FILE")
     parser.add_argument("--exp_config", default="./configs/experiment.yaml", help="from where to load the experiment YAML config", metavar="FILE")
+    parser.add_argument("--wandb_config", default="./configs/wandb.yaml", help="from where to load the WandB YAML config", metavar="FILE")
     parser.add_argument("--data_config", default="./configs/data.yaml", help="from where to load the YAML config of the chosen data", metavar="FILE")
-    parser.add_argument("--model_config", default="./configs/model.yaml", help="from where to load the YAML config of the chosen model", metavar="FILE")
+    parser.add_argument("--model_shared_config", default="./configs/model_shared.yaml", help="from where to load the YAML config of the chosen model", metavar="FILE")
     args = parse_args_and_configs(parser, argv)
+    parser.add_argument("--model_config", default=f"./configs/models/{args.model_module}.yaml", help="from where to load the YAML config of the chosen model", metavar="FILE")
     parser.add_argument("--network_config", default=f"./configs/networks/{args.model_backbone}.yaml", help="from where to load the YAML config of the chosen neural network", metavar="FILE")
     args = parse_args_and_configs(parser, argv)
     parser.add_argument("--training_config", default="./configs/training.yaml", help="from where to load the training YAML config", metavar="FILE")
@@ -69,9 +74,13 @@ def main():
     model_module = vars(models)[args.model_module]
     logger.info(f"Model module: {model_module}")
     model_args = get_config_specific_args_from_args(args, args.model_config)
+    model_shared_args = get_config_specific_args_from_args(args, args.model_shared_config)
+    model_args.update(model_shared_args)
     model = model_module(**model_args)   # initializing the model
     logger.trace(f"Model chosen for training: {model} \n")
-    logger.info(f"Model hyperparameters for training:\n{model.hparams} \n")
+    log_message = f"Model hyperparameters for training: \n{model.hparams} \n"
+    # log_message += f"Backbone network hyperparameters: {model.backbone_network_config} \n"
+    logger.info(log_message)
 
     # Setup experiment folders
     os.makedirs(args.experiments_dir, exist_ok=True)
@@ -82,8 +91,8 @@ def main():
     
     # Initialize WandB project tracking with config args
     wandb.init(
-    project="VisReas-project",
-    entity="klim-t",    # this should be a WandB username or team name
+    project=args.wandb_project_name,
+    entity=args.wandb_entity_name,
     dir=experiment_folder,
     name=experiment_name,
     config=args
@@ -91,9 +100,9 @@ def main():
 
     # Initialize the experiment logger
     if args.exp_logger == 'wandb':
-        exp_logger = WandbLogger(project='VisReas-project', name=experiment_name, save_dir=experiment_folder, log_model=False)    # NOTE: I set log_model=False because otherwise I get an error of connection with wandb (?)
+        exp_logger = WandbLogger(project=args.wandb_project_name, name=experiment_name, save_dir=experiment_folder, log_model=args.log_model)    # NOTE: I set log_model=False because otherwise I get an error of connection with wandb (?)
     else:
-        exp_logger = TensorBoardLogger(experiment_folder, default_hp_metric=False)
+        exp_logger = TensorBoardLogger(save_dir=experiment_folder, default_hp_metric=False)
 
     # Training
     trainer, best_model, best_model_ckpt, train_results = training.main(args, 
@@ -101,6 +110,9 @@ def main():
                                                                          datamodule, 
                                                                          model, 
                                                                          exp_logger)
+
+    if args.use_task_embeddings:
+        logger.info(f"Task embedding after training: {best_model.task_embedding}")
 
     # Testing
     all_test_results = inference.main(args, 
@@ -142,12 +154,12 @@ def main():
     
     exp_results_dict.update({k:v for k,v in all_test_results['test_results']['test_results_global_avg'].items()})
     exp_results_dict.update({k:v for k,v in all_test_results['test_results']['test_results_per_task_avg'].items()})
-    # exp_results_dict.update({k:v for k,v in test_results['test_results_per_task'].items()})
+    # exp_results_dict.update({k:v for k,v in all_test_results['test_results_per_task'].items()})
 
     if args.use_gen_test_set:
         exp_results_dict.update({k:v for k,v in all_test_results['gen_test_results']['gen_test_results_global_avg'].items()})
         exp_results_dict.update({k:v for k,v in all_test_results['gen_test_results']['gen_test_results_per_task_avg'].items()})
-        # exp_results_dict.update({k:v for k,v in gen_test_results['gen_test_results_per_task'].items()})
+        # exp_results_dict.update({k:v for k,v in all_test_results['gen_test_results_per_task'].items()})
     
     output_dict_df = pd.DataFrame([exp_results_dict])
     db_folder = os.path.join(args.experiments_dir, args.exp_summary_results_dir)

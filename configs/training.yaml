@@ -5,9 +5,9 @@ freeze_backbone: false
 # Callbacks
 metrics_callback_verbose: 1 # verbosity level: 0 for no verbose, 1 for more verbose, 2 for most verbose
 early_stopping: 0
+es_patience: 10 # number of epochs for patience of early stopping
 use_progress_bar: true
 refresh_rate: 0 # every how many number of batches to refresh the TQDM. 0 for no refresh
-es_patience: 40
 # Trainer
 gpus: 1 # number of GPUs to use
 trainer_precision: "16-mixed" # "16-mixed" usually for NVIDIA GPUs, "bf16-mixed" for TPUs and newer NVIDIA GPUs?

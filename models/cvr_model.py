@@ -38,7 +38,8 @@ class VisReasModel(pl.LightningModule):
     # So, create the artificial label at random for all samples before training, as doing it at each step decreases performance unnecessarily?
     def shared_step(self, batch):
         # The input batch is a tuple of 2 elements (samples, labels), where a label is the task name
-        x, batch_samples_task_names = batch  # ([bs, nb_images_in_one_sample, nb_channels, H, W], bs)
+        # TODO: make sure we get task ids for the samples of the batch so we can then use a task embedding if needed
+        x, samples_task_id = batch  # ([bs, nb_images_in_one_sample, nb_channels, H, W], bs)
 
         x_shape = x.shape    # bs x nb_images in the sample (4) x channels (3) x H (128) x W (128)
 
@@ -56,7 +57,7 @@ class VisReasModel(pl.LightningModule):
 
         # Enter the model forward pass function
         if self.use_task_embedding: # NOTE: this is used to indicate to the model which task it has to consider
-            y_hat = self(x, batch_samples_task_names)
+            y_hat = self(x, samples_task_id)
         else:
             y_hat = self(x)
 
@@ -214,7 +215,7 @@ def get_backbone_network_config(model_config):
     with open(f"./configs/networks/{model_config['model_backbone']}.yaml", "r") as f:
         network_config = yaml.safe_load(f)
 
-    logger.info(f"Network config of {model_config['model_backbone']} used for backbone: {network_config}")
+    logger.info(f"Network config of {model_config['model_backbone']} used for backbone: \n{network_config}")
 
     return network_config
 
@@ -237,11 +238,11 @@ class CVRModel(VisReasModel):
         self.backbone_network_config = get_backbone_network_config(self.hparams)
 
         self.num_classes = 4    # NOTE: this should be equal to the number of images within one sample, as they define the number of classes for the odd-one-out problem
+        self.nb_images_in_one_sample = 4
+
         self.mlp_dim = mlp_dim
         self.mlp_hidden_dim = mlp_hidden_dim
         self.use_task_embedding = use_task_embedding
-
-        self.nb_images_in_one_sample = 4
 
         if model_backbone == "resnet18":
             self.model_backbone = models.resnet18(progress=False, weights=self.hparams.pretrained)
@@ -266,7 +267,8 @@ class CVRModel(VisReasModel):
 
         if self.use_task_embedding:
             task_embedding_dim = self.hparams.task_embedding_dim
-            self.task_embedding = nn.Embedding(self.hparams.n_tasks, embedding_dim=self.hparams.task_embedding_dim)   # NOTE: 103 is the total number of tasks
+            self.task_embedding = nn.Embedding(103, embedding_dim=task_embedding_dim)   # NOTE: 103 is the total number of tasks
+            logger.info(f"Task embedding: {self.task_embedding}")
         else:
             task_embedding_dim = 0
             self.task_embedding = None
@@ -297,7 +299,7 @@ class CVRModel(VisReasModel):
                                     self.activation, 
                                     nn.Linear(self.mlp_hidden_dim, self.num_classes))    # NOTE: no Softmax needed here as it is included in the cross-entropy loss function
 
-    def forward(self, x, sample_task_name=None):
+    def forward(self, x, samples_task_id=None):
 
         x_shape = x.shape
 
@@ -306,15 +308,16 @@ class CVRModel(VisReasModel):
 
         # Forward pass through the model backbone
         x = self.model_backbone(x)
-        
-        if self.hparams.use_dp_sim:
 
-            # Handle the task embedding if needed
-            if sample_task_name is not None:
-                x_task = self.task_embedding(sample_task_name.repeat_interleave(self.nb_images_in_one_sample))     # repeat_interleave(4) is used to repeat 4 times the elements in the tensor sample_task_name? The output x_task is a tensor of shape (batch_size * 4, embedding_dim) ?
-                logger.debug(f"Shape of x_task: {x_task.size()}")
-                x = torch.cat([x, x_task], 1)
-                logger.debug(f"Shape of x after concatenation with task embedding x_task: {x.size()}")
+        # Handle the task embedding if needed
+        # TODO: see if this approach is correct.
+        if samples_task_id is not None:
+            task_embedding = self.task_embedding(samples_task_id.repeat_interleave(self.nb_images_in_one_sample))     # repeat_interleave(4) is used to repeat 4 times the element in the tensor sample_task_name? The output task_embedding is a tensor of shape (batch_size * 4, embedding_dim) ?
+            logger.debug(f"Shape of task_embedding: {task_embedding.size()}")
+            x = torch.cat([x, task_embedding], 1)
+            logger.debug(f"Shape of x after concatenation with task embedding task_embedding: {x.size()}")
+
+        if self.hparams.use_dp_sim:
 
             # Forward pass through the model head to get latent embeddings
             x = self.mlp(x)

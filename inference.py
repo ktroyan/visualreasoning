@@ -52,7 +52,7 @@ def process_test_results(args, test_results, test_type="test", exp_logger=None):
     
     logger.info(f"Global average results:\n{global_avg}")
     
-    log_message = "Per task results:\n"
+    log_message = "Per task results for each batch/step:\n"
     for key, value in per_task.items():
         log_message += f"{key}: {value}\n"
     logger.info(log_message)
@@ -146,7 +146,9 @@ if __name__ == '__main__':
     # Configs arguments (consistent arguments)
     parser.add_argument("--general_config", default="./configs/general.yaml", help="from where to load the general YAML config", metavar="FILE")
     parser.add_argument("--data_config", default="./configs/data.yaml", help="from where to load the YAML config of the chosen data", metavar="FILE")
-    parser.add_argument("--model_config", default="./configs/model.yaml", help="from where to load the YAML config of the chosen model", metavar="FILE")
+    parser.add_argument("--model_shared_config", default="./configs/model_shared.yaml", help="from where to load the YAML config of the chosen model", metavar="FILE")
+    args = parse_args_and_configs(parser, argv)
+    parser.add_argument("--model_config", default=f"./configs/models/{args.model_module}.yaml", help="from where to load the YAML config of the chosen model", metavar="FILE")
     args = parse_args_and_configs(parser, argv)
     parser.add_argument("--network_config", default=f"./configs/networks/{args.model_backbone}.yaml", help="from where to load the YAML config of the chosen neural network", metavar="FILE")
     parser.add_argument("--inference_config", default="./configs/inference.yaml", help="from where to load the inference YAML config", metavar="FILE")
@@ -170,6 +172,8 @@ if __name__ == '__main__':
     model_module = vars(models)[args.model_module]
     logger.info(f"Model module: {model_module}")
     model_args = get_config_specific_args_from_args(args, args.model_config)
+    model_shared_args = get_config_specific_args_from_args(args, args.model_shared_config)
+    model_args.update(model_shared_args)
     model = model_module(**model_args)   # initializing the model
 
     # --> FIXME: currently, the model initialized should match the model checkpoint used for inference.

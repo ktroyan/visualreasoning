@@ -1,6 +1,6 @@
 data_module: 'CVRDataModule'
-dataset_dir: './CVR/final_datasets/sample-efficiency/exp_setting_1/experiment_2'
-# dataset_dir: './CVR/final_datasets/compositionality/exp_setting_1/experiment_2' 
+# dataset_dir: './CVR/final_datasets/sample-efficiency/exp_setting_1/experiment_2'
+dataset_dir: './CVR/final_datasets/compositionality/exp_setting_1/experiment_2' 
 # dataset_dir: './CVR/final_datasets/sys-gen/exp_setting_1/experiment_2' 
 num_workers: 4
 train_batch_size: 32
