@@ -1,5 +1,4 @@
 import os
-import sys
 import argparse
 import time
 import pandas as pd
@@ -15,7 +14,7 @@ import data
 import models
 import training
 import inference
-from utility.utils import generate_timestamped_experiment_name, parse_args_and_configs, log_args_namespace, get_config_specific_args_from_args
+from utility.utils import generate_timestamped_experiment_name, log_args_namespace, get_config_specific_args_from_args, update_args_from_yaml_configs
 from utility.logging import logger
 
 torch.backends.cudnn.benchmark = False
@@ -23,38 +22,65 @@ torch.backends.cudnn.deterministic = False
 torch.set_float32_matmul_precision('medium')
 
 
+def get_all_args() -> argparse.Namespace:
+    """Define argument parser and merge CLI arguments with YAML config arguments."""
+    parser = argparse.ArgumentParser()
+
+    # Add arguments that may be given through the CLI. Note that we do not consider any default value as the ones in the YAML config files should be considered
+    parser.add_argument('--seed', type=int, help='seed for reproducibility')
+    parser.add_argument('--max_epochs', type=int, help='maximum number of epochs to be performed during training of the model')
+    parser.add_argument('--use_gen_test_set', action='store_true', help='whether to use the systematic generalization test set')
+    parser.add_argument('--test_in_and_out_domain', action='store_true', help='whether to test on both in and out of domain test sets, given that a sys-gen test set is provided')
+    parser.add_argument('--use_task_embeddings', action='store_true', help='whether to use task embeddings to allow the model to know which transformation/task to consider')
+
+    # Add arguments that contain paths to the static config files
+    parser.add_argument("--general_config", default="./configs/general.yaml", help="from where to load the general YAML config", metavar="FILE")
+    parser.add_argument("--exp_config", default="./configs/experiment.yaml", help="from where to load the experiment YAML config", metavar="FILE")
+    parser.add_argument("--wandb_config", default="./configs/wandb.yaml", help="from where to load the WandB YAML config", metavar="FILE")
+    parser.add_argument("--data_config", default="./configs/data.yaml", help="from where to load the YAML config of the chosen data", metavar="FILE")
+    parser.add_argument("--model_shared_config", default="./configs/model_shared.yaml", help="from where to load the YAML config of the chosen model", metavar="FILE")
+    parser.add_argument("--training_config", default="./configs/training.yaml", help="from where to load the training YAML config", metavar="FILE")
+    parser.add_argument("--inference_config", default="./configs/inference.yaml", help="from where to load the inference YAML config", metavar="FILE")
+
+    # Parse CLI arguments first
+    cli_args, _ = parser.parse_known_args()
+
+    # Create a new namespace to store only explicitly passed CLI arguments
+    args = argparse.Namespace()
+
+    # Add only explicitly passed CLI arguments to the namespace. 
+    # This is useful to deal with the arguments with 'store_true' action, as they would otherwise appear twice in the namespace
+    for key, value in vars(cli_args).items():
+        if value is not None and value:  # skip default values for store_true and unset arguments
+            setattr(args, key, value)
+
+    # Add the static config file arguments
+    args = update_args_from_yaml_configs(args, [cli_args.general_config, 
+                                                cli_args.exp_config, 
+                                                cli_args.wandb_config, 
+                                                cli_args.data_config, 
+                                                cli_args.model_shared_config,
+                                                cli_args.training_config,
+                                                cli_args.inference_config])
+
+    # Add the dynamic config file arguments (depending on the previously parsed args)
+    setattr(args, "model_config", f"./configs/models/{args.model_module}.yaml")
+    setattr(args, "network_config", f"./configs/networks/{args.model_backbone}.yaml")
+
+    # Add args from dynamic config files
+    args = update_args_from_yaml_configs(args, [args.model_config, 
+                                                args.network_config])
+
+    return args
+
 def main() -> None:
     """ Main function to run an experiment """
 
     logger.info("*** Experiment started ***")
     exp_start_time = time.time()
 
-    # Get the CLI arguments
-    argv = sys.argv[1:]
-
-    parser = argparse.ArgumentParser()
-
-    # Configs and CLI arguments (frequently changing arguments)
-    # NOTE: if an argument is not given through the CLI, the one in the related config file will be used (instead of being defaulted to None)
-    parser.add_argument('--seed', type=int, default=None, help='seed for reproducibility')
-    parser.add_argument('--max_epochs', type=int, default=None, help='maximum number of epochs to be performed during training of the model')
-    parser.add_argument('--use_gen_test_set', action='store_true', help='whether to use the systematic generalization test set')
-    parser.add_argument('--test_in_and_out_domain', action='store_true', help='whether to test on both in and out of domain test sets, given that a sys-gen test set is provided')
-    parser.add_argument('--use_task_embeddings', action='store_true', help='whether to use task embeddings to allow the model to know which transformation/task to consider')
-
-    # Configs arguments (consistent arguments)
-    parser.add_argument("--general_config", default="./configs/general.yaml", help="from where to load the general YAML config", metavar="FILE")
-    parser.add_argument("--exp_config", default="./configs/experiment.yaml", help="from where to load the experiment YAML config", metavar="FILE")
-    parser.add_argument("--wandb_config", default="./configs/wandb.yaml", help="from where to load the WandB YAML config", metavar="FILE")
-    parser.add_argument("--data_config", default="./configs/data.yaml", help="from where to load the YAML config of the chosen data", metavar="FILE")
-    parser.add_argument("--model_shared_config", default="./configs/model_shared.yaml", help="from where to load the YAML config of the chosen model", metavar="FILE")
-    args = parse_args_and_configs(parser, argv)
-    parser.add_argument("--model_config", default=f"./configs/models/{args.model_module}.yaml", help="from where to load the YAML config of the chosen model", metavar="FILE")
-    parser.add_argument("--network_config", default=f"./configs/networks/{args.model_backbone}.yaml", help="from where to load the YAML config of the chosen neural network", metavar="FILE")
-    args = parse_args_and_configs(parser, argv)
-    parser.add_argument("--training_config", default="./configs/training.yaml", help="from where to load the training YAML config", metavar="FILE")
-    parser.add_argument("--inference_config", default="./configs/inference.yaml", help="from where to load the inference YAML config", metavar="FILE")
-    args = parse_args_and_configs(parser, argv)
+    # Get and log all the arguments
+    args = get_all_args()
 
     # Log all the arguments in the args Namespace
     log_args_namespace(args)
@@ -100,7 +126,7 @@ def main() -> None:
 
     # Initialize the experiment logger
     if args.exp_logger == 'wandb':
-        exp_logger = WandbLogger(project=args.wandb_project_name, name=experiment_name, save_dir=experiment_folder, log_model=args.log_model)    # NOTE: I set log_model=False because otherwise I get an error of connection with wandb (?)
+        exp_logger = WandbLogger(project=args.wandb_project_name, name=experiment_name, save_dir=experiment_folder, log_model=args.log_model)
     else:
         exp_logger = TensorBoardLogger(save_dir=experiment_folder, default_hp_metric=False)
 

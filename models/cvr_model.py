@@ -1,13 +1,14 @@
 import yaml
-import pytorch_lightning as pl
 import torch
 from torch import nn as nn
 from torch.nn import functional as F
 from torchvision import models
+import pytorch_lightning as pl
 
 # Personal codebase dependencies
 from networks.vanilla_vits import get_vanilla_vit_base
 from utility.logging import logger
+from utility.utils import plot_lr_schedule
 
 
 class VisReasModel(pl.LightningModule):
@@ -25,6 +26,8 @@ class VisReasModel(pl.LightningModule):
 
         self.test_step_results = [] # NOTE: this is needed to store the results of the test step for each batch (i.e., at each step), and display the final results at the end of the epoch
         self.gen_test_step_results = [] # NOTE: this is needed to store the results of the generalization test step for each batch (i.e., at each step), and display the final results at the end of the epoch
+
+        self.lr_values = []
 
     def load_backbone_weights(self, checkpoint_path):
         self.model_backbone.load_state_dict(torch.load(checkpoint_path)['model'], strict=False)
@@ -56,7 +59,7 @@ class VisReasModel(pl.LightningModule):
         # logger.debug(f"Actual model input x after reshaping has dimensions: {x.size()}")    # NOTE: size should be [batch_size, nb_images_in_one_sample, nb_of_channels, img_height, img_width])
 
         # Enter the model forward pass function
-        if self.use_task_embedding: # NOTE: this is used to indicate to the model which task it has to consider
+        if self.use_task_embeddings: # NOTE: this is used to indicate to the model which task it has to consider
             y_hat = self(x, samples_task_id)
         else:
             y_hat = self(x)
@@ -171,6 +174,31 @@ class VisReasModel(pl.LightningModule):
             
             self.gen_test_results = gen_test_results
 
+    def on_train_end(self):
+        # Plot learning rate values used during training
+        # plot_lr_schedule(self.lr_values)
+        return
+
+    def optimizer_step(self, epoch, batch_idx, optimizer, optimizer_closure):
+        """Override the PyTorch Lightning optimizer_step method to add custom logic before the optimizer.step() call.
+        
+        NOTE: We use it for learning rate warm-up, as it is important for Transformer model training.
+        """
+        # Manual LR warm up
+        if self.trainer.global_step < 1000:
+            lr_scale = min(1.0, float(self.trainer.global_step + 1) / 1000.0)
+            for pg in optimizer.param_groups:
+                pg["lr"] = lr_scale * self.hparams.lr
+
+        self.lr_values.append(optimizer.param_groups[0]["lr"])
+
+        # if epoch == 0 and batch_idx == 0:
+        #     logger.debug(f"Learning rate at epoch 0 and batch 0: {optimizer.param_groups[0]['lr']}")
+        # if epoch == 1 and batch_idx == 0:
+        #     logger.debug(f"Learning rate at epoch 1 and batch 0: {optimizer.param_groups[0]['lr']}")
+        
+        # This is the content of the original optimizer_step method from PyTorch Lightning
+        optimizer.step(closure=optimizer_closure)   # update params
 
     def configure_optimizers(self):
         """ Initializes the optimizer and the learning rate scheduler. 
@@ -210,6 +238,7 @@ class VisReasModel(pl.LightningModule):
 
         return optimizer_config
 
+
 def get_backbone_network_config(model_config):
     # Load the architecture parameters of the backbone model from the <network_name>.yaml config file
     with open(f"./configs/networks/{model_config['model_backbone']}.yaml", "r") as f:
@@ -227,7 +256,7 @@ class CVRModel(VisReasModel):
         model_backbone: str = 'resnet18',
         mlp_dim: int = 128,
         mlp_hidden_dim: int = 2048,
-        use_task_embedding: bool = False,
+        use_task_embeddings: bool = False,
         **kwargs
     ):
 
@@ -242,21 +271,21 @@ class CVRModel(VisReasModel):
 
         self.mlp_dim = mlp_dim
         self.mlp_hidden_dim = mlp_hidden_dim
-        self.use_task_embedding = use_task_embedding
+        self.use_task_embeddings = use_task_embeddings
 
         if model_backbone == "resnet18":
             self.model_backbone = models.resnet18(progress=False, weights=self.hparams.pretrained)
-            nb_features = self.model_backbone.fc.in_features
+            nb_features_bb = self.model_backbone.fc.in_features
             self.model_backbone.fc = nn.Identity()
 
         elif model_backbone == "resnet50":
             self.model_backbone = models.resnet50(progress=False, weights=self.hparams.pretrained)
-            nb_features = self.model_backbone.fc.in_features
+            nb_features_bb = self.model_backbone.fc.in_features
             self.model_backbone.fc = nn.Identity()
 
         elif model_backbone == "vanilla_vit_base":
             self.model_backbone = get_vanilla_vit_base(self.backbone_network_config, img_size=128)
-            nb_features = self.model_backbone.embed_dim
+            nb_features_bb = self.model_backbone.embed_dim
             self.model_backbone.head = nn.Identity()
 
         elif model_backbone == "looped_vit":
@@ -265,10 +294,9 @@ class CVRModel(VisReasModel):
         else:
             raise ValueError(f"Unknown model backbone given: {model_backbone}")
 
-        if self.use_task_embedding:
+        if self.use_task_embeddings:
             task_embedding_dim = self.hparams.task_embedding_dim
-            self.task_embedding = nn.Embedding(103, embedding_dim=task_embedding_dim)   # NOTE: 103 is the total number of tasks
-            logger.info(f"Task embedding: {self.task_embedding}")
+            self.task_embedding = nn.Embedding(self.hparams.n_tasks, embedding_dim=task_embedding_dim)   # NOTE: 103 is the total number of tasks because the input is a task id (i.e., a number between 0 and 102)
         else:
             task_embedding_dim = 0
             self.task_embedding = None
@@ -284,70 +312,65 @@ class CVRModel(VisReasModel):
         
         # TODO: see if need to use batch norm or not. Currently unused
         if self.hparams.use_batchnorm:
-            self.batch_norm = nn.BatchNorm1d(nb_features)
+            self.batch_norm = nn.BatchNorm1d(nb_features_bb)
 
         # NOTE: the approach here from the CVR code is to give feature embeddings (obtained from the backbone model)
         # to the MLP head which will then create latent embeddings that are used to compute the pairwise dot products
         # for some sort of contrastive learning. That is why the num_classes variable is not used as the output dimension of the MLP head
         if self.hparams.use_dp_sim:
-            self.mlp = nn.Sequential(nn.Linear(nb_features+task_embedding_dim, self.mlp_hidden_dim),
+            self.mlp = nn.Sequential(nn.Linear(nb_features_bb+task_embedding_dim, self.mlp_hidden_dim),
                                     self.activation, 
                                     nn.Linear(self.mlp_hidden_dim, self.mlp_dim))    # NOTE: no Softmax needed here as it is included in the cross-entropy loss function
 
         else:
-            self.mlp = nn.Sequential(nn.Linear(nb_features+task_embedding_dim, self.mlp_hidden_dim),
+            self.mlp = nn.Sequential(nn.Linear(nb_features_bb+task_embedding_dim, self.mlp_hidden_dim),
                                     self.activation, 
                                     nn.Linear(self.mlp_hidden_dim, self.num_classes))    # NOTE: no Softmax needed here as it is included in the cross-entropy loss function
 
     def forward(self, x, samples_task_id=None):
 
-        x_shape = x.shape
+        x_shape = x.shape   # [B, nb_images_in_one_sample=4, C, H, W]
 
-        # Reshape so that the 4 images within a sample are put on the batch size dimension so that the model can process the batched samples which should have three dimensions max. (in addition to considering the batch size). That is, the 4 images wihin a sample are processed at the same time, as we should.
-        x = x.reshape([x_shape[0]*self.nb_images_in_one_sample, x_shape[2], x_shape[3], x_shape[4]])
+        # Reshape so that the 4 images within a sample are put on the batch size dimension so that the backbone model can process the batched samples which should have three dimensions max. (in addition to considering the batch size). That is, the 4 images wihin a sample are processed at the same time, as we should.
+        x = x.reshape([x_shape[0]*self.nb_images_in_one_sample, x_shape[2], x_shape[3], x_shape[4]])    # [B*4, C, H, W]
 
         # Forward pass through the model backbone
-        x = self.model_backbone(x)
+        x = self.model_backbone(x)  # [B*4, nb_features_backbone]
 
         # Handle the task embedding if needed
-        # TODO: see if this approach is correct.
         if samples_task_id is not None:
-            task_embedding = self.task_embedding(samples_task_id.repeat_interleave(self.nb_images_in_one_sample))     # repeat_interleave(4) is used to repeat 4 times the element in the tensor sample_task_name? The output task_embedding is a tensor of shape (batch_size * 4, embedding_dim) ?
-            logger.debug(f"Shape of task_embedding: {task_embedding.size()}")
-            x = torch.cat([x, task_embedding], 1)
-            logger.debug(f"Shape of x after concatenation with task embedding task_embedding: {x.size()}")
+            task_embedding = self.task_embedding(samples_task_id.repeat_interleave(self.nb_images_in_one_sample))     # [B*4, embed_dim] <-- .repeat_interleave(4) is used to repeat 4 times the element in the tensor samples_task_id. This allows to associate the same embedding with each of the four images within a sample and then allow to concatenate it with the features obtained from the backbone model, as the batch dimension is B*4
+            x = torch.cat([x, task_embedding], 1)  # [B*4, nb_features_backbone + embed_dim]
 
         if self.hparams.use_dp_sim:
 
             # Forward pass through the model head to get latent embeddings
-            x = self.mlp(x)
+            x = self.mlp(x)    # [B*4, mlp_dim]
 
-            # Normalize the latent embeddings
+            # Normalize the latent embeddings (over the features dimension)
             x = nn.functional.normalize(x, dim=1)
 
             # Compute pairwise dot products between the 4 [latent embeddings of the] images within each sample of the batch
-            x = x.reshape([-1, self.nb_images_in_one_sample, self.mlp_dim])    # reshape to have the 4 [latent embeddings of the] images in the sample dimension
-            x = (x[:, :, None, :] * x[:, None, :, :]).sum(3).sum(2)     # using None allows to add a dimension of size 1 at the specified position (i.e., 2nd and 3rd dimensions here). sum(3) sums across the features dimension, and sum(2) sums across the dimension with the number of images in the sample (so across the images comparisons)
+            x = x.reshape([-1, self.nb_images_in_one_sample, self.mlp_dim])    # [B, 4, mlp_dim] <-- we get back the batch size dimension by grouping the 4 images within a sample for each sample in the batch
+            x = x[:, :, None, :] * x[:, None, :, :]     # [B, 4, 4, mlp_dim] = [B, 4, 1, mlp_dim]*[B, 1, 4, mlp_dim] <-- using None allows to add a dimension of size 1 at the specified dimension
+            # x = x.sum(3)    # [B, 4, 4] <-- sum(3) sums across the features dimension
+            x = x.mean(3)    # [B, 4, 4] <-- sum(3) sums across the features dimension
+            # x = x.sum(2)    # [B, 4] <-- sum(2) sums across the dimension with the number of images in the sample (so across the images comparisons)
+            x = x.mean(2)    # [B, 4] <-- sum(2) sums across the dimension with the number of images in the sample (so across the images comparisons)
             
-            # To signify some sort of contrastive learning where lower value means better match?
-            x = -x
+            # To signify some sort of contrastive learning
+            x = -x  # [B, num_classes]  <--  we write num_classes because by construction it is equal to the number of images within a sample
         
         else:
 
             # Reshape back to group the 4 images within a single sample, for each sample of the batch
             x = x.reshape(x_shape[0], self.nb_images_in_one_sample, -1)  # [batch_size, 4, nb_features]
 
-            # Aggregate features
-            # TODO: see what approach would be appropriate here
+            # Aggregate features for the 4 images within a sample, for each sample in the batch
             x = x.mean(dim=1)  # [batch_size, nb_features]. Average pooling
             # x = x.max(dim=1)[0]  # [batch_size, nb_features]. Max pooling
 
-            # logger.warning(f"Shape of x after backbone and pooling: {x.size()}")
-
             # Forward pass through the model head
-            x = self.mlp(x)
-
-            # logger.warning(f"Shape of x after MLP head: {x.size()}")
-            # logger.warning(f"x: {x}")
+            x = self.mlp(x)   # [batch_size, num_classes]
 
         return x

@@ -9,7 +9,7 @@ import pytorch_lightning as pl
 # Personal codebase dependencies
 import data
 import models
-from utility.utils import parse_args_and_configs, log_args_namespace, get_config_specific_args_from_args
+from utility.utils import log_args_namespace, get_config_specific_args_from_args, update_args_from_yaml_configs
 from utility.logging import logger
 
 torch.set_float32_matmul_precision('medium')
@@ -83,7 +83,6 @@ def main(args, datamodule, model, model_ckpt_path=None, exp_logger=None):
                          devices=args.gpus,
                          accelerator='auto',
                          enable_progress_bar=True,
-                         log_every_n_steps=args.log_every_n_steps,
                         )
 
     # Model
@@ -130,29 +129,54 @@ def main(args, datamodule, model, model_ckpt_path=None, exp_logger=None):
 
     return all_test_results
 
-if __name__ == '__main__':
-    logger.info(f"inference.py process ID: {os.getpid()}")
-
-    argv = sys.argv[1:]
-
+def get_all_args() -> argparse.Namespace:
+    """Define argument parser and merge CLI arguments with YAML config arguments."""
     parser = argparse.ArgumentParser()
 
-    # Mandatory CLI arguments
+    # Add arguments that may be given through the CLI. Note that we do not consider any default value as the ones in the YAML config files should be considered
+    parser.add_argument('--seed', type=int, help='seed for reproducibility')
     parser.add_argument('--inference_model_ckpt', type=str, required=True, help='path to a model checkpoint to be used for inference')
 
-    # Configs and CLI arguments (frequently changing arguments)
-    parser.add_argument('--seed', type=int, default=None, help='seed for reproducibility')
-
-    # Configs arguments (consistent arguments)
+    # Add arguments that contain paths to the static config files
     parser.add_argument("--general_config", default="./configs/general.yaml", help="from where to load the general YAML config", metavar="FILE")
     parser.add_argument("--data_config", default="./configs/data.yaml", help="from where to load the YAML config of the chosen data", metavar="FILE")
     parser.add_argument("--model_shared_config", default="./configs/model_shared.yaml", help="from where to load the YAML config of the chosen model", metavar="FILE")
-    args = parse_args_and_configs(parser, argv)
-    parser.add_argument("--model_config", default=f"./configs/models/{args.model_module}.yaml", help="from where to load the YAML config of the chosen model", metavar="FILE")
-    args = parse_args_and_configs(parser, argv)
-    parser.add_argument("--network_config", default=f"./configs/networks/{args.model_backbone}.yaml", help="from where to load the YAML config of the chosen neural network", metavar="FILE")
     parser.add_argument("--inference_config", default="./configs/inference.yaml", help="from where to load the inference YAML config", metavar="FILE")
-    args = parse_args_and_configs(parser, argv)
+
+    # Parse CLI arguments first
+    cli_args, _ = parser.parse_known_args()
+
+    # Create a new namespace to store only explicitly passed CLI arguments
+    args = argparse.Namespace()
+
+    # Add only explicitly passed CLI arguments to the namespace. 
+    # This is useful to deal with the arguments with 'store_true' action, as they would otherwise appear twice in the namespace
+    for key, value in vars(cli_args).items():
+        if value is not None and value:  # skip default values for store_true and unset arguments
+            setattr(args, key, value)
+
+    # Add the static config file arguments
+    args = update_args_from_yaml_configs(args, [cli_args.general_config, 
+                                                cli_args.data_config, 
+                                                cli_args.model_shared_config,
+                                                cli_args.inference_config,
+                                                ])
+
+    # Add the dynamic config file arguments (depending on the previously parsed args)
+    setattr(args, "model_config", f"./configs/models/{args.model_module}.yaml")
+    setattr(args, "network_config", f"./configs/networks/{args.model_backbone}.yaml")
+
+    # Add args from dynamic config files
+    args = update_args_from_yaml_configs(args, [args.model_config, 
+                                                args.network_config])
+
+    return args
+
+if __name__ == '__main__':
+    logger.info(f"inference.py process ID: {os.getpid()}")
+
+    # Get all the arguments
+    args = get_all_args()
 
     # Log all the arguments in the Namespace
     log_args_namespace(args)

@@ -1,4 +1,5 @@
 import os
+import json
 import pandas as pd
 from PIL import Image
 from torchvision import transforms as tvt
@@ -147,6 +148,11 @@ class CVRDataset(Dataset):
         self.samples_metadata = pd.read_csv(csv_dataset_path, header=0)
         self.samples_metadata['filepath'] = self.samples_metadata['filepath'].apply(lambda path: os.path.normpath(os.path.join("CVR", path)))
 
+        # Load the dictionary mapping the task name to the task id
+        task_name_to_id_json = "./CVR/final_datasets/CVR_task_name_to_id.json"
+        with open(task_name_to_id_json, 'r') as f:
+            self.task_name_to_id = json.load(f)
+
         self.n_samples = len(self.samples_metadata)
         self.image_size = image_size
         self.transform = transform
@@ -161,6 +167,9 @@ class CVRDataset(Dataset):
         sample_path = sample_metadata['filepath']
         sample_task_name = sample_metadata['task']
 
+        # Convert the task name to a task id
+        sample_task_id = self.task_name_to_id[sample_task_name]
+
         sample = Image.open(sample_path)
         sample = self.totensor(sample)
         img_size = sample.shape[1]
@@ -172,9 +181,8 @@ class CVRDataset(Dataset):
         if self.transform is not None:
             sample = self.transform(sample)
 
-        # return sample, label, sample_task_name
-        return sample, sample_task_name
-    
+        return sample, sample_task_id
+
 
 class CVRDataModule(DataModuleBase):
 

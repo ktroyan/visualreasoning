@@ -1,8 +1,8 @@
-model_module: 'CVRModel'
+model_module: 'CVRModel'  # it can be: CVRModel, REARCModel, BEFOREARCModel
 model_backbone: 'vanilla_vit_base'  # it can be: vanilla_vit_base, resnet18, resnet50
 pretrained: null
-use_task_embedding: false
-mlp_dim: 128
+use_task_embeddings: true
+mlp_dim: 256  # 128
 mlp_hidden_dim: 2048
 activation: 'relu'
 use_batchnorm: false

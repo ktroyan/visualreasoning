@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Tuple
 # Personal codebase dependencies
 import data
 import models
-from utility.utils import parse_args_and_configs, log_args_namespace, get_config_specific_args_from_args, get_latest_ckpt
+from utility.utils import log_args_namespace, get_config_specific_args_from_args, get_latest_ckpt, update_args_from_yaml_configs
 from utility.logging import logger
 
 torch.backends.cudnn.benchmark = False
@@ -95,7 +95,7 @@ class MetricsCallback(Callback):
             for k, v in epoch_metrics.items():
                 log_message += f"{k}: {v} \n"
             
-            logger.info(f"Learning rate used at epoch {trainer.current_epoch}: {pl_model_module.lr_schedulers().get_last_lr()}")    # this yields learning_rate_epoch in the logs
+            log_message += f"\nLearning rate at the end of epoch {trainer.current_epoch}: {pl_model_module.lr_schedulers().get_last_lr()}"    # this yields learning_rate_epoch in the logs
             logger.info(log_message)
 
         if self.verbose >= 2:
@@ -130,7 +130,7 @@ def init_callbacks(args, training_folder):
     callbacks['model_checkpoint'] = model_checkpoint
 
     # Early stopping callback
-    if args.early_stopping != 0:
+    if args.use_early_stopping:
         early_stopping = pl.callbacks.EarlyStopping(monitor='metrics/val_acc', mode='max', patience=args.es_patience, strict=True, verbose=True)   # we can use stopping_threshold=0.99 to stop when the accuracy metric reaches 0.99
         # early_stopping = pl.callbacks.EarlyStopping(monitor='metrics/val_loss', mode='min', patience=args.es_patience, strict=True, verbose=True)   # we can use stopping_threshold=0.99 to stop when the accuracy metric reaches 0.99
         callbacks['early_stopping'] = early_stopping
@@ -179,7 +179,8 @@ def train(args, model, datamodule, callbacks, exp_logger=None, checkpoint_path=N
                          enable_progress_bar=True,
                          enable_checkpointing=True,
                          log_every_n_steps=args.log_every_n_steps,
-                         fast_dev_run=False
+                         fast_dev_run=False,
+                        #  profiler='simple'
                         )
 
     trainer.fit(model, datamodule, ckpt_path=checkpoint_path)
@@ -254,28 +255,55 @@ def main(args, training_folder, datamodule, model, exp_logger=None):
 
     return trainer, best_model, best_model_ckpt_path, train_results
 
-if __name__ == '__main__':
-    logger.info(f"training.py process ID: {os.getpid()}")
-
-    argv = sys.argv[1:]
-
+def get_all_args() -> argparse.Namespace:
+    """Define argument parser and merge CLI arguments with YAML config arguments."""
     parser = argparse.ArgumentParser()
 
-    # Configs and CLI arguments (frequently changing arguments)
-    parser.add_argument('--seed', type=int, default=None, help='seed for reproducibility')
-    parser.add_argument('--max_epochs', type=int, default=None, help='maximum number of epochs to be performed during training of the model')
+    # Add arguments that may be given through the CLI. Note that we do not consider any default value as the ones in the YAML config files should be considered
+    parser.add_argument('--seed', type=int, help='seed for reproducibility')
+    parser.add_argument('--max_epochs', type=int, help='maximum number of epochs to be performed during training of the model')
     parser.add_argument('--resume_training', action='store_true', help='whether to resume training from a given checkpoint')
 
-    # Configs arguments (consistent arguments)
+    # Add arguments that contain paths to the static config files
     parser.add_argument("--general_config", default="./configs/general.yaml", help="from where to load the general YAML config", metavar="FILE")
     parser.add_argument("--data_config", default="./configs/data.yaml", help="from where to load the YAML config of the chosen data", metavar="FILE")
     parser.add_argument("--model_shared_config", default="./configs/model_shared.yaml", help="from where to load the YAML config of the chosen model", metavar="FILE")
-    args = parse_args_and_configs(parser, argv)
-    parser.add_argument("--model_config", default=f"./configs/models/{args.model_module}.yaml", help="from where to load the YAML config of the chosen model", metavar="FILE")
-    parser.add_argument("--training_config", default="./configs/training.yaml", help="from where to load the YAML config of training-related arguments", metavar="FILE")
-    args = parse_args_and_configs(parser, argv)
-    parser.add_argument("--network_config", default=f"./configs/networks/{args.model_backbone}.yaml", help="from where to load the YAML config of the chosen neural network", metavar="FILE")
-    args = parse_args_and_configs(parser, argv)
+    parser.add_argument("--training_config", default="./configs/training.yaml", help="from where to load the training YAML config", metavar="FILE")
+
+    # Parse CLI arguments first
+    cli_args, _ = parser.parse_known_args()
+
+    # Create a new namespace to store only explicitly passed CLI arguments
+    args = argparse.Namespace()
+
+    # Add only explicitly passed CLI arguments to the namespace. 
+    # This is useful to deal with the arguments with 'store_true' action, as they would otherwise appear twice in the namespace
+    for key, value in vars(cli_args).items():
+        if value is not None and value:  # skip default values for store_true and unset arguments
+            setattr(args, key, value)
+
+    # Add the static config file arguments
+    args = update_args_from_yaml_configs(args, [cli_args.general_config, 
+                                                cli_args.data_config, 
+                                                cli_args.model_shared_config,
+                                                cli_args.training_config,
+                                                ])
+
+    # Add the dynamic config file arguments (depending on the previously parsed args)
+    setattr(args, "model_config", f"./configs/models/{args.model_module}.yaml")
+    setattr(args, "network_config", f"./configs/networks/{args.model_backbone}.yaml")
+
+    # Add args from dynamic config files
+    args = update_args_from_yaml_configs(args, [args.model_config, 
+                                                args.network_config])
+
+    return args
+
+if __name__ == '__main__':
+    logger.info(f"training.py process ID: {os.getpid()}")
+
+    # Get all the arguments from the CLI and the YAML config files
+    args = get_all_args()
 
     # Log all the arguments in the Namespace
     log_args_namespace(args)

@@ -1,1 +1,2 @@
 seed: 1997
+gpus: 1 # number of GPUs to use

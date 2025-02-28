@@ -1,2 +1,2 @@
-n_tasks: 400    # NOTE: this is used for the task embedding (i.e., to inform the model through an embedding of which tasks to consider)
+n_tasks: 84    # NOTE: this is used for the task embedding (i.e., to inform the model through an embedding of which tasks to consider)
 task_embedding_dim: 128
