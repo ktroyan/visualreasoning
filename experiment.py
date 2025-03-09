@@ -1,10 +1,8 @@
 import os
-import argparse
 import time
 import pandas as pd
 import torch
 import pytorch_lightning as pl
-from pytorch_lightning.loggers.tensorboard import TensorBoardLogger
 from pytorch_lightning.loggers.wandb import WandbLogger
 import wandb
 from typing import Any, Dict, List, Tuple
@@ -14,7 +12,7 @@ import data
 import models
 import training
 import inference
-from utility.utils import generate_timestamped_experiment_name, log_args_namespace, get_config_specific_args_from_args, update_args_from_yaml_configs
+from utility.utils import generate_timestamped_experiment_name, log_config_dict, get_complete_config
 from utility.logging import logger
 
 torch.backends.cudnn.benchmark = False
@@ -22,126 +20,60 @@ torch.backends.cudnn.deterministic = False
 torch.set_float32_matmul_precision('medium')
 
 
-def get_all_args() -> argparse.Namespace:
-    """Define argument parser and merge CLI arguments with YAML config arguments."""
-    parser = argparse.ArgumentParser()
-
-    # Add arguments that may be given through the CLI. Note that we do not consider any default value as the ones in the YAML config files should be considered
-    parser.add_argument('--seed', type=int, help='seed for reproducibility')
-    parser.add_argument('--max_epochs', type=int, help='maximum number of epochs to be performed during training of the model')
-    parser.add_argument('--use_gen_test_set', action='store_true', help='whether to use the systematic generalization test set')
-    parser.add_argument('--test_in_and_out_domain', action='store_true', help='whether to test on both in and out of domain test sets, given that a sys-gen test set is provided')
-    parser.add_argument('--use_task_embeddings', action='store_true', help='whether to use task embeddings to allow the model to know which transformation/task to consider')
-
-    # Add arguments that contain paths to the static config files
-    parser.add_argument("--general_config", default="./configs/general.yaml", help="from where to load the general YAML config", metavar="FILE")
-    parser.add_argument("--exp_config", default="./configs/experiment.yaml", help="from where to load the experiment YAML config", metavar="FILE")
-    parser.add_argument("--wandb_config", default="./configs/wandb.yaml", help="from where to load the WandB YAML config", metavar="FILE")
-    parser.add_argument("--data_config", default="./configs/data.yaml", help="from where to load the YAML config of the chosen data", metavar="FILE")
-    parser.add_argument("--model_shared_config", default="./configs/model_shared.yaml", help="from where to load the YAML config of the chosen model", metavar="FILE")
-    parser.add_argument("--training_config", default="./configs/training.yaml", help="from where to load the training YAML config", metavar="FILE")
-    parser.add_argument("--inference_config", default="./configs/inference.yaml", help="from where to load the inference YAML config", metavar="FILE")
-
-    # Parse CLI arguments first
-    cli_args, _ = parser.parse_known_args()
-
-    # Create a new namespace to store only explicitly passed CLI arguments
-    args = argparse.Namespace()
-
-    # Add only explicitly passed CLI arguments to the namespace. 
-    # This is useful to deal with the arguments with 'store_true' action, as they would otherwise appear twice in the namespace
-    for key, value in vars(cli_args).items():
-        if value is not None and value:  # skip default values for store_true and unset arguments
-            setattr(args, key, value)
-
-    # Add the static config file arguments
-    args = update_args_from_yaml_configs(args, [cli_args.general_config, 
-                                                cli_args.exp_config, 
-                                                cli_args.wandb_config, 
-                                                cli_args.data_config, 
-                                                cli_args.model_shared_config,
-                                                cli_args.training_config,
-                                                cli_args.inference_config])
-
-    # Add the dynamic config file arguments (depending on the previously parsed args)
-    setattr(args, "model_config", f"./configs/models/{args.model_module}.yaml")
-    setattr(args, "network_config", f"./configs/networks/{args.model_backbone}.yaml")
-
-    # Add args from dynamic config files
-    args = update_args_from_yaml_configs(args, [args.model_config, 
-                                                args.network_config])
-
-    return args
-
 def main() -> None:
     """ Main function to run an experiment """
 
     logger.info("*** Experiment started ***")
     exp_start_time = time.time()
 
-    # Get and log all the arguments
-    args = get_all_args()
-
-    # Log all the arguments in the args Namespace
-    log_args_namespace(args)
+    # Get and log all the config arguments
+    config, _ = get_complete_config()
+    log_config_dict(config, "*** All arguments contained in the config dict ***")
 
     # Seed everything for reproducibility
-    if args.seed is not None:
-        pl.seed_everything(args.seed)
+    if config.base.seed is not None:
+        pl.seed_everything(config.base.seed)
 
     # Data chosen
-    data_module = vars(data)[args.data_module]
-    logger.info(f"Data module: {data_module}")
-    data_args = get_config_specific_args_from_args(args, args.data_config)
-    datamodule = data_module(**data_args)   # initializing the data
-    logger.info(f"Data module instantiated (showing the total number of samples per dataloader):\n{datamodule}\n")
+    data_module = vars(data)[config.base.data_module]
+    datamodule = data_module(config.data)   # initialize the data with the data config
+    logger.info(f"Data module instantiated. Now showing the total number of samples per dataloader:\n{datamodule}\n")
 
     # Model chosen
-    model_module = vars(models)[args.model_module]
-    logger.info(f"Model module: {model_module}")
-    model_args = get_config_specific_args_from_args(args, args.model_config)
-    model_shared_args = get_config_specific_args_from_args(args, args.model_shared_config)
-    model_args.update(model_shared_args)
-    model = model_module(**model_args)   # initializing the model
-    logger.trace(f"Model chosen for training: {model} \n")
-    log_message = f"Model hyperparameters for training: \n{model.hparams} \n"
-    # log_message += f"Backbone network hyperparameters: {model.backbone_network_config} \n"
-    logger.info(log_message)
+    model_module = vars(models)[config.base.model_module]
+    model = model_module(config.model, config.backbone_network, config.head_network)   # initialize the model with the model and network configs
+    logger.trace(f"Model chosen for training: {model}")
 
     # Setup experiment folders
-    os.makedirs(args.experiments_dir, exist_ok=True)
-    experiment_basename = args.dataset_dir.split('/')[-1]
-    experiment_name = generate_timestamped_experiment_name(experiment_basename)
-    experiment_folder = args.experiments_dir + f"/{experiment_name}"
+    experiment_name_timestamped = generate_timestamped_experiment_name(config.experiment.name)
+    experiment_folder = config.experiment.experiments_dir + f"/{experiment_name_timestamped}"
     os.makedirs(experiment_folder, exist_ok=True)
-    
-    # Initialize WandB project tracking with config args
+
+    # Initialize WandB project tracking with config config
     wandb.init(
-    project=args.wandb_project_name,
-    entity=args.wandb_entity_name,
+    project=config.wandb.wandb_project_name,
+    entity=config.wandb.wandb_entity_name,
     dir=experiment_folder,
-    name=experiment_name,
-    config=args
+    name=experiment_name_timestamped,
+    config=config
     )
 
     # Initialize the experiment logger
-    if args.exp_logger == 'wandb':
-        exp_logger = WandbLogger(project=args.wandb_project_name, name=experiment_name, save_dir=experiment_folder, log_model=args.log_model)
+    if config.experiment.exp_logger == 'wandb':
+        exp_logger = WandbLogger(project=config.wandb.wandb_project_name, name=experiment_name_timestamped, save_dir=experiment_folder, log_model=config.wandb.log_model)
     else:
-        exp_logger = TensorBoardLogger(save_dir=experiment_folder, default_hp_metric=False)
+        logger.warning(f"Experiment logger {config.experiment.exp_logger} not recognized. The experiment logger is set to Null. Otherwise, choose 'wandb'.")
+        exp_logger = None
 
     # Training
-    trainer, best_model, best_model_ckpt, train_results = training.main(args, 
+    trainer, best_model, best_model_ckpt, train_results = training.main(config, 
                                                                          experiment_folder, 
                                                                          datamodule, 
                                                                          model, 
                                                                          exp_logger)
 
-    if args.use_task_embeddings:
-        logger.info(f"Task embedding after training: {best_model.task_embedding}")
-
     # Testing
-    all_test_results = inference.main(args, 
+    all_test_results = inference.main(config, 
                                   datamodule, 
                                   model=best_model,
                                   model_ckpt_path=None, # we use the best model found during training, so no need to specify a checkpoint path
@@ -157,40 +89,45 @@ def main() -> None:
     logger.info(log_message)
 
     # Save the results and config arguments that we are the most interested to check quickly when experimenting
-    # TODO: only consider the relevant args and results
+    # TODO: only consider the relevant config and results
     exp_results_dict = {
-        'experiments_dir': args.experiments_dir,
-        'dataset_dir': args.dataset_dir,
+        'experiments_dir': config.experiment.experiments_dir,
+        'exp_name': experiment_name_timestamped,
+        'dataset_dir': config.data.dataset_dir,
         'exp_duration': exp_elapsed_time,
-        'exp_logger': args.exp_logger,
-        'exp_name': experiment_name,
-        'seed': args.seed,
-        'data_module': args.data_module,
-        'model_module': args.model_module,
-        'model_ckpt': args.model_ckpt_path,
-        'backbone_ckpt': args.backbone_ckpt_path,
-        'freeze_backbone': args.freeze_backbone,
+        'exp_logger': config.experiment.exp_logger,
+        'data_module': config.base.data_module,
+        'model_module': config.base.model_module,
+        'network_backbone': config.model.backbone,
+        'network_head': config.model.head,
+        'model_ckpt': config.training.model_ckpt_path,
+        'backbone_ckpt': config.training.backbone_ckpt_path,
+        'freeze_backbone': config.training.freeze_backbone,
         'best_val_acc': train_results['best_val_acc'],
-        'best_epoch': train_results['best_epoch'],
-        'max_epochs': args.max_epochs,
-        'model_backbone': args.model_backbone,
-        'train_batch_size': args.train_batch_size,
-        'lr': args.lr,
+        'best_epoch': train_results['best_val_epoch'],
+        'max_epochs': config.training.max_epochs,
+        'train_batch_size': config.data.train_batch_size,
+        'val_batch_size': config.data.val_batch_size,
+        'test_batch_size': config.data.test_batch_size,
+        'task_embedding': config.model.task_embedding,
+        'lr': config.model.training_hparams.lr,
+        'optimizer': config.model.training_hparams.optimizer,
+        'scheduler': config.model.training_hparams.scheduler,
+        'seed': config.base.seed,
     }
     
     exp_results_dict.update({k:v for k,v in all_test_results['test_results']['test_results_global_avg'].items()})
     exp_results_dict.update({k:v for k,v in all_test_results['test_results']['test_results_per_task_avg'].items()})
     # exp_results_dict.update({k:v for k,v in all_test_results['test_results_per_task'].items()})
 
-    if args.use_gen_test_set:
+    if config.data.use_gen_test_set:
         exp_results_dict.update({k:v for k,v in all_test_results['gen_test_results']['gen_test_results_global_avg'].items()})
         exp_results_dict.update({k:v for k,v in all_test_results['gen_test_results']['gen_test_results_per_task_avg'].items()})
         # exp_results_dict.update({k:v for k,v in all_test_results['gen_test_results_per_task'].items()})
     
     output_dict_df = pd.DataFrame([exp_results_dict])
-    db_folder = os.path.join(args.experiments_dir, args.exp_summary_results_dir)
-    os.makedirs(db_folder, exist_ok=True)
-    csv_path = os.path.join(db_folder, 'all_results_summary.csv')
+    os.makedirs(config.experiment.exp_summary_results_dir, exist_ok=True)
+    csv_path = os.path.join(config.experiment.exp_summary_results_dir, 'all_results_summary.csv')
     write_header = not os.path.exists(csv_path)
     output_dict_df.to_csv(csv_path, sep=';', mode='a', index=False, header=write_header)
 

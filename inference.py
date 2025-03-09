@@ -9,24 +9,32 @@ import pytorch_lightning as pl
 # Personal codebase dependencies
 import data
 import models
-from utility.utils import log_args_namespace, get_config_specific_args_from_args, update_args_from_yaml_configs
+from utility.utils import get_complete_config, log_config_dict
 from utility.logging import logger
 
 torch.set_float32_matmul_precision('medium')
 torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.deterministic = True
 
+
 # FIXME: for this code to work currently, the batch size should yield a number of elements in each key of results so that it is a multiple of the number of tasks, otherwise the reshape will fail. Fix it.
 # Also see how to handle the case where the results are for multiple test dataloaders
-def process_test_results(args, test_results, test_type="test", exp_logger=None):
+def process_test_results(config, test_results, test_type="test", exp_logger=None):
 
     # Just handle some naming consistency issue with the generated data splits that are named "test_gen" instead of "gen_test"
     if test_type == "gen_test":
-        test_set = pd.read_csv(f"{args.dataset_dir}/{'_'.join(reversed(test_type.split('_')))}.csv")
-    
+        test_set_path = f"{config.data.dataset_dir}/{'_'.join(reversed(test_type.split('_')))}"
     else:
-        test_set = pd.read_csv(f"{args.dataset_dir}/{test_type}.csv")
-    
+        test_set_path = f"{config.data.dataset_dir}/{test_type}"
+
+    # Check if the folder config.data.dataset_dir contains test_set_path with .csv or .json extension and load it accordingly with pandas
+    if os.path.exists(f"{test_set_path}.csv"):
+        test_set = pd.read_csv(f"{test_set_path}.csv")
+    elif os.path.exists(f"{test_set_path}.json"):
+        test_set = pd.read_json(f"{test_set_path}.json")
+    else:
+        raise FileNotFoundError(f"Test set file not found in the dataset directory: {test_set_path}")
+
     # Processing of the results and wrap-up of the parameters used
     tasks_considered = test_set['task'].unique()
 
@@ -73,14 +81,14 @@ def process_test_results(args, test_results, test_type="test", exp_logger=None):
 
     return processed_test_results
 
-def main(args, datamodule, model, model_ckpt_path=None, exp_logger=None):
+def main(config, datamodule, model, model_ckpt_path=None, exp_logger=None):
 
     logger.info("*** Inference started ***")
     inference_start_time = time.time()
 
     trainer = pl.Trainer(num_nodes=1,
                          logger=exp_logger, 
-                         devices=args.gpus,
+                         devices=config.base.gpus,
                          accelerator='auto',
                          enable_progress_bar=True,
                         )
@@ -98,25 +106,25 @@ def main(args, datamodule, model, model_ckpt_path=None, exp_logger=None):
         # log_message += f"Model: {model}\n"
         logger.info(log_message)
 
-    logger.info(f"Model hyperparameters of the model used for inference:\n{model.hparams} \n")
+    logger.info(f"All hyperparameters of the model used for inference:\n{model.hparams} \n")
 
     # Testing
     trainer.test(model=model, datamodule=datamodule, verbose=True)  # NOTE: if more than one test dataloader was created in the datamodule, all the test dataloaders will be used for testing
    
-    if args.inference_verbose == 1:
+    if config.inference.inference_verbose == 1:
         logger.info(f"Test predictions: {model.test_preds}")
         logger.info(f"Test labels: {model.test_labels}")
 
-        if args.use_gen_test_set:
+        if config.data.use_gen_test_set:
             logger.info(f"Sys-gen test predictions: {model.gen_test_preds}")
             logger.info(f"Sys-gen test labels: {model.gen_test_labels}")
 
     test_results = model.test_results
-    processed_test_results = process_test_results(args, test_results, test_type="test", exp_logger=None)
+    processed_test_results = process_test_results(config, test_results, test_type="test", exp_logger=None)
 
-    if args.use_gen_test_set:
+    if config.data.use_gen_test_set:
         gen_test_results = model.gen_test_results
-        processed_gen_test_results = process_test_results(args, gen_test_results, test_type="gen_test", exp_logger=None)
+        processed_gen_test_results = process_test_results(config, gen_test_results, test_type="gen_test", exp_logger=None)
     else:
         processed_gen_test_results = {}
 
@@ -129,78 +137,29 @@ def main(args, datamodule, model, model_ckpt_path=None, exp_logger=None):
 
     return all_test_results
 
-def get_all_args() -> argparse.Namespace:
-    """Define argument parser and merge CLI arguments with YAML config arguments."""
-    parser = argparse.ArgumentParser()
-
-    # Add arguments that may be given through the CLI. Note that we do not consider any default value as the ones in the YAML config files should be considered
-    parser.add_argument('--seed', type=int, help='seed for reproducibility')
-    parser.add_argument('--inference_model_ckpt', type=str, required=True, help='path to a model checkpoint to be used for inference')
-
-    # Add arguments that contain paths to the static config files
-    parser.add_argument("--general_config", default="./configs/general.yaml", help="from where to load the general YAML config", metavar="FILE")
-    parser.add_argument("--data_config", default="./configs/data.yaml", help="from where to load the YAML config of the chosen data", metavar="FILE")
-    parser.add_argument("--model_shared_config", default="./configs/model_shared.yaml", help="from where to load the YAML config of the chosen model", metavar="FILE")
-    parser.add_argument("--inference_config", default="./configs/inference.yaml", help="from where to load the inference YAML config", metavar="FILE")
-
-    # Parse CLI arguments first
-    cli_args, _ = parser.parse_known_args()
-
-    # Create a new namespace to store only explicitly passed CLI arguments
-    args = argparse.Namespace()
-
-    # Add only explicitly passed CLI arguments to the namespace. 
-    # This is useful to deal with the arguments with 'store_true' action, as they would otherwise appear twice in the namespace
-    for key, value in vars(cli_args).items():
-        if value is not None and value:  # skip default values for store_true and unset arguments
-            setattr(args, key, value)
-
-    # Add the static config file arguments
-    args = update_args_from_yaml_configs(args, [cli_args.general_config, 
-                                                cli_args.data_config, 
-                                                cli_args.model_shared_config,
-                                                cli_args.inference_config,
-                                                ])
-
-    # Add the dynamic config file arguments (depending on the previously parsed args)
-    setattr(args, "model_config", f"./configs/models/{args.model_module}.yaml")
-    setattr(args, "network_config", f"./configs/networks/{args.model_backbone}.yaml")
-
-    # Add args from dynamic config files
-    args = update_args_from_yaml_configs(args, [args.model_config, 
-                                                args.network_config])
-
-    return args
 
 if __name__ == '__main__':
     logger.info(f"inference.py process ID: {os.getpid()}")
 
-    # Get all the arguments
-    args = get_all_args()
-
-    # Log all the arguments in the Namespace
-    log_args_namespace(args)
+    # Get and log all the config arguments
+    config = get_complete_config()
+    log_config_dict(config)
 
     # Seed everything for reproducibility
-    if args.seed is not None:
-        pl.seed_everything(args.seed)
+    if config.base.seed is not None:
+        pl.seed_everything(config.base.seed)
 
     # Data chosen
-    data_module = vars(data)[args.data_module]
-    logger.info(f"Data module: {data_module}")
-    data_args = get_config_specific_args_from_args(args, args.data_config)
-    datamodule = data_module(**data_args)   # initializing the data
-    logger.info(f"Datamodule (showing the total number of samples per dataloader):\n {datamodule} \n")
+    data_module = vars(data)[config.base.data_module]
+    datamodule = data_module(config.data)   # initialize the data with the data config
+    logger.info(f"Data module instantiated. Now showing the total number of samples per dataloader:\n{datamodule}\n")
 
     # Model chosen
-    model_module = vars(models)[args.model_module]
-    logger.info(f"Model module: {model_module}")
-    model_args = get_config_specific_args_from_args(args, args.model_config)
-    model_shared_args = get_config_specific_args_from_args(args, args.model_shared_config)
-    model_args.update(model_shared_args)
-    model = model_module(**model_args)   # initializing the model
+    model_module = vars(models)[config.base.model_module]
+    model = model_module(config.model, config.backbone_network, config.head_network)   # initialize the model with the model and network configs
+    logger.trace(f"Model chosen for training: {model}")
 
-    # --> FIXME: currently, the model initialized should match the model checkpoint used for inference.
-    # We should for example add the model class with the correct args (used to created the instance of the model checkpoint) used to the checkpoint folder so that a checkpoint can be loaded properly
+    # --> TODO: currently, the model initialized should match the model checkpoint used for inference.
+    # We should for example add the model class with the correct config (used to created the instance of the model checkpoint) used to the checkpoint folder so that a checkpoint can be loaded properly
     # Then we will be able to load a model from a checkpoint and use it for inference. Maybe a better way to solve the issue?
-    test_results = main(args, datamodule, model, args.inference_model_ckpt, exp_logger=None)
+    test_results = main(config, datamodule, model, config.inference.inference_model_ckpt, exp_logger=None)

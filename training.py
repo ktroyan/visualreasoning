@@ -1,7 +1,5 @@
 import os
-import sys
 import time
-import argparse
 import numpy as np
 import torch
 import pytorch_lightning as pl
@@ -11,7 +9,7 @@ from typing import Any, Dict, List, Tuple
 # Personal codebase dependencies
 import data
 import models
-from utility.utils import log_args_namespace, get_config_specific_args_from_args, get_latest_ckpt, update_args_from_yaml_configs
+from utility.utils import get_complete_config, log_config_dict, get_latest_ckpt
 from utility.logging import logger
 
 torch.backends.cudnn.benchmark = False
@@ -115,7 +113,7 @@ class MetricsCallback(Callback):
         # logger.info(f"Attributes of the instance of the pl model module: {pl_model_module.__dict__}")    
 
 
-def init_callbacks(args, training_folder):
+def init_callbacks(config, training_folder):
 
     callbacks = {}
 
@@ -124,24 +122,24 @@ def init_callbacks(args, training_folder):
                                                     save_top_k=1, 
                                                     mode='max', 
                                                     monitor='metrics/val_acc', # 'metrics/val_loss'
-                                                    every_n_epochs=args.ckpt_period, 
+                                                    every_n_epochs=config.training.ckpt_period, 
                                                     save_last=True)
 
     callbacks['model_checkpoint'] = model_checkpoint
 
     # Early stopping callback
-    if args.use_early_stopping:
-        early_stopping = pl.callbacks.EarlyStopping(monitor='metrics/val_acc', mode='max', patience=args.es_patience, strict=True, verbose=True)   # we can use stopping_threshold=0.99 to stop when the accuracy metric reaches 0.99
-        # early_stopping = pl.callbacks.EarlyStopping(monitor='metrics/val_loss', mode='min', patience=args.es_patience, strict=True, verbose=True)   # we can use stopping_threshold=0.99 to stop when the accuracy metric reaches 0.99
+    if config.training.early_stopping.enabled:
+        early_stopping = pl.callbacks.EarlyStopping(monitor='metrics/val_acc', mode='max', patience=config.training.early_stopping.es_patience, strict=True, verbose=True)   # we can use stopping_threshold=0.99 to stop when the accuracy metric reaches 0.99
+        # early_stopping = pl.callbacks.EarlyStopping(monitor='metrics/val_loss', mode='min', patience=config.training.es_patience, strict=True, verbose=True)   # we can use stopping_threshold=0.99 to stop when the accuracy metric reaches 0.99
         callbacks['early_stopping'] = early_stopping
 
     # Progress bar callback
-    if args.use_progress_bar:
-        progress_bar = TQDMProgressBar(refresh_rate=args.refresh_rate, leave=False)
+    if config.training.progress_bar.enabled:
+        progress_bar = TQDMProgressBar(refresh_rate=config.training.progress_bar.refresh_rate, leave=False)
         callbacks['progress_bar'] = progress_bar
 
     # Metrics callback
-    metrics_callback = MetricsCallback(verbose=args.metrics_callback_verbose)
+    metrics_callback = MetricsCallback(verbose=config.training.metrics_callback_verbose)
     callbacks['metrics_callback'] = metrics_callback
 
     return callbacks
@@ -160,7 +158,7 @@ def get_already_trained_model(experiments_dir, model_ckpt_path):
     
     return ckpt_path
 
-def train(args, model, datamodule, callbacks, exp_logger=None, checkpoint_path=None):
+def train(config, model, datamodule, callbacks, exp_logger=None, checkpoint_path=None):
 
     # Handle callbacks. Note that the callbacks objects are updated by the pl.Trainer() during the training process
     callbacks_list = list(callbacks.values())    # convert the dict of callbacks to a list of callbacks so that it can be passed to the Trainer()
@@ -170,15 +168,15 @@ def train(args, model, datamodule, callbacks, exp_logger=None, checkpoint_path=N
                          num_nodes=1,
                          logger=exp_logger, 
                          callbacks=callbacks_list, 
-                         max_epochs=args.max_epochs,
-                         devices=args.gpus,
+                         max_epochs=config.training.max_epochs,
+                         devices=config.base.gpus,
                          accelerator='auto',
-                         precision=args.trainer_precision,
+                         precision=config.training.trainer_precision,
                          gradient_clip_val=None,
                          num_sanity_val_steps=0, 
                          enable_progress_bar=True,
                          enable_checkpointing=True,
-                         log_every_n_steps=args.log_every_n_steps,
+                         log_every_n_steps=config.training.log_every_n_steps,
                          fast_dev_run=False,
                         #  profiler='simple'
                         )
@@ -200,28 +198,28 @@ def get_best_model_from_training(model, callbacks):
 
     return best_model, best_model_ckpt_path
 
-def main(args, training_folder, datamodule, model, exp_logger=None):
+def main(config, training_folder, datamodule, model, exp_logger=None):
 
     logger.info("*** Training started ***")
     training_start_time = time.time()
 
     # Resume training with a model checkpoint or load a backbone model checkpoint
     ckpt_path = None
-    if args.resume_training:
-        ckpt_path = get_already_trained_model(args.experiments_dir, args.model_ckpt_path)
+    if config.training.resume_training:
+        ckpt_path = get_already_trained_model(config.experiment.experiments_dir, config.training.model_ckpt_path)
     else:
-        if args.backbone_ckpt_path != '':
-            model.load_backbone_weights(args.backbone_ckpt_path)
+        if config.training.backbone_ckpt_path != '':
+            model.load_backbone_weights(config.training.backbone_ckpt_path)
 
     # Freeze the backbone model if needed
-    if args.freeze_backbone:
+    if config.training.freeze_backbone:
         model.freeze_backbone_model()
 
     # Training callbacks
-    callbacks = init_callbacks(args, training_folder)
+    callbacks = init_callbacks(config, training_folder)
 
     # Training
-    trainer, callbacks = train(args, model, datamodule, callbacks, exp_logger, ckpt_path)
+    trainer, callbacks = train(config, model, datamodule, callbacks, exp_logger, ckpt_path)
 
     # Get best model from the training process
     best_model, best_model_ckpt_path = get_best_model_from_training(model, callbacks)
@@ -230,7 +228,7 @@ def main(args, training_folder, datamodule, model, exp_logger=None):
     metrics = callbacks['metrics_callback'].get_all_metrics()
 
     best_val_acc = np.nanmax(metrics['metrics/val_acc'] + [0])
-    best_epoch = (np.nanargmax(metrics['metrics/val_acc'] + [0]) + 1) * args.ckpt_period
+    best_val_epoch = (np.nanargmax(metrics['metrics/val_acc'] + [0]) + 1) * config.training.ckpt_period
 
     log_message = "All epoch training metrics: \n"
     for k, v in metrics.items():
@@ -240,12 +238,12 @@ def main(args, training_folder, datamodule, model, exp_logger=None):
     # Access the wandb experiment and save the logs for the model hyperparameters and additional results (than those already logged with log_dict() in the model file)
     if exp_logger:
         exp_logger.log_hyperparams(model.hparams)
-        exp_logger.experiment.log({'best_epoch': best_epoch, 'best_val_acc': best_val_acc})
+        exp_logger.experiment.log({'best_val_epoch': best_val_epoch, 'best_val_acc': best_val_acc})
 
     train_results = {
         'metrics': metrics,
         'best_val_acc': best_val_acc,
-        'best_epoch': best_epoch
+        'best_val_epoch': best_val_epoch
     }
 
     log_message = "*** Training ended ***\n"
@@ -255,82 +253,30 @@ def main(args, training_folder, datamodule, model, exp_logger=None):
 
     return trainer, best_model, best_model_ckpt_path, train_results
 
-def get_all_args() -> argparse.Namespace:
-    """Define argument parser and merge CLI arguments with YAML config arguments."""
-    parser = argparse.ArgumentParser()
-
-    # Add arguments that may be given through the CLI. Note that we do not consider any default value as the ones in the YAML config files should be considered
-    parser.add_argument('--seed', type=int, help='seed for reproducibility')
-    parser.add_argument('--max_epochs', type=int, help='maximum number of epochs to be performed during training of the model')
-    parser.add_argument('--resume_training', action='store_true', help='whether to resume training from a given checkpoint')
-
-    # Add arguments that contain paths to the static config files
-    parser.add_argument("--general_config", default="./configs/general.yaml", help="from where to load the general YAML config", metavar="FILE")
-    parser.add_argument("--data_config", default="./configs/data.yaml", help="from where to load the YAML config of the chosen data", metavar="FILE")
-    parser.add_argument("--model_shared_config", default="./configs/model_shared.yaml", help="from where to load the YAML config of the chosen model", metavar="FILE")
-    parser.add_argument("--training_config", default="./configs/training.yaml", help="from where to load the training YAML config", metavar="FILE")
-
-    # Parse CLI arguments first
-    cli_args, _ = parser.parse_known_args()
-
-    # Create a new namespace to store only explicitly passed CLI arguments
-    args = argparse.Namespace()
-
-    # Add only explicitly passed CLI arguments to the namespace. 
-    # This is useful to deal with the arguments with 'store_true' action, as they would otherwise appear twice in the namespace
-    for key, value in vars(cli_args).items():
-        if value is not None and value:  # skip default values for store_true and unset arguments
-            setattr(args, key, value)
-
-    # Add the static config file arguments
-    args = update_args_from_yaml_configs(args, [cli_args.general_config, 
-                                                cli_args.data_config, 
-                                                cli_args.model_shared_config,
-                                                cli_args.training_config,
-                                                ])
-
-    # Add the dynamic config file arguments (depending on the previously parsed args)
-    setattr(args, "model_config", f"./configs/models/{args.model_module}.yaml")
-    setattr(args, "network_config", f"./configs/networks/{args.model_backbone}.yaml")
-
-    # Add args from dynamic config files
-    args = update_args_from_yaml_configs(args, [args.model_config, 
-                                                args.network_config])
-
-    return args
 
 if __name__ == '__main__':
     logger.info(f"training.py process ID: {os.getpid()}")
 
-    # Get all the arguments from the CLI and the YAML config files
-    args = get_all_args()
-
-    # Log all the arguments in the Namespace
-    log_args_namespace(args)
+    # Get and log all the config arguments
+    config = get_complete_config()
+    log_config_dict(config)
 
     # Seed everything for reproducibility
-    if args.seed is not None:
-        pl.seed_everything(args.seed)
-
-    # Create the training folder
-    training_folder = "./" + args.data_module.replace("DataModule", "") + "/training"
-    os.makedirs(training_folder, exist_ok=True)
+    if config.base.seed is not None:
+        pl.seed_everything(config.base.seed)
 
     # Data chosen
-    data_module = vars(data)[args.data_module]
-    logger.info(f"Data module: {data_module}")
-    data_args = get_config_specific_args_from_args(args, args.data_config)
-    datamodule = data_module(**data_args)   # initializing the data
-    logger.info(f"Datamodule (showing the total number of samples per dataloader):\n {datamodule} \n")
+    data_module = vars(data)[config.base.data_module]
+    datamodule = data_module(config.data)   # initialize the data with the data config
+    logger.info(f"Data module instantiated. Now showing the total number of samples per dataloader:\n{datamodule}\n")
 
     # Model chosen
-    model_module = vars(models)[args.model_module]
-    logger.info(f"Model module: {model_module}")
-    model_args = get_config_specific_args_from_args(args, args.model_config)
-    model_shared_args = get_config_specific_args_from_args(args, args.model_shared_config)
-    model_args.update(model_shared_args)
-    model = model_module(**model_args)   # initializing the model
-    logger.trace(f"Model for training: {model} \n")
-    logger.info(f"Model hyperparameters for training:\n{model.hparams} \n")
+    model_module = vars(models)[config.base.model_module]
+    model = model_module(config.model, config.backbone_network, config.head_network)   # initialize the model with the model and network configs
+    logger.trace(f"Model chosen for training: {model}")
 
-    trainer, best_model, best_model_ckpt_path, train_results = main(args, training_folder, datamodule, model, exp_logger=None)
+    # Create the training folder
+    training_folder = f"./{config.data.data_env}/training"
+    os.makedirs(training_folder, exist_ok=True)
+
+    trainer, best_model, best_model_ckpt_path, train_results = main(config, training_folder, datamodule, model, exp_logger=None)
