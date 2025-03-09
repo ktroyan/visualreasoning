@@ -1,5 +1,8 @@
-from models.cvr_model import CVRModel
-from models.rearc_model import REARCModel
-from models.beforearc_model import BEFOREARCModel
+from models.cvr_vision_model import CVRVisionModel
+from models.rearc_vision_model import REARCVisionModel
+from models.rearc_seq2seq_model import REARCSeq2SeqModel
 
-__all__ = ["CVRModel", "REARCModel", "BEFOREARCModel"]
+__all__ = ["CVRVisionModel", 
+           "REARCVisionModel", 
+           "REARCSeq2SeqModel",
+           ]
