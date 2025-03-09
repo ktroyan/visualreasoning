@@ -7,26 +7,31 @@ vis-reas_venv/
 notes.txt
 lightning_logs/
 
+### Lab ###
+lab/
+
 
 ### CVR ###
 /CVR/generated_data
+/CVR/generated_data_64x64
+/CVR/generated_data_128x128
 /CVR/final_datasets
 /CVR/experiments
 /CVR/training
 
 
-### RE-ARC ###
-/RE-ARC
-/RE-ARC/arc_original
-/RE-ARC/generated_data
-/RE-ARC/generated_data_lb0_ub04
-/RE-ARC/generated_data_lb0_ub07
-/RE-ARC/generated_data_lb07_ub1
-/RE-ARC/final_datasets
+### REARC ###
+/REARC
+/REARC/arc_original
+/REARC/generated_data
+/REARC/generated_data_lb0_ub04
+/REARC/generated_data_lb0_ub07
+/REARC/generated_data_lb07_ub1
+/REARC/final_datasets
 
 
-### BEFORE-ARC ###
-/BEFORE-ARC
+### BEFOREARC ###
+/BEFOREARC
 
 
 ##########
