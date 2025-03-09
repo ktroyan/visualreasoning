@@ -6,6 +6,7 @@ vis-reas_venv/
 ### Files at root
 notes.txt
 lightning_logs/
+requirements_backup.txt
 
 ### Lab ###
 lab/
@@ -33,7 +34,7 @@ lab/
 ### BEFOREARC ###
 /BEFOREARC
 
-#VSCode
+# VSCode
 .vscode/
 
 ##########
