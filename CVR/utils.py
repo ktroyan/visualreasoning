@@ -362,7 +362,7 @@ def render_ooo(xy, size, shape, color, image_size=128):
 
     images = []
     for i in range(len(shape)):
-        im = render_cv(xy[i], size[i], shape[i], color[i], image_size=128)
+        im = render_cv(xy[i], size[i], shape[i], color[i], image_size=image_size)
         im = np.pad(im, [[4,4], [4,4], [0,0]], constant_values=0)
         images.append(im)
 

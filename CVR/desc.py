@@ -108,9 +108,9 @@ TASKS=[
     # Each image contains 2 sets of objects that have the same spatial configuration. One of the spatial configurations is rotated and objects in the configuration are rotated with the same angle.
     ['task_pos_rot_2', task_pos_rot_2],
     # In each image, the objects are always positioned similarly along the same dimension with respect to their colors.
-    ['task_pos_col_1', task_pos_col_1],
+    ['task_pos_color_1', task_pos_color_1], # NOTE: I changed it from task_pos_col_1 to task_pos_color_1
     # The images contain a set of objects that have the same spatial configuration and color configuration. Both configurations are maintained in all images.
-    ['task_pos_col_2', task_pos_col_2],
+    ['task_pos_color_2', task_pos_color_2], # NOTE: I changed it from task_pos_col_2 to task_pos_color_2
     # The images contain two objects in contact along the same direction.
     ['task_pos_contact', task_pos_contact],
     # The images contain two pairs of objects. Each pair of objects have the same size and shape.

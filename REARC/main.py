@@ -9,8 +9,8 @@ import random
 import dsl
 from dsl import *
 
-import utility.utils as utils
-from utility.utils import *
+import utils as utils
+from utils import *
 
 import generators
 import verifiers
@@ -111,7 +111,7 @@ def generate_dataset(
 
     print("Tasks selected: ", keys)
     # Write in a file the tasks selected and for which samples are generated
-    with open(f'./tasks_generated.txt', 'w') as f:
+    with open('./tasks_generated.txt', 'w') as f:
         for key in keys:
             f.write(f'{key}\n')
 

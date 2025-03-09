@@ -5,17 +5,12 @@ import pickle
 import numpy as np
 # import matplotlib.pyplot as plt
 from PIL import Image
-
+import cv2
 import itertools
 import math
-
-# NOTE: I changed this due to numpy version update
-np.math = math
-
-import cv2
-
+np.math = math  # NOTE: I changed this due to numpy version update
 from shape import Shape
-from utility.utils import *
+from utils import *
 
 render = render_cv
 
@@ -1602,7 +1597,7 @@ def task_pos_flip_2(condition='xyc'):
 # In each image, the objects are always positioned similarly along the same dimension with respect to their colors.
 
 
-def task_pos_col_1(condition='xyscid_'):
+def task_pos_color_1(condition='xyscid_'):  # NOTE: I changed the name from task_pos_col_1 to task_pos_color_1
 
     n_samples = 4
     n_objects = 2
@@ -1688,7 +1683,7 @@ def task_pos_col_1(condition='xyscid_'):
 # The images contain a set of objects that have the same spatial configuration and color configuration. Both configurations are maintained in all images.
 
 
-def task_pos_col_2(condition='xych'):
+def task_pos_color_2(condition='xych'): # NOTE: I changed the name from task_pos_col_2 to task_pos_color_2
 
     n_samples = 4
 
@@ -10090,9 +10085,9 @@ TASKS = [
         "Each image contains many pairs of close objects. The pairs, identified by the object shapes, are similar across images."],
     ["task_pos_rot_1", task_pos_rot_1, "The images contain a set of objects that have the same spatial configuration. The spatial configurations are rotated and objects in the configuration are rotated with the same angle."],
     ["task_pos_rot_2", task_pos_rot_2, "Each image contains 2 sets of objects that have the same spatial configuration. One of the spatial configurations is rotated and objects in the configuration are rotated with the same angle."],
-    ["task_pos_col_1", task_pos_col_1,
+    ["task_pos_color_1", task_pos_color_1,    # NOTE: I changed the name from task_pos_col_1 to task_pos_color_1
         "In each image, the objects are always positioned similarly along the same dimension with respect to their colors."],
-    ["task_pos_col_2", task_pos_col_2, "The images contain a set of objects that have the same spatial configuration and color configuration. Both configurations are maintained in all images."],
+    ["task_pos_color_2", task_pos_color_2, "The images contain a set of objects that have the same spatial configuration and color configuration. Both configurations are maintained in all images."],   # NOTE: I changed the name from task_pos_col_2 to task_pos_color_2
     ["task_pos_contact", task_pos_contact,
         "The images contain two objects in contact along the same direction."],
     ["task_size_shape_1", task_size_shape_1,

@@ -10,7 +10,7 @@ from PIL import Image
 
 from tasks import TASKS
 from generalization_tasks import TASKS as TASKS_GEN
-from utility.utils import render_ooo
+from utils import render_ooo
 
 
 TASKS_IDX={
@@ -69,8 +69,8 @@ TASKS_IDX={
     50: "task_pos_shape_2",
     51: "task_pos_rot_1",
     52: "task_pos_rot_2",
-    53: "task_pos_col_1",
-    54: "task_pos_col_2",
+    53: "task_pos_color_1", # NOTE: I changed it from task_pos_col_1 to task_pos_color_1
+    54: "task_pos_color_2", # NOTE: I changed it from task_pos_col_2 to task_pos_color_2
     55: "task_pos_contact",
     56: "task_size_shape_1",
     57: "task_size_shape_2",
@@ -137,6 +137,9 @@ def generate_dataset(task_name, task_fn, task_fn_gen, data_path='/media/data_cif
     n_test_samples_0 = 0
     n_test_samples_1 = test_size
 
+    n_gen_test_samples_0 = 0
+    n_gen_test_samples_1 = test_gen_size
+
     os.makedirs(task_path, exist_ok=True)
     os.makedirs(os.path.join(task_path,'train'), exist_ok=True)
     os.makedirs(os.path.join(task_path,'val'), exist_ok=True)
@@ -173,7 +176,7 @@ def generate_dataset(task_name, task_fn, task_fn_gen, data_path='/media/data_cif
 
     np.random.seed(seed+2)
     split = 'test_gen'
-    for i in range(n_test_samples_0, n_test_samples_1):
+    for i in range(n_gen_test_samples_0, n_gen_test_samples_1):
         images = render_ooo(*task_fn_gen(), image_size=image_size)
         save_path = os.path.join(task_path, split, '{:05d}.png'.format(i))
         img = Image.fromarray(images).convert('RGB')
