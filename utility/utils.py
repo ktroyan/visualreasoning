@@ -1,136 +1,196 @@
 import os
-import sys
 import yaml
-import argparse
-from pathlib import Path
 import glob
 import datetime
 import matplotlib.pyplot as plt
-from typing import Dict, Any
+import numpy as np
+import pandas as pd
+from PIL import Image
+from torchvision import transforms as tvt
+from omegaconf import OmegaConf
+from typing import Dict
 
 # Personal codebase dependencies
 from utility.logging import logger
 
-def update_args_from_yaml_config(args: argparse.Namespace, config_file: str) -> argparse.Namespace:
-    """Update args Namespace from a YAML config file path."""
 
-    if Path(config_file).exists():
-        with open(config_file, 'r') as file:
-            config = yaml.safe_load(file) or {}
-            for key, value in config.items():
-                # Only update if the argument is not already set via CLI
-                if not hasattr(args, key):
-                    setattr(args, key, value)
-    else:
-        raise FileNotFoundError(f"Config file {config_file} not found.")
-
-    return args
-
-def update_args_from_yaml_configs(args: argparse.Namespace, config_files: list) -> argparse.Namespace:
-    """Update args Namespace from a list of YAML config file paths."""
-
-    for config_file in config_files:
-        args = update_args_from_yaml_config(args, config_file)
-
-    return args
-
-# NOTE: not used
-def parse_config(argv, args, config_path):
-    config_vars = {}
-
-    with open(config_path, 'r') as stream:
-        config_vars = yaml.safe_load(stream)
-    
-    if config_vars is not None:
-        default_args = argparse.Namespace()
-        default_args.__dict__.update(args.__dict__)
-        default_args.__dict__.update(config_vars)
-
-        new_keys = {}
-        for k, v in args.__dict__.items():
-            if '--'+k in argv or '-'+k in argv or (k not in default_args):
-                new_keys[k] = v
-
-        default_args.__dict__.update(new_keys)
-        args = default_args
-
-    return args
-
-# NOTE: not used
-def add_config_args_to_parser(parser, args, configs_to_add):
-    """Update args by merging CLI arguments with YAML config arguments.
-    
-    CLI arguments take precedence over YAML config arguments.
-    
-    Args:
-        parser (argparse.ArgumentParser): The argument parser.
-        args (argparse.Namespace): Parsed CLI arguments.
-        configs_to_add (list): List of config argument names to load YAML files from.
-    
-    Returns:
-        argparse.Namespace: Updated arguments namespace.
+def get_complete_config():
     """
-    args_dict = vars(args)  # Convert Namespace to dictionary
-    yaml_defaults = {}
+    Load and merge all relevant configuration files using OmegaConf.
 
-    # Load YAML files and store values in yaml_defaults
-    for config_arg in configs_to_add:
-        config_path = args_dict.get(config_arg)
-        if config_path is None:
-            continue  # Skip if config file path is not specified
+    Returns:
+        resolved_complete_config_oc (OmegaConf): The complete resolved configuration as an OmegaConf object.
+        resolved_complete_config_dict (dict): The complete resolved configuration as a dict.
+    """
+    try:
+        # Load base configurations
+        base_config = OmegaConf.load("configs/base.yaml")
+        data_config = OmegaConf.load("configs/data.yaml")
+        experiment_config = OmegaConf.load("configs/experiment.yaml")
+        wandb_config = OmegaConf.load("configs/wandb.yaml")
+        training_config = OmegaConf.load("configs/training.yaml")
+        inference_config = OmegaConf.load("configs/inference.yaml")
+        cli_config = OmegaConf.from_cli()
 
-        try:
-            with open(config_path, "r") as f:
-                config_data = yaml.safe_load(f) or {}  # Load YAML file content
+        # Merge common configurations
+        main_config = OmegaConf.merge(base_config,
+                                      data_config,
+                                      experiment_config,
+                                      wandb_config,
+                                      training_config,
+                                      inference_config,
+                                      cli_config
+                                      )
 
-                # Allow later configs to override earlier ones
-                for key, value in config_data.items():
-                    yaml_defaults[key] = value
-        except FileNotFoundError:
-            logger.warning(f"Config file {config_path} not found. Skipping.")
-        except yaml.YAMLError as e:
-            logger.error(f"Error parsing YAML config {config_path}: {e}")
+        # Create resolvers
+        def resolve_if_then_else(enabled: bool, set_value):
+            return set_value if enabled else None  # return None when disabled
 
-    # Handle store_true arguments
-    for action in parser._actions:
-        if isinstance(action, argparse._StoreTrueAction):
-            arg_name = action.dest
-            # If the argument is not set in the CLI, use the YAML value (if present)
-            if not getattr(args, arg_name, False):
-                yaml_value = yaml_defaults.get(arg_name, False)
-                yaml_defaults[arg_name] = bool(yaml_value)
+        # Register the resolvers
+        OmegaConf.register_new_resolver("resolve_if_then_else", resolve_if_then_else)
 
-    # Update parser defaults with YAML values
-    parser.set_defaults(**yaml_defaults)
+        # Explicitly resolve interpolations in the main config so that we get the values needed to load the specific configs below
+        OmegaConf.resolve(main_config)
 
-    # Reparse to apply updated defaults while keeping CLI arguments
-    updated_args = parser.parse_args(sys.argv[1:])
-    return updated_args
+        # Load model-specific config
+        model_module = main_config.base.get("model_module", None)
+        if not model_module:
+            raise ValueError("Error: 'base.model_module' is missing in base.yaml")
 
-def log_args_namespace(args):
-    # Convert the args Namespace to a dictionary
-    args_dict = vars(args)
+        model_config_path = f"configs/models/{model_module}.yaml"
+        if not os.path.exists(model_config_path):
+            raise FileNotFoundError(f"Error: Model config file '{model_config_path}' not found.")
+        model_config = OmegaConf.load(model_config_path)
 
-    # Log all the keys/arguments of the dictionary
-    log_message = "*** All arguments contained in the args variable *** \n\n"
-    for key, value in args_dict.items():
-        log_message += f"{key}: {value}\n"
+        # Load backbone network-specific config
+        backbone_network_name = model_config.model.get("backbone", None)
+        if not backbone_network_name:
+            raise ValueError("Error: 'model.backbone' is missing in model config.")
 
-    logger.info(log_message)
+        backbone_network_config_path = f"configs/networks/backbones/{backbone_network_name}.yaml"
+        if not os.path.exists(backbone_network_config_path):
+            raise FileNotFoundError(f"Error: Backbone network config file '{backbone_network_config_path}' not found.")
+        backbone_network_config = OmegaConf.load(backbone_network_config_path)
 
-def get_config_specific_args_from_args(args, specific_config_path):
+        # Load head network-specific config
+        head_network_name = model_config.model.get("head", None)
+        if not head_network_name:
+            raise ValueError("Error: 'model.head' is missing in model config.")
+
+        head_network_config_path = f"configs/networks/heads/{head_network_name}.yaml"
+        if not os.path.exists(head_network_config_path):
+            raise FileNotFoundError(f"Error: Head network config file '{head_network_config_path}' not found.")
+        head_network_config = OmegaConf.load(head_network_config_path)
+
+        # Merge all configs into a single hierarchical object
+        complete_config = OmegaConf.merge(main_config,
+                                          model_config,
+                                          backbone_network_config,
+                                          head_network_config,
+                                          cli_config
+                                          )
+
+        # Explicitly resolve value interpolations in the complete config
+        OmegaConf.resolve(complete_config)
+
+        # Convert the config to a dict
+        resolved_complete_config_dict = OmegaConf.to_container(complete_config)
+
+        # Convert dict to OmegaConf object so that we can then use dot notation to access the keys
+        resolved_complete_config_oc = OmegaConf.create(resolved_complete_config_dict)
+
+    except Exception as e:
+        raise RuntimeError(f"Error loading or merging configurations: {e}")
+    
+    return resolved_complete_config_oc, resolved_complete_config_dict
+
+def log_config_dict(config_dict, log_message=""):
+    """
+    Logs the config dictionary in a structured format.
+
+    Args:
+        config_dict (dict): The configuration dictionary to log.
+        log_message (str): An optional message to prepend to the log.
+    """
+    dict_logs_message = OmegaConf.to_yaml(config_dict)
+    logger.info(f"{log_message}\n\n{dict_logs_message}")
+
+def get_config_specific_args_from_args_dict(args_dict, specific_config_path):
     # Load the YAML config to get config-specific keys
     with open(specific_config_path, "r") as f:
         specific_config_keys = yaml.safe_load(f).keys()
 
     # Filter args to include only the arguments of the specific config file given
-    specific_config_args = {key: value for key, value in vars(args).items() if key in specific_config_keys}
+    specific_config_args = {key: value for key, value in args_dict.items() if key in specific_config_keys}
 
     return specific_config_args
 
 def save_config(cfg, path):
     with open(path, 'w') as cfg_file:
         yaml.dump(cfg, cfg_file)
+
+def compute_dataset_stats(dataset_path):
+    # Load the dataset file
+    dataset_file_type = dataset_path.split(".")[-1]
+    if dataset_file_type == "json":
+        dataset_pd = pd.read_json(dataset_path)
+
+        # Flatten each sample in the 'input' column
+        sample_inputs = dataset_pd["input"].apply(lambda image: np.array(image).flatten()).values
+
+    elif dataset_file_type == "csv":
+        dataset_pd = pd.read_csv(dataset_path)
+        
+        # Normalize file paths and load images
+        dataset_pd['filepath'] = dataset_pd['filepath'].apply(lambda path: os.path.normpath(os.path.join("CVR", path)))
+        
+        # Load images and convert to tensors
+        samples = [tvt.ToTensor()(Image.open(sample_path)) for sample_path in dataset_pd['filepath']]
+        
+        # Flatten each sample (3-channel image) and store in the 'input' column
+        dataset_pd['input'] = [sample.flatten().numpy() for sample in samples]
+        
+        # Extract flattened samples
+        sample_inputs = dataset_pd['input'].values
+
+    else:
+        raise Exception("File format not supported. Please provide a csv or json file.")
+
+    # Check if the 'input' column exists
+    if "input" not in dataset_pd.columns:
+        raise Exception("The dataset does not contain an 'input' column.")
+
+    logger.info(f"Number of samples: {len(sample_inputs)}")
+
+    ## Global stats (i.e., mean and std computed across all pixels in the dataset)
+    # NOTE: this is the one to use for normalization of images of the dataset before creating the dataloader
+    
+    # Flatten all samples into a single array
+    all_pixels = np.concatenate(sample_inputs)
+
+    # Compute the dataset mean and std
+    dataset_mean_global = np.mean(all_pixels)
+    dataset_std_global = np.std(all_pixels)
+
+    # Log the dataset mean and std
+    logger.info(f"Dataset mean (global): {dataset_mean_global}")
+    logger.info(f"Dataset std (global): {dataset_std_global}")
+
+    ## Per-sample stats (i.e., mean and std computed per sample and averaged across all samples)
+    
+    # Compute mean and std per sample
+    mean_per_sample = [np.mean(sample) for sample in sample_inputs]
+    std_per_sample = [np.std(sample) for sample in sample_inputs]
+
+    # Average the mean and std across all samples
+    dataset_mean_per_sample = np.mean(mean_per_sample)
+    dataset_std_per_sample = np.mean(std_per_sample)
+
+    # Log the dataset mean and std
+    logger.info(f"Dataset mean (average per sample): {dataset_mean_per_sample}")
+    logger.info(f"Dataset std (average per sample): {dataset_std_per_sample}")
+
+    return dataset_mean_global, dataset_std_global, dataset_mean_per_sample, dataset_std_per_sample
 
 def generate_timestamped_experiment_name(exp_basename):
     now = datetime.datetime.now()
@@ -176,9 +236,5 @@ def plot_lr_schedule(lr_values):
     plt.title("Learning Rate Schedule")
     plt.legend()
     plt.grid()
-    plt.savefig("learning_rate_schedule.png")
-    plt.show()
-
-    # Save the plot at the root
-    # TODO: see if useful to save it in the experiment folder
-    plt.savefig("learning_rate_schedule.png")
+    plt.savefig("./figs/learning_rate_schedule.png")   # save the plot
+    # plt.show()

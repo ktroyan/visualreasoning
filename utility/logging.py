@@ -1,7 +1,9 @@
+import os
 import sys
 from datetime import datetime
 import yaml
-from loguru import logger
+from loguru import logger as loguru_logger
+
 
 def setup_loguru(loguru_logger):
     # Generate a timestamp for the log file name
@@ -9,16 +11,15 @@ def setup_loguru(loguru_logger):
     formatted_datetime = current_datetime.strftime("%m-%d-%Hh%M")
 
     # Get the data environment to have the correct log path
-    # Open yaml file
-    with open("./configs/experiment.yaml") as file:
-        config = yaml.safe_load(file)
+    with open("./configs/base.yaml") as file:
+        config_base = yaml.safe_load(file)
 
-    # Define the log file path
-    log_filename = (
-        f"{config['experiments_dir']}/logs/experiment_"
-        + formatted_datetime
-        + ".log"
-    )
+    # Make sure the log folder exists
+    log_folder = f"{config_base['base']['data_env']}/experiments/logs"
+    os.makedirs(log_folder, exist_ok=True)
+
+    # Log file path
+    log_filename = (f"{log_folder}/experiment_{formatted_datetime}.log")
 
     # Logging format
     fmt = (
@@ -29,7 +30,7 @@ def setup_loguru(loguru_logger):
     )
 
     # Remove the default logger with its associated sink
-    logger.remove()
+    loguru_logger.remove()
     
     # Add a file sink for logging
     loguru_logger.add(log_filename, level="TRACE", format=fmt)    # levels can be TRACE, DEBUG, INFO, SUCCESS, WARNING, ERROR...
@@ -40,4 +41,4 @@ def setup_loguru(loguru_logger):
     return loguru_logger
 
 # Configure the logger and make the object accessible to other modules
-logger = setup_loguru(logger)
+logger = setup_loguru(loguru_logger)
