@@ -1,12 +1,10 @@
-data_module: 'CVRDataModule'
-dataset_dir: './CVR/final_datasets/sample-efficiency/exp_setting_1/experiment_4'
-# dataset_dir: './CVR/final_datasets/compositionality/exp_setting_1/experiment_2' 
-# dataset_dir: './CVR/final_datasets/sys-gen/exp_setting_1/experiment_2' 
-num_workers: 4
-train_batch_size: 32
-val_batch_size: 50
-test_batch_size: 50
-train_transform: null
-test_transform: null
-use_gen_test_set: false
-test_in_and_out_domain: false
+data:
+  dataset_dir: './${base.data_env}/final_datasets/${experiment.study}/${experiment.setting}/${experiment.name}'
+  num_workers: 4
+  train_batch_size: 32
+  val_batch_size: 50
+  test_batch_size: 50
+  transform:
+    enabled: true # whether to apply data transformation (e.g., normalization, augmentation). TODO: We can add a field to specify the type of transformation
+  use_gen_test_set: false
+  test_in_and_out_domain: false

@@ -1,6 +1,0 @@
-patch_size: 16
-embed_dim: 768  # 384 for small, 768 for base
-depth: 12
-num_heads: 8  # 12
-mlp_ratio: 4
-qkv_bias: true

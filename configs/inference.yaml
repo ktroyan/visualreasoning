@@ -1,1 +1,2 @@
-inference_verbose: 1  # verbosity level: 0 for no verbose, 1 for most verbose
+inference:
+  inference_verbose: 1  # verbosity level: 0 for no verbose, 1 for most verbose

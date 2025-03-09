@@ -1,0 +1,3 @@
+backbone_network:
+  name: 'resnet'
+  network_size: 50  # choices: 18 (for ResNet18), 50 (for ResNet50)

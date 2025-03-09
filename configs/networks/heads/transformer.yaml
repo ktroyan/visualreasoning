@@ -1,0 +1,9 @@
+head_network:
+  name: 'transformer'
+  embed_dim: 128  # 384 for small, 768 for base
+  num_layers: 8  # 12
+  ff_dim: 512  # 2048
+  num_heads: 8  # 12
+  init_weights_cfg:
+    type: 'xavier'
+    distribution: 'uniform'

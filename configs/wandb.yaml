@@ -1,3 +1,4 @@
-wandb_project_name: 'VisReas-project'
-wandb_entity_name: 'klim-t'     # this should be a WandB username or team name
-log_model: false
+wandb:
+  wandb_project_name: 'VisReas-project'
+  wandb_entity_name: 'klim-t'     # this should be a WandB username or team name
+  log_model: false

@@ -1,0 +1,20 @@
+model:
+  backbone: 'vit'  # choices: 'vit', 'resnet'
+  head: 'mlp'  # choices: 'mlp'
+  pretrained: null
+  patch_size: 16
+  pos_embed: 'learn'  # choices: 'learn', '' (TODO: for no PE or fixed PE?)
+  use_cls_token: true # whether to use a cls token or not
+  nb_reg_tokens: 0
+  global_pool_method: 'token' # choices: '' (for no pooling and returning a sequence), 'mean', 'max', 'token' (for aggretating features and returning the cls token)
+  n_tasks: 103    # NOTE: this is used for the task embedding (i.e., to inform the model through an embedding of which tasks to consider)
+  task_embedding:
+    enabled: false
+    task_embedding_dim: ${resolve_if_then_else:${model.task_embedding.enabled},128} # if task_embedding is enabled, then task_embedding_dim is 128, otherwise it is null
+  dp_sim:
+    enabled: true # TODO: we could add a field to specify the pooling technique for example
+  training_hparams:
+    optimizer: 'Adam' # it can be: Adam, AdamW, SGD
+    scheduler: 'ReduceLROnPlateau' # it can be: ReduceLROnPlateau, StepLR, MultiStepLR, ExponentialLR, CosineAnnealingLR
+    lr: 0.001
+    wd: 0.001

@@ -1,16 +1,19 @@
-resume_training: false
-model_ckpt_path: ''  # specify the path to the checkpoint to load for the complete predictive model
-backbone_ckpt_path: ''  # specify the path to the checkpoint to load for the backbone model
-freeze_backbone: false
-# Callbacks
-metrics_callback_verbose: 1 # verbosity level: 0 for no verbose, 1 for more verbose, 2 for most verbose
-use_early_stopping: true
-es_patience: 10 # number of epochs for patience of early stopping
-use_progress_bar: true
-refresh_rate: 0 # every how many number of batches to refresh the TQDM. 0 for no refresh
-# Trainer
-trainer_precision: "16-mixed" # "16-mixed" usually for NVIDIA GPUs, "bf16-mixed" for TPUs and newer NVIDIA GPUs?
-max_epochs: 3
-log_every_n_steps: 10
-ckpt_period: 1  # every how many epochs are the checkpoints saved when running the Trainer()
-# flush_logs_every_n_steps: 100
+training:
+  resume_training: false
+  model_ckpt_path: ''  # specify the path to the checkpoint to load for the complete predictive model
+  backbone_ckpt_path: ''  # specify the path to the checkpoint to load for the backbone model
+  freeze_backbone: false
+  # Callbacks
+  metrics_callback_verbose: 1 # verbosity level: 0 for no verbose, 1 for more verbose, 2 for most verbose
+  early_stopping:
+    enabled: true
+    es_patience: ${resolve_if_then_else:${training.early_stopping.enabled},10} # number of epochs for patience of early stopping
+  progress_bar:
+    enabled: true
+    refresh_rate: ${resolve_if_then_else:${training.progress_bar.enabled},0} # every how many number of batches to refresh the TQDM. 0 for no refresh
+  # Trainer
+  trainer_precision: "16-mixed" # "16-mixed" usually for NVIDIA GPUs, "bf16-mixed" for TPUs and newer NVIDIA GPUs?
+  max_epochs: 3
+  log_every_n_steps: 10
+  ckpt_period: 1  # every how many epochs are the checkpoints saved when running the Trainer()
+  # flush_logs_every_n_steps: 100
