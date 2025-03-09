@@ -33,6 +33,8 @@ lab/
 ### BEFOREARC ###
 /BEFOREARC
 
+#VSCode
+.vscode/
 
 ##########
 
