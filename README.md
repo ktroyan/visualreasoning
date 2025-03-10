@@ -1,6 +1,20 @@
 # visualreasoning
 Evaluating Neural Network architectures by studying Systematic Generalization, Sample Efficiency, Compositionality and ICL in Abstract Visual Reasoning (AVR) tasks from different data environments.
 
+# Use
+An experiment is run as
+```bash
+python experiment.py
+```
+
+Using CLI arguments, an experiment can be run, for example, as
+```bash
+python experiment.py base.data_env="REARC" base.problem_approach="Vision" experiment.study="sample-efficiency" experiment.setting="exp_setting_1" experiment.name="experiment_1" training.max_epochs=5
+```
+This performs a run for the REARC data environment using a Vision modeling approach, for a Sample-Efficiency study, some experiment setting (as defined in the file `create_rearc_datasets.ipynb`), and some experiment part of that experiment setting. Moreover, the model is trained for 5 epochs at most.
+
+The parameters can be found in the YAML config files in the folder `/configs`.
+
 # General information
 The goal is to study Transformer-based vision models for Abstract Visual Reasoning (AVR) tasks across different data environments and experiment settings. 
 <br>
