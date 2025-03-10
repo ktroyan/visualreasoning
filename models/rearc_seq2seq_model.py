@@ -6,7 +6,7 @@ import pytorch_lightning as pl
 # Personal codebase dependencies
 from networks.backbones.transformers import get_transformer_encoder
 from networks.heads.transformers import get_transformer_decoder
-from utility.utils import plot_lr_schedule  # noqa: F401
+from utility.utils import plot_lr_schedule, timer_decorator
 from utility.logging import logger
 
 
@@ -262,6 +262,8 @@ class REARCSeq2SeqModel(VisReasModel):
         # Input embedding
         self.input_embedding = nn.Embedding(self.num_classes, embedding_dim=self.backbone_input_embed_dim)
 
+        # TODO: implement positional encoding for the input embeddings
+
         # Model backbone or encoder
         if model_config.backbone == "transformer":
             self.encoder = get_transformer_encoder(backbone_network_config, device=self.device)
@@ -295,9 +297,44 @@ class REARCSeq2SeqModel(VisReasModel):
         self.output_layer = nn.Linear(self.head_input_embed_dim, self.num_classes)
 
 
+    @timer_decorator
+    def decode_sequence(self, B, x_encoded):
+
+        # # Decoding method 1: memory inefficient
+        # Initialize the target sequence (start with zeros or a learned start token)
+        # output_target_seq = torch.zeros(B, self.seq_len, self.head_input_embed_dim).to(x.device)  # [B, seq_len, embed_dim (+task_embedding_dim)]
+        # output_target_seq_shape = output_target_seq.shape
+        # for t in range(self.seq_len):  # 900 iterations/tokens
+        #     # Decode up to step t
+        #     output_t = self.decoder(output_target_seq[:, :t+1, :], x_encoded)  # [B, t+1, head_input_embed_dim]
+
+        #     # Update the target sequence with the tokens predicted so far
+        #     output_target_seq[:, t, :] = output_t[:, -1, :] # [B, head_input_embed_dim]
+
+        # Decoding method 2: memory efficient
+        output_tokens = []  # list to store the output tokens at each step. Instead of reserving memory for all timesteps at once, we append only the necessary data step-by-step, hence avoiding storing the intermediate states as using a list detaches all states from the computation graph
+        for t in range(self.seq_len):
+            if output_tokens:
+                prev_tokens = torch.stack(output_tokens, dim=1).detach()  # create a tensor from the list and detach to save memory
+            else:
+                prev_tokens = torch.zeros(B, 1, self.head_input_embed_dim, device=x_encoded.device)    # [B, 1, head_input_embed_dim]
+
+            # Decode up to step t
+            output_t = self.decoder(prev_tokens, x_encoded) # [B, 1, head_input_embed_dim]
+
+            # Store in the list the output token at step t
+            output_tokens.append(output_t[:, -1, :].detach())  # detach to save memory and store the output token at step t
+        
+        # Stack the output tokens from the list to get the predicted target sequence
+        output_target_seq = torch.stack(output_tokens, dim=1)   # [B, seq_len, head_input_embed_dim]
+
+        return output_target_seq
+
     def forward(self, x, samples_task_id=None):
+        B = x.shape[0]
+        
         # Flatten the input grid into a sequence
-        x_flat = x.view(x.shape[0], self.seq_len)  # [B, seq_len=900] <-- [B, H=30, W=30]
+        x_flat = x.view(B, self.seq_len)  # [B, seq_len=900] <-- [B, H=30, W=30]
 
         # Embed the input tokens
         x_embed = self.input_embedding(x_flat.long())  # [B, seq_len, backbone_input_embed_dim]; each token/symbol has its embedding of dim backbone_input_embed_dim
@@ -315,41 +352,10 @@ class REARCSeq2SeqModel(VisReasModel):
             # Map the encoded input sequence to the same embedding dimension as the decoder
             x_encoded = self.enc_to_dec_proj(x_encoded)  # [B, seq_len, embed_dim]
 
-
         # Auto-regressive decoding
-        
-        # # Decoding method 1: memory inefficient
-        # Initialize the target sequence (start with zeros or a learned start token)
-        # output_target_seq = torch.zeros(x.shape[0], self.seq_len, self.head_input_embed_dim).to(x.device)  # [B, seq_len, embed_dim (+task_embedding_dim)]
-        # output_target_seq_shape = output_target_seq.shape
-        # for t in range(self.seq_len):  # 900 iterations/tokens
-        #     # Decode up to step t
-        #     output_t = self.decoder(output_target_seq[:, :t+1, :], x_encoded)  # [B, t+1, head_input_embed_dim]
-
-        #     # Update the target sequence with the tokens predicted so far
-        #     output_target_seq[:, t, :] = output_t[:, -1, :] # [B, head_input_embed_dim]
-
-
-        # Decoding method 2: memory efficient
-        output_tokens = []  # list to store the output tokens at each step. Instead of reserving memory for all timesteps at once, we append only the necessary data step-by-step, hence avoiding storing the intermediate states as using a list detaches all states from the computation graph
-        for t in range(self.seq_len):
-            if output_tokens:
-                prev_tokens = torch.stack(output_tokens, dim=1).detach()  # create a tensor from the list and detach to save memory
-            else:
-                prev_tokens = torch.zeros(x.shape[0], 1, self.head_input_embed_dim, device=x.device)    # [B, 1, head_input_embed_dim]
-
-            # Decode up to step t
-            output_t = self.decoder(prev_tokens, x_encoded) # [B, 1, head_input_embed_dim]
-
-            # Store in the list the output token at step t
-            output_tokens.append(output_t[:, -1, :].detach())  # detach to save memory and store the output token at step t
-        
-        # Stack the output tokens from the list to get the predicted target sequence
-        output_target_seq = torch.stack(output_tokens, dim=1)   # [B, seq_len, head_input_embed_dim]
-        output_target_seq_shape = output_target_seq.shape
+        output_target_seq = self.decode_sequence(B, x_encoded)
 
         # Apply the linear output layer to get the logits from the predicted target sequence
         logits = self.output_layer(output_target_seq)  # [B, seq_len, num_classes=10]
-        logits_shape = logits.shape
 
         return logits

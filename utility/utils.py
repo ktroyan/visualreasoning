@@ -1,4 +1,5 @@
 import os
+import time
 import yaml
 import glob
 import datetime
@@ -238,3 +239,29 @@ def plot_lr_schedule(lr_values):
     plt.grid()
     plt.savefig("./figs/learning_rate_schedule.png")   # save the plot
     # plt.show()
+    plt.close()
+
+def plot_positional_embeddings(pos_embed, num_prefix_tokens):
+    plt.figure(figsize=(10, 5))
+    plt.imshow(pos_embed[0, num_prefix_tokens:, :].detach().cpu().numpy())  # exclude the extra tokens (e.g., [cls] and registers) if they exist
+    plt.xlabel("Embedding position")
+    plt.ylabel("Sequence position")
+    plt.colorbar()
+    plt.title("Positional Embeddings")
+    plt.savefig('./figs/positional_embeddings.png')   # save the plot
+    # plt.show()
+    plt.close()
+
+def timer_decorator(func):
+    """"
+    Decorator to measure the execution time of a function.
+    """
+
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)  # call the function
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        logger.warning(f"{func.__name__} took {elapsed_time:.4f} seconds to execute.")
+        return result
+    return wrapper
