@@ -18,6 +18,7 @@ from timm.layers import PatchEmbed
 
 # Personal codebase dependencies
 from utility.logging import logger
+from utility.utils import plot_positional_embeddings
 
 
 __all__ = ['get_vit']
@@ -50,7 +51,7 @@ class Vit(VisionTransformer):
                          mlp_ratio=mlp_ratio,
                          qkv_bias=qkv_bias,
                          norm_layer=norm_layer,
-                         pos_embed=pos_embed,  # NOTE: the only choice from timm is "learn"
+                         pos_embed=pos_embed,  # NOTE: the only choice from timm is 'learn' (or '' ?)
                          class_token=use_cls_token,
                          global_pool=global_pool
                          )
@@ -96,15 +97,8 @@ class Vit(VisionTransformer):
         self.pos_embed.requires_grad = False    # NOTE: set to False for the PE to not be learned
 
         # Visualize PE
-        if self.use_cls_token:
-            plt.imshow(self.pos_embed[0, 1:].detach().cpu().numpy())  # exclude the [cls] token
-        else:
-            plt.imshow(self.pos_embed[0, :].detach().cpu().numpy())
-        
-        plt.colorbar()
-        plt.title("Positional Embeddings")
-        # plt.show()
-        plt.savefig('./figs/positional_embeddings.png')
+        plot_positional_embeddings(self.pos_embed, self.num_prefix_tokens)
+
 
     def _init_weights(self,):
         for name, m in self.named_modules():
