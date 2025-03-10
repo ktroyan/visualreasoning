@@ -181,6 +181,10 @@ def train(config, model, datamodule, callbacks, exp_logger=None, checkpoint_path
                         #  profiler='simple'
                         )
 
+    # Compile the model for improved performance
+    # NOTE: without specifying the backend, it seems to fail on my NVIDIA RTX 3070 (Laptop) GPU
+    # model = torch.compile(model, backend='eager')
+
     trainer.fit(model, datamodule, ckpt_path=checkpoint_path)
 
     return trainer, callbacks
