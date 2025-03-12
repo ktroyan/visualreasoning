@@ -116,12 +116,12 @@ ALL_TASKS_ID_TO_NAME = {
 # Create the dict task name to task id
 ALL_TASKS_NAME_TO_ID = {v: k for k, v in ALL_TASKS_ID_TO_NAME.items()}
 
-def main(base_data_dir, tasks, train_size, val_size, test_size, test_gen_size, image_size, seed):
+def main(data_dir, tasks, train_size, val_size, test_size, test_gen_size, image_size, seed):
     """
     Generate CVR data.
 
     Args:
-        base_data_dir (str): where to save the generated data
+        data_dir (str): where to save the generated data
         tasks (str, list, int): tasks to generate
         train_size (int): number of training examples to generate per task
         val_size (int): number of validation examples to generate per task
@@ -140,8 +140,7 @@ def main(base_data_dir, tasks, train_size, val_size, test_size, test_gen_size, i
           image_size {image_size}
         """)
 
-    # Create folder
-    data_dir = f"{base_data_dir}_{image_size}x{image_size}"
+    # Create folder if it does not exist
     if not os.path.exists(data_dir):
         os.makedirs(data_dir)
 
@@ -210,12 +209,13 @@ if __name__ == '__main__':
 
     # Parameters
     train_size = 1000  # originally: 10000
-    val_size = 500  # originally
+    val_size = 500  # originally: 500
     test_size = 1000    # originally: 1000
-    test_gen_size = 1000    # originally
+    test_gen_size = 1000    # originally: 500
     image_size = 64 # originally: 128
     seed = 1997
-    base_data_dir = './generated_data'
+    data_dir = f"./generated_data_{image_size}x{image_size}"
+
 
     # Tasks to generate
     elem_tasks_considered = ["task_pos", "task_rot", "task_count", "task_color"]
@@ -228,4 +228,4 @@ if __name__ == '__main__':
     # tasks = 0 # single task
 
     # Generate data
-    main(base_data_dir, tasks, train_size, val_size, test_size, test_gen_size, image_size, seed)
+    main(data_dir, tasks, train_size, val_size, test_size, test_gen_size, image_size, seed)
