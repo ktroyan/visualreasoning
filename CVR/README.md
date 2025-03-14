@@ -17,5 +17,6 @@ Associated paper: [A Benchmark for Efficient and Compositional Visual Reasoning]
 
  
 # License
+The CVR code used (and modified) is located in the `/external` folder.
 
 CVR is released under the Apache License, Version 2.0.
