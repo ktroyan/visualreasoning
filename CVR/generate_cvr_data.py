@@ -1,9 +1,14 @@
+"""
+This file can be used as a script or its main function can be called. 
+In both cases, its purpose is to generate CVR data.
+"""
+
 import os
 
 # Personal codebase dependencies
-from tasks import TASKS
-from generalization_tasks import TASKS as TASKS_GEN
-from generate_dataset import generate_dataset
+from external.tasks import TASKS
+from external.generalization_tasks import TASKS as TASKS_GEN
+from external.generate_dataset import generate_dataset
 
 ALL_TASKS_ID_TO_NAME = {
     # elementary

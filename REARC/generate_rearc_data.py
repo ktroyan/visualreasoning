@@ -1,11 +1,16 @@
-# NOTE: currently, the script would overwrite the data if an already existing file is used.
+"""
+This file can be used as a script or its main function can be called. 
+In both cases, its purpose is to generate REARC data.
+"""
 
 # Personal codebase dependencies
-from main import generate_dataset
+from external.main import generate_dataset
 
 def main(base_data_dir, seed, n_tasks, n_examples, difficulties_lb, difficulties_ub, specific_tasks):
     """
     Generate REARC data.
+
+    NOTE: this function overwrites the data if an already existing file is used.
 
     Args:
         path (str): where to save the generated data
