@@ -3,12 +3,13 @@ import time
 import yaml
 import glob
 import datetime
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from PIL import Image
+import torch
 from torchvision import transforms as tvt
 from omegaconf import OmegaConf
+import matplotlib.pyplot as plt
 from typing import Dict
 
 # Personal codebase dependencies
@@ -199,6 +200,24 @@ def generate_timestamped_experiment_name(exp_basename):
     experiment_name = f"{exp_basename}_{timestamp}"
     return experiment_name
 
+def save_model_metadata_for_ckpt(save_folder, model):
+    """
+    Save the model class and all the config arguments used to create the model and save it in the current (timestamped) experiment folder.
+    This allows us to load the model module/class and config arguments in order to be able to easily load a model from a checkpoint only.
+
+    Args:
+        save_folder (str): the folder in which to save the metadata .pth (dict) file
+        model (pl.LightningModule): the model to save metadata for
+    """
+
+    metadata_for_ckpt = {
+    "model_module_name": model.__class__.__name__,
+    "hparams": model.hparams    # in fact not necessary to load the hparams as they are already saved in the checkpoint
+    }
+
+    torch.save(metadata_for_ckpt, os.path.join(save_folder, "metadata_for_ckpt.pth"))
+    logger.info("Model metadata saved for future checkpoint use.")
+
 def find_most_recent_experiment_folder(directory):
     # Search for the the most recent "experiment_" folder in the given directory
     folders = [os.path.join(directory, d) for d in os.listdir(directory) if (os.path.isdir(os.path.join(directory, d)) and "experiment_" in d)]
@@ -228,6 +247,25 @@ def get_latest_ckpt(directory):
 
     latest_ckpt = max(ckpt_files, key=os.path.getmtime)
     return latest_ckpt
+
+def get_model_from_ckpt(model_ckpt_path):
+    import models   # import the models module here to avoid circular imports
+
+    # Get the model class and hparams arguments from the metadata file
+    metadata_path = os.path.join(os.path.dirname(model_ckpt_path), "metadata_for_ckpt.pth")
+    metadata_for_ckpt = torch.load(metadata_path, weights_only=False)
+
+    model_module_name = metadata_for_ckpt["model_module_name"]
+    # hparams = metadata_for_ckpt["hparams"]    # in fact not necessary to load the hparams as they are already saved in the checkpoint
+
+    # Load the model module
+    model_module = vars(models)[model_module_name]
+    # model = model_module(**hparams)    # in fact not necessary to load the hparams as they are already saved in the checkpoint
+
+    # Load the model
+    model = model_module.load_from_checkpoint(model_ckpt_path)
+
+    return model
 
 def plot_lr_schedule(lr_values):
     plt.figure(figsize=(10, 5))
