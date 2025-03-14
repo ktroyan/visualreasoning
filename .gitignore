@@ -1,18 +1,14 @@
 ### General
 
-## venv
-vis-reas_venv/
 
 ### Files at root
 notes.txt
 lightning_logs/
 requirements_backup.txt
 
-### Lab ###
-lab/
-
 
 ### CVR ###
+/CVR/external
 /CVR/generated_data
 /CVR/generated_data_64x64
 /CVR/generated_data_128x128
@@ -22,6 +18,7 @@ lab/
 
 
 ### REARC ###
+/REARC/external
 /REARC/experiments
 /REARC/arc_original
 /REARC/generated_data
@@ -32,12 +29,29 @@ lab/
 
 
 ### BEFOREARC ###
-/BEFOREARC
 
-# VSCode
+## lab
+lab/
+
+## configs
+
+## data
+
+## models
+
+## networks
+
+## utility
+
+## jobs
+
+
+## VSCode
 .vscode/
 
-##########
+
+
+########## DEFAULT ##########
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
