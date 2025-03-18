@@ -1,7 +1,5 @@
 import os
-import sys
 import time
-import argparse
 import pandas as pd
 import torch
 import pytorch_lightning as pl
@@ -9,7 +7,7 @@ import pytorch_lightning as pl
 # Personal codebase dependencies
 import data
 import models
-from utility.utils import get_complete_config, log_config_dict
+from utility.utils import get_complete_config, log_config_dict, get_model_from_ckpt
 from utility.logging import logger
 
 torch.set_float32_matmul_precision('medium')
@@ -81,30 +79,34 @@ def process_test_results(config, test_results, test_type="test", exp_logger=None
 
     return processed_test_results
 
-def main(config, datamodule, model, model_ckpt_path=None, exp_logger=None):
+def main(config, datamodule, model=None, model_ckpt_path=None, exp_logger=None):
 
     logger.info("*** Inference started ***")
     inference_start_time = time.time()
 
-    trainer = pl.Trainer(num_nodes=1,
-                         logger=exp_logger, 
+    trainer = pl.Trainer(num_nodes=1,   # number of gpu nodes for distributed training
+                         logger=exp_logger,
                          devices=config.base.gpus,
                          accelerator='auto',
                          enable_progress_bar=True,
                         )
 
     # Model
-    if model_ckpt_path is not None:
-        model_module = model.__class__
-        model = model_module.load_from_checkpoint(model_ckpt_path)
+    if model is not None:
+        log_message = f"A specific model instance from class {model.__class__} was given for inference.\n\n"
+        # log_message += f"Model: {model}\n"
+        log_message += "No model checkpoint is used."
+        logger.info(log_message)
+    
+    elif model_ckpt_path is not None:
+        model = get_model_from_ckpt(model_ckpt_path)
         log_message = f"Model loaded from checkpoint for inference: {model_ckpt_path}\n\n"
         # log_message += f"Model: {model}\n"
         logger.info(log_message)
 
     else:
-        log_message = f"Model instance from class {model.__class__} was given for inference.\n\n"
-        # log_message += f"Model: {model}\n"
-        logger.info(log_message)
+        raise ValueError("No model instance or model checkpoint path was given for inference.")
+
 
     logger.info(f"All hyperparameters of the model used for inference:\n{model.hparams} \n")
 
@@ -142,7 +144,7 @@ if __name__ == '__main__':
     logger.info(f"inference.py process ID: {os.getpid()}")
 
     # Get and log all the config arguments
-    config = get_complete_config()
+    config, _ = get_complete_config()
     log_config_dict(config)
 
     # Seed everything for reproducibility
@@ -155,11 +157,14 @@ if __name__ == '__main__':
     logger.info(f"Data module instantiated. Now showing the total number of samples per dataloader:\n{datamodule}\n")
 
     # Model chosen
-    model_module = vars(models)[config.base.model_module]
-    model = model_module(config.model, config.backbone_network, config.head_network)   # initialize the model with the model and network configs
-    logger.trace(f"Model chosen for training: {model}")
+    model_ckpt = config.inference.inference_model_ckpt
+    if model_ckpt is not None and model_ckpt != "":
+        logger.info(f"Model checkpoint path chosen for inference: {model_ckpt}")
+        model = None
+    else:
+        model_module = vars(models)[config.base.model_module]
+        model = model_module(config.model, config.backbone_network, config.head_network)   # initialize the model with the model and network configs
+        logger.info(f"Model chosen for inference w.r.t. the current config files: {model}")
+    
 
-    # --> TODO: currently, the model initialized should match the model checkpoint used for inference.
-    # We should for example add the model class with the correct config (used to created the instance of the model checkpoint) used to the checkpoint folder so that a checkpoint can be loaded properly
-    # Then we will be able to load a model from a checkpoint and use it for inference. Maybe a better way to solve the issue?
-    test_results = main(config, datamodule, model, config.inference.inference_model_ckpt, exp_logger=None)
+    test_results = main(config, datamodule, model, model_ckpt, exp_logger=None)

@@ -1,7 +1,14 @@
 backbone_network:
   name: 'vit'
   embed_dim: 384  # 384 for small, 768 for base
-  num_layers: 12
-  num_heads: 8  # 12
-  mlp_ratio: 4  # TODO: think of implementing the explicit relationship with ff_dim (used in Transformer)?
+  num_heads: 6  # 8
+  mlp_ratio: 4  # used instead of explicit ff_dim
   qkv_bias: true
+  num_layers: 8  # 12
+  ape_dropout_rate: 0.0
+  attn_dropout_rate: 0.0
+  attn_proj_dropout_rate: 0.0
+  ff_dropout_rate: 0.0
+  init_weights_cfg:
+    type: 'xavier'
+    distribution: 'uniform'

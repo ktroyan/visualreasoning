@@ -1,7 +1,8 @@
 data:
   dataset_dir: './${base.data_env}/final_datasets/${experiment.study}/${experiment.setting}/${experiment.name}'
+  image_size: ${resolve_data_env_img_size:${base.data_env},null}  # if CVR, the default 128 is used. If REARC the set value is used (null means that the value is inferred from the data)
   num_workers: 4
-  train_batch_size: 32
+  train_batch_size: 64
   val_batch_size: 50
   test_batch_size: 50
   transform:

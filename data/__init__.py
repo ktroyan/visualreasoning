@@ -1,9 +1,7 @@
-from data.cvr_vision_data import CVRVisionDataModule
-from data.rearc_vision_data import REARCVisionDataModule
-from data.rearc_seq2seq_data import REARCSeq2SeqDataModule
+from data.cvr_data import CVRDataModule
+from data.rearc_data import REARCDataModule
 
 __all__ = [
-    'CVRVisionDataModule',
-    'REARCVisionDataModule',
-    'REARCSeq2SeqDataModule'
+    'CVRDataModule',
+    'REARCDataModule'
 ]

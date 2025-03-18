@@ -3,10 +3,12 @@ model:
   head: 'mlp'  # choices: 'mlp'
   pretrained: null
   patch_size: 16
-  pos_embed: 'learn'  # choices: 'learn', '' (TODO: for no PE or fixed PE?)
-  use_cls_token: true # whether to use a cls token or not
-  nb_reg_tokens: 0
-  global_pool_method: 'token' # choices: '' (for no pooling and returning a sequence), 'mean', 'max', 'token' (for aggretating features and returning the cls token)
+  ape_type: 'learn'  # choices: 'learn', '2dsincos'; absolute positional encoding
+  use_cls_token: false # whether to use a cls token or not
+  num_reg_tokens: 0
+  encoder_aggregation:
+    enabled: true
+    method: 'token' # choices: '' (for no pooling and returning a sequence), 'mean', 'max', 'token' (for aggregating features and returning the cls token)
   n_tasks: 103    # NOTE: this is used for the task embedding (i.e., to inform the model through an embedding of which tasks to consider)
   task_embedding:
     enabled: false

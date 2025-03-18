@@ -12,7 +12,7 @@ import data
 import models
 import training
 import inference
-from utility.utils import generate_timestamped_experiment_name, log_config_dict, get_complete_config
+from utility.utils import log_config_dict, get_complete_config, generate_timestamped_experiment_name, save_model_metadata_for_ckpt
 from utility.logging import logger
 
 torch.backends.cudnn.benchmark = False
@@ -34,29 +34,36 @@ def main() -> None:
     if config.base.seed is not None:
         pl.seed_everything(config.base.seed)
 
-    # Data chosen
-    data_module = vars(data)[config.base.data_module]
-    datamodule = data_module(config.data)   # initialize the data with the data config
-    logger.info(f"Data module instantiated. Now showing the total number of samples per dataloader:\n{datamodule}\n")
-
-    # Model chosen
-    model_module = vars(models)[config.base.model_module]
-    model = model_module(config.model, config.backbone_network, config.head_network)   # initialize the model with the model and network configs
-    logger.trace(f"Model chosen for training: {model}")
-
     # Setup experiment folders
     experiment_name_timestamped = generate_timestamped_experiment_name(config.experiment.name)
     experiment_folder = config.experiment.experiments_dir + f"/{experiment_name_timestamped}"
     os.makedirs(experiment_folder, exist_ok=True)
 
+    # Data chosen
+    data_module = vars(data)[config.base.data_module]
+    datamodule = data_module(config.data)   # initialize the data with the data config
+    logger.info(f"Data module instantiated. Now showing the total number of samples per dataloader:\n{datamodule}\n")
+
+    # Get the image size from the datamodule. Useful for the model backbone
+    image_size = datamodule.image_size
+    logger.info(f"Max. image size considered (with padding): {image_size}")
+
+    # Model chosen
+    model_module = vars(models)[config.base.model_module]
+    model = model_module(config.model, config.backbone_network, config.head_network, image_size)   # initialize the model with the model and network configs
+    logger.trace(f"Model chosen for training: {model}")
+    
+    # Save the model metadata for future checkpoint use
+    save_model_metadata_for_ckpt(experiment_folder, model)
+
     # Initialize WandB project tracking with config config
-    wandb.init(
-    project=config.wandb.wandb_project_name,
-    entity=config.wandb.wandb_entity_name,
-    dir=experiment_folder,
-    name=experiment_name_timestamped,
-    config=config
-    )
+    run = wandb.init(
+        project=config.wandb.wandb_project_name,
+        entity=config.wandb.wandb_entity_name,
+        dir=experiment_folder,
+        name=experiment_name_timestamped,
+        config=config
+        )
 
     # Initialize the experiment logger
     if config.experiment.exp_logger == 'wandb':
@@ -65,12 +72,14 @@ def main() -> None:
         logger.warning(f"Experiment logger {config.experiment.exp_logger} not recognized. The experiment logger is set to Null. Otherwise, choose 'wandb'.")
         exp_logger = None
 
+
     # Training
     trainer, best_model, best_model_ckpt, train_results = training.main(config, 
                                                                          experiment_folder, 
                                                                          datamodule, 
                                                                          model, 
                                                                          exp_logger)
+
 
     # Testing
     all_test_results = inference.main(config, 
@@ -79,8 +88,9 @@ def main() -> None:
                                   model_ckpt_path=None, # we use the best model found during training, so no need to specify a checkpoint path
                                   exp_logger=exp_logger)
     
+
     # End the wandb run
-    wandb.finish()
+    run.finish()
 
     # Time taken for the experiment
     log_message = "*** Experiment ended ***\n"
@@ -89,7 +99,6 @@ def main() -> None:
     logger.info(log_message)
 
     # Save the results and config arguments that we are the most interested to check quickly when experimenting
-    # TODO: only consider the relevant config and results
     exp_results_dict = {
         'experiments_dir': config.experiment.experiments_dir,
         'exp_name': experiment_name_timestamped,

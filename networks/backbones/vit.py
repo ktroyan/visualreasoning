@@ -35,10 +35,10 @@ class Vit(VisionTransformer):
                  mlp_ratio=4.,
                  qkv_bias=True,
                  norm_layer=None,
-                 pos_embed='',
+                 ape='',
                  use_cls_token=True,
                  reg_tokens=0,
-                 global_pool='',
+                 cls_aggreg_method='',
                  ):
         
         super().__init__(img_size=img_size,
@@ -51,9 +51,9 @@ class Vit(VisionTransformer):
                          mlp_ratio=mlp_ratio,
                          qkv_bias=qkv_bias,
                          norm_layer=norm_layer,
-                         pos_embed=pos_embed,  # NOTE: the only choice from timm is 'learn' (or '' ?)
+                         pos_embed=ape,  # NOTE: the only choice from timm is 'learn' (or '' ?)
                          class_token=use_cls_token,
-                         global_pool=global_pool
+                         cls_aggreg_method=cls_aggreg_method
                          )
         
         self.use_cls_token = use_cls_token
@@ -141,10 +141,10 @@ def get_vit(model_config, backbone_network_config, img_size, num_channels, num_c
         mlp_ratio=backbone_network_config['mlp_ratio'], 
         qkv_bias=backbone_network_config['qkv_bias'],
         norm_layer=partial(nn.LayerNorm, eps=1e-6),
-        pos_embed=model_config['pos_embed'],
+        pos_embed=model_config['ape'],
         use_cls_token=model_config['use_cls_token'],  # whether to use or not the cls token
-        reg_tokens=model_config['nb_reg_tokens'],  # number of register tokens
-        global_pool=model_config['global_pool_method'],  # "" for no global pooling to get a sequence as output, "mean" for global average pooling, "token" for using the [cls] token to aggregate features
+        reg_tokens=model_config['num_reg_tokens'],  # number of register tokens
+        global_pool=model_config['cls_aggreg_method'],  # "" for no global pooling to get a sequence as output, "mean" for global average pooling, "token" for using the [cls] token to aggregate features
         )
 
     # TODO: should we use that default config? Does not seem useful, as it is devised for 1K-ImageNet

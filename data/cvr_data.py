@@ -4,15 +4,14 @@ import pandas as pd
 from PIL import Image
 from torch.utils.data import Dataset
 from torchvision import transforms as tvt
-import numpy as np
 
 # Personal codebase dependencies
 from data.data_base import DataModuleBase
+from utility.cvr.utils import compute_dataset_stats
 from utility.logging import logger
-from utility.utils import compute_dataset_stats
 
 
-class CVRVisionDataset(Dataset):
+class CVRDataset(Dataset):
     def __init__(self, csv_dataset_path, image_size=128, transform=None):
         super().__init__()
 
@@ -57,7 +56,7 @@ class CVRVisionDataset(Dataset):
         return sample, sample_task_id
 
 
-class CVRVisionDataModule(DataModuleBase):
+class CVRDataModule(DataModuleBase):
 
     def __init__(self, data_config, image_size=128, **kwargs):
 
@@ -74,19 +73,24 @@ class CVRVisionDataModule(DataModuleBase):
         test_set_path = data_config.dataset_dir + '/test.csv'
 
         if data_config.transform.enabled:
-            dataset_mean_global, dataset_std_global, _, _ = compute_dataset_stats(train_set_path)
-            transform = self._transforms(dataset_mean_global, dataset_std_global)
+            # Compute the mean and std for normalization
+            # dataset_mean_global, dataset_std_global, _, _ = compute_dataset_stats(train_set_path)
+
+            # Use the mean and std normalization values from the CVR codebase
+            # transform = self._transforms(dataset_mean_global, dataset_std_global)
+
+            transform = self._transforms()
         else:
             transform = None
 
         # Create the torch Dataset objects that will then be used to create the dataloaders
-        self.train_set = CVRVisionDataset(train_set_path, image_size=image_size, transform=transform)
-        self.val_set = CVRVisionDataset(val_set_path, image_size=image_size, transform=transform)
-        self.test_set = CVRVisionDataset(test_set_path, image_size=image_size, transform=transform)
+        self.train_set = CVRDataset(train_set_path, image_size=image_size, transform=transform)
+        self.val_set = CVRDataset(val_set_path, image_size=image_size, transform=transform)
+        self.test_set = CVRDataset(test_set_path, image_size=image_size, transform=transform)
 
         if data_config.use_gen_test_set:
             gen_test_set_path = data_config.dataset_dir + '/test_gen.csv'
-            self.gen_test_set = CVRVisionDataset(gen_test_set_path, image_size=image_size, transform=transform)
+            self.gen_test_set = CVRDataset(gen_test_set_path, image_size=image_size, transform=transform)
 
     # TODO: How did they choose mean of 0.9 and std of 0.1 ?
     # TODO: Check if the mean and std are computed and used correctly

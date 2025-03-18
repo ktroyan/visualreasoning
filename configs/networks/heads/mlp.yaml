@@ -1,5 +1,6 @@
 head_network:
   name: 'mlp'
-  # n_layers: 2
+  embed_dim: 128
   hidden_dim: 128
   activation: 'relu'
+  # n_layers: 2

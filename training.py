@@ -15,6 +15,8 @@ from utility.logging import logger
 torch.backends.cudnn.benchmark = False
 torch.backends.cudnn.deterministic = False
 torch.set_float32_matmul_precision('medium')
+os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+os.environ['TORCH_USE_CUDA_DSA'] = 'true'
 
 class MetricsCallback(Callback):
     """A PyTorch Lightning callback to handle and store metrics during the training process.
@@ -182,7 +184,7 @@ def train(config, model, datamodule, callbacks, exp_logger=None, checkpoint_path
                         )
 
     # Compile the model for improved performance
-    # NOTE: without specifying the backend, it seems to fail on my NVIDIA RTX 3070 (Laptop) GPU
+    # NOTE: without specifying the backend as 'eager', it seems to fail on my NVIDIA RTX 3070 (Laptop) GPU
     # model = torch.compile(model, backend='eager')
 
     trainer.fit(model, datamodule, ckpt_path=checkpoint_path)
@@ -262,7 +264,7 @@ if __name__ == '__main__':
     logger.info(f"training.py process ID: {os.getpid()}")
 
     # Get and log all the config arguments
-    config = get_complete_config()
+    config, _ = get_complete_config()
     log_config_dict(config)
 
     # Seed everything for reproducibility

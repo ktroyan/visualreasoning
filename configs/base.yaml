@@ -2,6 +2,5 @@ base:
   seed: 1997
   gpus: 1 # number of GPUs to use
   data_env: 'REARC' # choices: 'REARC', 'CVR'
-  problem_approach: 'Seq2Seq'  # choices: 'Vision', 'Seq2Seq'
-  data_module: "${base.data_env}${base.problem_approach}DataModule"
-  model_module: "${base.data_env}${base.problem_approach}Model"
+  data_module: "${base.data_env}DataModule"
+  model_module: "${base.data_env}Model"

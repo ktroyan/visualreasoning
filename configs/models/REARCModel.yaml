@@ -1,0 +1,25 @@
+model:
+  backbone: 'transformer'  # choices: 'my_vit', 'transformer', 'resnet'
+  head: 'transformer'  # choices: 'transformer' (for transformer-based backbone), 'mlp' (for resnet backbone)
+  pretrained: null
+  patch_size: 1
+  use_ohe_repr: false # if True, use OHE for the possible tokens thus yielding as many artificial channels as there are different possible tokens; if False, use a simple sequence of tokens with an artificial channel only created to use convolution for linear projection of patches/pixels/tokens
+  ape_type: 'learn'  # choices: 'learn', '2dsincos'; absolute positional encoding
+  use_cls_token: false # whether to use a cls token or not
+  num_reg_tokens: 0
+  encoder_aggregation:
+    enabled: false
+    method: '' # choices: '' (for no pooling and returning a sequence), 'mean', 'max', 'token' (for aggregating features and returning the cls token)
+  n_tasks: 400    # used for the task embedding (i.e., to inform the model through an embedding of which tasks to consider)
+  task_embedding:
+    enabled: false
+    task_embedding_dim: ${resolve_if_then_else:${model.task_embedding.enabled},128}
+  output_embed_dim: 128
+  training_hparams:
+    optimizer: 'Adam' # choices: Adam, AdamW, SGD
+    scheduler: 'ReduceLROnPlateau' # choices: ReduceLROnPlateau, StepLR, MultiStepLR, ExponentialLR, CosineAnnealingLR
+    lr: 0.001
+    wd: 0.001
+  observe_preds:
+    enabled: True
+    n_samples: 4
