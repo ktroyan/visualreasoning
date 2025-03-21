@@ -8,7 +8,6 @@ requirements_backup.txt
 
 
 ### CVR ###
-/CVR/external
 /CVR/generated_data
 /CVR/generated_data_64x64
 /CVR/generated_data_128x128
@@ -18,7 +17,7 @@ requirements_backup.txt
 
 
 ### REARC ###
-/REARC/external
+/REARC/external/arc_original
 /REARC/experiments
 /REARC/arc_original
 /REARC/generated_data
@@ -29,6 +28,10 @@ requirements_backup.txt
 
 
 ### BEFOREARC ###
+
+
+## figs
+/figs
 
 ## lab
 lab/
