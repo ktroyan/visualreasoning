@@ -28,9 +28,12 @@ class REARCDataset(Dataset):
         self.max_img_size = image_size  # if we want to pad to a fixed size given as argument
 
 
-    # TODO: what value should the padding be? Some str symbol such as "<pad_token>" or simply some int such as 0?
     def pad_tensor(self, x: torch.Tensor, pad_value: int) -> torch.Tensor:
-        """ Pad the 2D input tensor x to the desired fixed size with the given pad value """
+        """ 
+        Pad the 2D input tensor x to the desired fixed size with the given pad value 
+
+        TODO: What value should the padding take for convenience? Some str symbol such as "<pad_token>" or simply some int such as 11?
+        """
         x_padded = F.pad(
             x, 
             (0, self.max_img_size - x.shape[1],  # pad width dim (left, right)
@@ -38,11 +41,6 @@ class REARCDataset(Dataset):
             value=pad_value  # padding value
         )
         return x_padded
-
-    # Simplest tokenization of a 2D tensor function: just flatten the tensor
-    def tokenize_tensor(self, x):
-        x = x.view(-1).float()  # seq_len = H*W
-        return x
 
     def __len__(self):
         return self.n_samples
@@ -83,9 +81,9 @@ class REARCDataset(Dataset):
 def get_max_grid_size(df, columns=["input", "output"]):
     
     def get_grid_size(grid):
-        if not grid:  # Handle empty cases
+        if not grid:  # handle empty grid
             return (0, 0)
-        height = len(grid)  # Number of rows
+        height = len(grid)  # number of rows
         width = len(grid[0]) if height > 0 else 0  # width of the first row; NOTE: all rows of a same sample input/output are assumed to have the same width since otherwise it is not a rectangular grid image
         return height, width
 
@@ -118,6 +116,7 @@ class REARCDataModule(DataModuleBase):
     def __init__(self, data_config, **kwargs):
 
         super().__init__(data_config.num_workers,
+                         data_config.shuffle_train_dl,
                          data_config.train_batch_size, 
                          data_config.val_batch_size, 
                          data_config.test_batch_size, 

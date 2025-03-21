@@ -6,9 +6,11 @@ from utility.logging import logger
 
 class DataModuleBase(LightningDataModule):
 
-    def __init__(self, num_workers, train_batch_size, val_batch_size, test_batch_size, test_in_and_out_domain=False):
+    def __init__(self, num_workers, shuffle_train_dl, train_batch_size, val_batch_size, test_batch_size, test_in_and_out_domain=False):
         super().__init__()
 
+        self.shuffle_train_dl = shuffle_train_dl
+    
         self.train_batch_size = train_batch_size
         self.val_batch_size = val_batch_size
         self.test_batch_size = test_batch_size
@@ -28,7 +30,7 @@ class DataModuleBase(LightningDataModule):
         train_loader = DataLoader(
             self.train_set,
             batch_size=self.train_batch_size,
-            shuffle=True,
+            shuffle=self.shuffle_train_dl,
             num_workers=self.num_workers,
             persistent_workers=True,
             pin_memory=True,
