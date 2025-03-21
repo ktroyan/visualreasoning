@@ -5,6 +5,7 @@ import torch
 import pytorch_lightning as pl
 from pytorch_lightning.loggers.wandb import WandbLogger
 import wandb
+import matplotlib
 from typing import Any, Dict, List, Tuple
 
 # Personal codebase dependencies
@@ -12,7 +13,7 @@ import data
 import models
 import training
 import inference
-from utility.utils import log_config_dict, get_complete_config, generate_timestamped_experiment_name, save_model_metadata_for_ckpt
+from utility.utils import log_config_dict, get_complete_config, generate_timestamped_experiment_name, save_model_metadata_for_ckpt, copy_folder
 from utility.logging import logger
 
 torch.backends.cudnn.benchmark = False
@@ -50,7 +51,7 @@ def main() -> None:
 
     # Model chosen
     model_module = vars(models)[config.base.model_module]
-    model = model_module(config.model, config.backbone_network, config.head_network, image_size)   # initialize the model with the model and network configs
+    model = model_module(config.base, config.model, config.backbone_network, config.head_network, image_size)   # initialize the model with the model and network configs
     logger.trace(f"Model chosen for training: {model}")
     
     # Save the model metadata for future checkpoint use
@@ -98,6 +99,11 @@ def main() -> None:
     log_message += f"\nTotal experiment time: \n{exp_elapsed_time} seconds ~=\n{exp_elapsed_time/60} minutes ~=\n{exp_elapsed_time/(60*60)} hours"
     logger.info(log_message)
 
+    # Save the figures produced in the /figs folder during the experiment to the experiment folder
+    experiment_figs_folder = f"{experiment_folder}/figs"
+    os.makedirs(experiment_figs_folder, exist_ok=True)
+    copy_folder("./figs", experiment_figs_folder)   # copy everything in the /figs folder to the current experiment folder
+
     # Save the results and config arguments that we are the most interested to check quickly when experimenting
     exp_results_dict = {
         'experiments_dir': config.experiment.experiments_dir,
@@ -143,5 +149,7 @@ def main() -> None:
 
 if __name__ == '__main__':
     logger.info(f"experiment.py process ID: {os.getpid()}")
+
+    matplotlib.use('Agg')   # prevent the matplotlib GUI pop-ups from stealing focus
 
     main()
