@@ -24,6 +24,7 @@ dependencies = [
     "omegaconf",
     "jupyter",
     "ipykernel",
+    "seaborn>=0.13.2",
 ]
 
 [tool.uv.sources]
