@@ -5,6 +5,7 @@ import pytorch_lightning as pl
 
 # Personal codebase dependencies
 from networks.backbones.vit import get_vit
+from networks.backbones.my_vit import get_my_vit
 from networks.backbones.resnet import get_resnet
 from networks.heads.mlp import get_mlp_head
 from utility.utils import plot_lr_schedule  # noqa: F401
@@ -12,17 +13,28 @@ from utility.logging import logger
 
 
 class VisReasModel(pl.LightningModule):
-    def __init__(self):
+    def __init__(self, model_config, image_size):
         super().__init__()
 
+        self.model_config = model_config
+        self.img_size = image_size
+
         self.train_preds = []
-        self.train_labels = []
+        self.train_targets = []
         self.val_preds = []
-        self.val_labels = []
+        self.val_targets = []
         self.test_preds = []
-        self.test_labels = []
+        self.test_targets = []
         self.gen_test_preds = []
-        self.gen_test_labels = []
+        self.gen_test_targets = []
+
+        # Not used for now
+        self.train_loss_step = []
+        self.train_acc_step = []
+        self.train_grid_acc_step = []
+        self.val_loss_step = []
+        self.val_acc_step = []
+        self.val_grid_acc_step = []
 
         self.test_step_results = [] # NOTE: this is needed to store the results of the test step for each batch (i.e., at each step), and display the final results at the end of the epoch
         self.gen_test_step_results = [] # NOTE: this is needed to store the results of the generalization test step for each batch (i.e., at each step), and display the final results at the end of the epoch
@@ -37,11 +49,9 @@ class VisReasModel(pl.LightningModule):
         for param in self.model_backbone.parameters():
             param.requires_grad = False
 
-    # TODO: optimize method for speed. E.g.: remove logging statements, remove unnecessary code such as the variable affectation of nb_images_in_one_sample and of y, put somewhere else the creation of artificial labels
-    # So, create the artificial label at random for all samples before training, as doing it at each step decreases performance unnecessarily?
     def shared_step(self, batch):
         # The input batch is a tuple of 2 elements (samples, labels), where a label is the task name
-        x, samples_task_id = batch  # ([B, nb_images_in_one_sample, C, H, W], B)
+        x, samples_task_id = batch  # ([B, nb_images_in_one_sample, C, H, W], [B])
 
         x_shape = x.shape    # B x nb_images in the sample (4) x C (3) x H (128) x W (128)
 
@@ -83,7 +93,7 @@ class VisReasModel(pl.LightningModule):
         loss, logs = self.step(batch, batch_idx)
 
         self.train_preds.append(logs.pop('preds'))
-        self.train_labels.append(logs.pop('y'))
+        self.train_targets.append(logs.pop('y'))
 
         self.log_dict({f"metrics/train_{k}": v for k,v in logs.items()}, prog_bar=True, logger=True, on_step=True, on_epoch=True)    # NOTE: this is monitored for best checkpoint and early stopping
         
@@ -93,7 +103,7 @@ class VisReasModel(pl.LightningModule):
         loss, logs = self.step(batch, batch_idx)
 
         self.val_preds.append(logs.pop('preds'))
-        self.val_labels.append(logs.pop('y'))
+        self.val_targets.append(logs.pop('y'))
 
         self.log_dict({f"metrics/val_{k}": v for k, v in logs.items()}, prog_bar=True, logger=True, on_step=True, on_epoch=True)    # NOTE: this is monitored for best checkpoint and early stopping
         self.log_dict({"learning_rate": self.lr_schedulers().get_last_lr()[-1]}, prog_bar=True, logger=True, on_step=True, on_epoch=True)    # NOTE: this is monitored for best checkpoint and early stopping. This yields learning_rate in the logs
@@ -112,7 +122,7 @@ class VisReasModel(pl.LightningModule):
 
         if dataloader_idx == 0:
             self.test_preds.append(preds)
-            self.test_labels.append(y)
+            self.test_targets.append(y)
 
             results = {f"test_{k}": v for k, v in logs.items()}
             self.log_dict(results, logger=True, prog_bar=True)  # log metrics for progress bar visualization
@@ -120,7 +130,7 @@ class VisReasModel(pl.LightningModule):
 
         elif dataloader_idx == 1:
             self.gen_test_preds.append(preds)
-            self.gen_test_labels.append(y)
+            self.gen_test_targets.append(y)
 
             # TODO: currently in the code we assume that if there is only one dataloader, it will be considered as a test dataloader and not a gen test dataloader even though the data may be of systematic generalization. Fix this to be better maybe?
             results = {f"gen_test_{k}": v for k, v in logs.items()}
@@ -232,16 +242,16 @@ class VisReasModel(pl.LightningModule):
 # Vision approach
 class CVRModel(VisReasModel):
 
-    def __init__(self, model_config, backbone_network_config, head_network_config, **kwargs):
+    def __init__(self, base_config, model_config, backbone_network_config, head_network_config, image_size, **kwargs):
 
         # Save the hyperparameters so that they can be stored in the model checkpoint when using torch.save()
         self.save_hyperparameters() # saves all the arguments (kwargs too) of __init__() to the variable hparams
 
-        super().__init__()
+        super().__init__(model_config=model_config, image_size=image_size)
 
         self.model_config = model_config
 
-        self.img_size = 128
+        self.image_size = image_size
         self.num_channels = 3
         self.num_classes = 4
         self.nb_images_in_one_sample = 4
@@ -250,12 +260,35 @@ class CVRModel(VisReasModel):
 
         # Model backbone or encoder
         if model_config.backbone == "resnet":
-            self.model_backbone, bb_num_out_features = get_resnet(model_config, backbone_network_config)
+            self.encoder, bb_num_out_features = get_resnet(base_config=base_config,
+                                                           model_config=model_config,
+                                                           network_config=backbone_network_config,
+                                                           image_size=self.image_size,
+                                                           num_classes=self.num_classes,
+                                                           device=self.device
+                                                           )
             self.head_input_dim = bb_num_out_features
 
         elif model_config.backbone == "vit":
-            self.model_backbone, bb_num_out_features = get_vit(model_config, backbone_network_config, self.img_size, self.num_channels, self.num_classes)
+            self.encoder, bb_num_out_features = get_vit(base_config=base_config,
+                                                        model_config=model_config, 
+                                                        network_config=backbone_network_config,
+                                                        image_size=self.img_size,
+                                                        num_channels=self.num_channels,
+                                                        num_classes=self.num_classes
+                                                        )
             self.head_input_dim = bb_num_out_features
+
+        elif model_config.backbone == "my_vit":
+            self.encoder = get_my_vit(base_config=base_config,
+                                      model_config=model_config,
+                                      network_config=backbone_network_config,
+                                      image_size=self.image_size,
+                                      num_channels=self.num_channels,
+                                      num_classes=self.num_classes,
+                                      device=self.device
+                                      )
+            self.head_input_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
 
         elif model_config.backbone == "looped_vit":
             raise NotImplementedError("Looped ViT not implemented yet")
@@ -275,7 +308,7 @@ class CVRModel(VisReasModel):
 
 
         # Model head or decoder (depending on the backbone chosen)
-        if model_config.backbone in ["resnet", "vit"]: 
+        if model_config.backbone in ["resnet", "vit", "my_vit"]: 
             if model_config.dp_sim.enabled:
                 # NOTE: the approach here from the CVR code is to give feature embeddings (obtained from the backbone model)
                 # to the MLP head which will then create latent embeddings that are used to compute the pairwise dot products
@@ -298,7 +331,7 @@ class CVRModel(VisReasModel):
         x = x.reshape([x_shape[0]*self.nb_images_in_one_sample, x_shape[2], x_shape[3], x_shape[4]])    # [B*4, C, H, W]
 
         # Forward pass through the model backbone
-        x_encoded = self.model_backbone(x)  # [B*4, nb_features_backbone]
+        x_encoded = self.encoder(x)  # [B*4, nb_features_backbone]
 
         # Handle the task embedding if needed
         if samples_task_id is not None:

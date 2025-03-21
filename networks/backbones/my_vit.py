@@ -3,37 +3,17 @@ import torch.nn as nn
 
 # Personal codebase dependencies
 from utility.logging import logger
+from utility.utils import plot_absolute_positional_embeddings
+from utility.rearc.utils import one_hot_encode
 
 
 __all__ = ['get_my_vit']
 
 
-def one_hot_encode(x: torch.Tensor, num_categorical_values: int) -> torch.Tensor:
-    """
-    Performs One-Hot Encoding (OHE) on a 2D tensor with possible values/tokens: 0, ..., 9, <pad_token>, ..?
-    """
-    # TODO: How to OHE special tokens such as padding token? What about extra tokens such as cls and register tokens? Is my approach correct?
-    #       Moreover, we cannot perform the OHE in the data module, or in the model, right? Since we need to do it once we have the input with all the tokens that could appear.
-
-    if not isinstance(x, torch.Tensor):
-        raise TypeError("Input must be a PyTorch tensor")
-
-    if x.ndim != 2:
-        raise ValueError("Input tensor must be 2D (H, W)")
-
-    # Convert to one-hot representation
-    x_ohe = torch.nn.functional.one_hot(x, num_classes=num_categorical_values)  # [H, W, num_categorical_values]
-
-    # Reshape to get the number of possible categorical values, which is used as channels (C), as the first dimension
-    x_ohe = x_ohe.permute(2, 0, 1).float()  # [num_categorical_values, H, W] 
-
-    return x_ohe
-
 def create_relative_positional_encoding():
-    # TODO: See how to build and use the 2D RPE (relative positional encoding)
+    # TODO: See how to build and use the 2D RPE (relative positional encoding) in the Attention module.
     #       See ViTARC
     raise NotImplementedError("Relative Positional Encoding (RPE) not yet implemented")
-
 
 class PatchEmbed(nn.Module):
     """ 
@@ -45,30 +25,36 @@ class PatchEmbed(nn.Module):
     If num_token_categories is given (not None), the input is a 2D Tensor with possible token values that are represented as OHE artificial channels so that the tensor can be flattened and projected linearly (1x1 conv) to the embedding dimension.
     If num_token_categories is None, the input is a 2D Tensor for which we create an artificial single channel so that the tensor can be flattened and projected linearly (1x1 conv) to the embedding dimension.
     
+    Eseentially, giving num_token_categories is for REARC and BEFOREARC, not for CVR (as it is a continuous image space and not categorical values)
     """
-    def __init__(self, img_size, patch_size, in_channels, embed_dim, num_token_categories=None):
+    def __init__(self, base_config, img_size, patch_size, in_channels, embed_dim, num_token_categories=None):
         super().__init__()
 
-        # TODO: see with supervisors if it is correct to create patches (in the forward pass) without the extra tokens but to consider them still for the number of channels
-        self.num_token_categories = num_token_categories
-        if self.num_token_categories is not None:
-            self.in_channels = self.num_token_categories
-        else:
-            self.in_channels = in_channels
+        # TODO: See if it is correct to create patches (in the forward pass) without the extra tokens but to consider them still for the number of channels
 
+        self.base_config = base_config
+        if self.base_config.data_env == 'REARC':
+            self.num_token_categories = num_token_categories
+            if self.num_token_categories is not None:
+                in_channels = self.num_token_categories
+        else:
+            self.num_token_categories = None
+
+        # NOTE: The image is assumed to be square
         self.img_size = img_size
         self.patch_size = patch_size
-        self.num_patches = (img_size // patch_size) ** 2
+        self.grid_size = img_size // patch_size
+        self.num_patches = (self.grid_size) ** 2
         self.patch_proj = nn.Conv2d(in_channels=in_channels, out_channels=embed_dim, kernel_size=patch_size, stride=patch_size)
 
     def forward(self, x):
-        if self.in_channels == 1:
+        if self.base_config.data_env == 'REARC':
             if self.num_token_categories is not None:
                 x = one_hot_encode(x, self.num_token_categories)  # add a channel dimension for the input image: [B, C=num_token_categories, H, W] <-- [B, H, W]
             else:
                 x = x.unsqueeze(1)  # add a channel dimension for the input image: [B, C=1, H, W] <-- [B, H, W]
 
-        x = self.patch_proj(x)    # [B, embed_dim, H_out//patch_size, W_out//patch_size], where H_out = ((H-1)/1)+1) = H and W_out = ((W-1)/1)+1) = W if the spatial dimensions have not been reduced, by having patch_size=1 and stride=1
+        x = self.patch_proj(x)    # [B, embed_dim, H_out//patch_size, W_out//patch_size], where H_out = ((H-1)/1)+1) = H and W_out = ((W-1)/1)+1) = W if the spatial dimensions have not been reduced, by having patch_size=1 and stride=patch_size
         x = x.flatten(2) # [B, embed_dim, num_patches]  # flatten the spatial dimensions to get a sequence of patches
         x = x.transpose(1, 2)  # [B, num_patches, embed_dim], where num_patches = H*W = seq_len
         return x
@@ -89,7 +75,7 @@ def create_absolute_positional_encoding(ape_type: str, seq_len: int, embed_dim: 
         pos_embed.requires_grad = True    # NOTE: set to True for the PE to be learned
 
     elif ape_type == '2dsincos':    # 2D sin-cos fixed positional embedding
-        h, w = patch_embed.grid_size
+        h, w = (patch_embed.grid_size, patch_embed.grid_size)
         grid_w = torch.arange(w, dtype=torch.float32)
         grid_h = torch.arange(h, dtype=torch.float32)
         grid_w, grid_h = torch.meshgrid(grid_w, grid_h)
@@ -114,8 +100,10 @@ def create_absolute_positional_encoding(ape_type: str, seq_len: int, embed_dim: 
     else:
         raise ValueError(f"Invalid positional encoding type: {ape_type}. Choose from ['learn', '2dsincos']")
 
+    # Visualize PE
+    plot_absolute_positional_embeddings(pos_embed)
 
-    return pos_embed
+    return pos_embed    # [1, num_patches(+num_extra_tokens), embed_dim]
 
 
 class MHSA(nn.Module):
@@ -206,6 +194,7 @@ class VisionTransformer(nn.Module):
     """ Vision Transformer """
     def __init__(
             self,
+            base_config,
             model_config,
             network_config,
             image_size,
@@ -227,8 +216,7 @@ class VisionTransformer(nn.Module):
 
         self.num_all_tokens = 0     # essentially seq_len + extra tokens; number of tokens/positions in a sequence (i.e., the extra tokens are also accounted for)
 
-        if self.num_channels == 1:
-            # TODO: self.num_token_categories is only relevant for REARC. How to handle it since CVR could use this backbone?
+        if base_config.data_env == 'REARC':
             self.num_token_categories = self.num_classes  # REARC: 10 symbols (0-9) + 1 pad token (<pad_token>) [+ 1 cls token] + [1 register token]
 
         self.embed_dim = self.network_config.embed_dim
@@ -244,7 +232,7 @@ class VisionTransformer(nn.Module):
             self.cls_token = nn.Parameter(torch.zeros(1, 1, self.embed_dim)) # create the [cls] token
             self.num_all_tokens += 1
             self.num_extra_tokens += 1
-            if self.num_channels == 1:
+            if base_config.data_env == 'REARC':
                 self.num_token_categories += 1
 
         # Create register tokens
@@ -252,32 +240,30 @@ class VisionTransformer(nn.Module):
             self.reg_tokens = nn.Parameter(torch.zeros(1, self.model_config.num_reg_tokens, self.embed_dim)) # create the register tokens
             self.num_all_tokens += model_config.num_reg_tokens
             self.num_extra_tokens += model_config.num_reg_tokens
-            if self.num_channels == 1:
+            if base_config.data_env == 'REARC':
                 self.num_token_categories += 1
 
 
         ## Patch Embeddings
-        if self.num_channels == 3:
+        if base_config.data_env == 'CVR':
             # We are in CVR and we want to use the RGB channels for the input image, so we create patches using convolutions
             # Using channels: input x is [B, C=3, H, W] and we should get [B, seq_len=num_patches, embed_dim]
-            self.patch_embed = PatchEmbed(img_size=self.image_size, patch_size=self.patch_size, in_channels=self.num_channels, embed_dim=self.embed_dim)
+            self.patch_embed = PatchEmbed(base_config, img_size=self.image_size, patch_size=self.patch_size, in_channels=self.num_channels, embed_dim=self.embed_dim)
         
-        elif self.num_channels == 1:
+        elif base_config.data_env == 'REARC':
             # NOTE: When patch_size=1 (i.e., consider pixels), this is equivalent to flattening the input image and projecting it to the embedding dimension
             if self.model_config.use_ohe_repr:
                 # We are in REARC and we want to use OHE (resulting in channels) for the possible tokens and thus create artificial channels for the linear projection of patches/pixels/tokens
                 # Using Channels: we create input x [B, C=num_token_categories, H, W] and we should get [B, seq_len=num_patches, embed_dim]
-                self.patch_embed = PatchEmbed(img_size=self.image_size, patch_size=self.patch_size, in_channels=self.num_channels, embed_dim=self.embed_dim, num_token_categories=self.num_token_categories)
+                self.patch_embed = PatchEmbed(base_config, img_size=self.image_size, patch_size=self.patch_size, in_channels=self.num_channels, embed_dim=self.embed_dim, num_token_categories=self.num_token_categories)
             else:
                 # We are in REARC and we want to simply flatten the input image (resulting in a sequence of tokens) and thus create an artificial channel for the linear projection of patches/pixels/tokens
                 # Using Seq2Seq: we create input x [B, C=1, H, W] and we should get [B, seq_len, embed_dim]
-                self.patch_embed = PatchEmbed(img_size=self.image_size, patch_size=self.patch_size, in_channels=self.num_channels, embed_dim=self.embed_dim)
-
-        else:
-            raise ValueError("Invalid number of input channels. Choose from [1, 3]")
+                self.patch_embed = PatchEmbed(base_config, img_size=self.image_size, patch_size=self.patch_size, in_channels=self.num_channels, embed_dim=self.embed_dim)
 
         logger.info(f"The max sequence length (with padding) not embedded as patches is: {image_size * image_size}")
         logger.info(f"The actual max sequence length (with padding) embedded as patches is: {self.patch_embed.num_patches}")
+        
         self.seq_len = self.patch_embed.num_patches
 
 
@@ -342,7 +328,7 @@ class VisionTransformer(nn.Module):
 
 
     def forward_embed(self, x):
-        B, H, W = x.shape
+        B = x.shape[0]
 
         x = self.patch_embed(x) # [B, num_patches, embed_dim]
 
@@ -398,11 +384,10 @@ class VisionTransformer(nn.Module):
     # NOTE: Masks for the forward() method
     # 1) [Not needed] (Self-)Attention mask. Use mask in forward() of nn.TransformerEncoder. It is used for custom attention masking. Use value 0 for allowed and -inf for masked positions.
     # 2) [Not needed] Padding mask. Use src_key_padding_mask in forward() of nn.TransformerEncoder. It is used to mask the padding (or other) tokens in the input sequence. Use value True for padding tokens and False for actual tokens.
-    def forward(self, x):
-        B, H, W = x.shape
+    def forward(self, src):
 
         # Embed the input image to an input sequence
-        x = self.forward_embed(x)
+        x = self.forward_embed(src)  # [B, num_all_tokens, embed_dim] <-- [B, C, H, W]
 
         # Encode the sequence (i.e., the embedded input image)
         x = self.forward_encode(x)  # [B, num_all_tokens, embed_dim] <-- [B, C, H, W]
@@ -412,10 +397,11 @@ class VisionTransformer(nn.Module):
 
         return x
 
-def get_my_vit(model_config, network_config, image_size, num_channels, num_classes, device):
+def get_my_vit(base_config, model_config, network_config, image_size, num_channels, num_classes, device):
     """Returns a ViT encoder instance"""
     
-    vit_encoder = VisionTransformer(model_config, 
+    vit_encoder = VisionTransformer(base_config,
+                                    model_config, 
                                     network_config, 
                                     image_size, 
                                     num_channels, 

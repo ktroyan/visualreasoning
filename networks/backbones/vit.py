@@ -18,7 +18,7 @@ from timm.layers import PatchEmbed
 
 # Personal codebase dependencies
 from utility.logging import logger
-from utility.utils import plot_positional_embeddings
+from utility.utils import plot_absolute_positional_embeddings
 
 
 __all__ = ['get_vit']
@@ -51,16 +51,15 @@ class Vit(VisionTransformer):
                          mlp_ratio=mlp_ratio,
                          qkv_bias=qkv_bias,
                          norm_layer=norm_layer,
-                         pos_embed=ape,  # NOTE: the only choice from timm is 'learn' (or '' ?)
+                         pos_embed='',  # NOTE: the only choice from timm is 'learn' or '' (?). Hence we handle the APE below.
                          class_token=use_cls_token,
-                         cls_aggreg_method=cls_aggreg_method
+                         global_pool=cls_aggreg_method
                          )
         
         self.use_cls_token = use_cls_token
         self.num_prefix_tokens = 1+reg_tokens if use_cls_token else reg_tokens  # NOTE: the cls and reg tokens are defined as cls_token and reg_token respectively in the timm VisionTransformer class
 
-        # TODO: finish to implement reg tokens below
-
+        # TODO: Do similar as what I did in REARCModel to get the selected APE
         # Use fixed 2D sin-cos position embedding
         self.build_2d_sincos_position_embedding()
 
@@ -86,7 +85,6 @@ class Vit(VisionTransformer):
 
         # NOTE: https://github.com/facebookresearch/moco-v3/issues/36Note
         # Handle [cls] token
-        # TODO: do we have to use PE for cls and register tokens? E.g., not in Google Big Vision)
         if self.use_cls_token:
             assert self.num_prefix_tokens == 1, 'Assuming one and only one token, [cls]'    # TODO: change if we also use register tokens
             pe_token = torch.zeros([1, 1, self.embed_dim], dtype=torch.float32)     # define the PE of the [cls] token to be concatenated at the beginning of the PE of the patches
@@ -97,7 +95,7 @@ class Vit(VisionTransformer):
         self.pos_embed.requires_grad = False    # NOTE: set to False for the PE to not be learned
 
         # Visualize PE
-        plot_positional_embeddings(self.pos_embed, self.num_prefix_tokens)
+        plot_absolute_positional_embeddings(self.pos_embed, self.num_prefix_tokens)
 
 
     def _init_weights(self,):
@@ -119,7 +117,7 @@ class Vit(VisionTransformer):
 
 
 # Vanilla Vision Transformer using timm. Use it as a encoder/backbone vision model for an MLP head
-def get_vit(model_config, backbone_network_config, img_size, num_channels, num_classes):    
+def get_vit(base_config, model_config, network_config, image_size, num_channels, num_classes):    
 
     ## Method 1 to get the model
     # model = timm.create_model(
@@ -131,20 +129,20 @@ def get_vit(model_config, backbone_network_config, img_size, num_channels, num_c
 
     ## Method 2 to get the model
     model = Vit(
-        img_size=img_size,
+        img_size=image_size,
         num_channels=num_channels,
         num_classes=num_classes,
         patch_size=model_config['patch_size'], 
-        embed_dim=backbone_network_config['embed_dim'], 
-        num_layers=backbone_network_config['num_layers'],
-        num_heads=backbone_network_config['num_heads'], 
-        mlp_ratio=backbone_network_config['mlp_ratio'], 
-        qkv_bias=backbone_network_config['qkv_bias'],
+        embed_dim=network_config['embed_dim'], 
+        num_layers=network_config['num_layers'],
+        num_heads=network_config['num_heads'], 
+        mlp_ratio=network_config['mlp_ratio'], 
+        qkv_bias=network_config['qkv_bias'],
         norm_layer=partial(nn.LayerNorm, eps=1e-6),
-        pos_embed=model_config['ape'],
+        ape=model_config['ape_type'],
         use_cls_token=model_config['use_cls_token'],  # whether to use or not the cls token
         reg_tokens=model_config['num_reg_tokens'],  # number of register tokens
-        global_pool=model_config['cls_aggreg_method'],  # "" for no global pooling to get a sequence as output, "mean" for global average pooling, "token" for using the [cls] token to aggregate features
+        cls_aggreg_method=model_config['encoder_aggregation']['method'],  # "" for no global pooling to get a sequence as output, "mean" for global average pooling, "token" for using the [cls] token to aggregate features
         )
 
     # TODO: should we use that default config? Does not seem useful, as it is devised for 1K-ImageNet

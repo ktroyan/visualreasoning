@@ -15,27 +15,48 @@ from utility.logging import logger
 
 
 class VisReasModel(pl.LightningModule):
-    def __init__(self, model_config):
+    def __init__(self, model_config, image_size):
         super().__init__()
 
         self.model_config = model_config
+        self.image_size = image_size
 
-        self.train_preds = []
-        self.train_labels = []
-        self.val_preds = []
-        self.val_labels = []
+        # Test inputs, targets and predictions for local observation
+        self.test_inputs = []
+        self.gen_test_inputs = []
         self.test_preds = []
-        self.test_labels = []
+        self.test_targets = []
         self.gen_test_preds = []
-        self.gen_test_labels = []
+        self.gen_test_targets = []
 
+        # Train and val predictions and targets for local logging if verbose
+        self.train_inputs = []
+        self.train_preds = []
+        self.train_targets = []
+
+        self.val_inputs = []
+        self.val_preds = []
+        self.val_targets = []
+
+        # Metrics for local plotting
+        self.train_loss_step = []
+        self.train_acc_step = []
+        self.train_grid_acc_step = []
+
+        self.val_loss_step = []
+        self.val_acc_step = []
+        self.val_grid_acc_step = []
+
+        # Test results for logging
         self.test_step_results = [] # NOTE: this is needed to store the results of the test step for each batch (i.e., at each step), and display the final results at the end of the epoch
         self.gen_test_step_results = [] # NOTE: this is needed to store the results of the generalization test step for each batch (i.e., at each step), and display the final results at the end of the epoch
 
+        # Learning rate values for plotting LR schedule
         self.lr_values = []
 
         # Criterion / Loss Function
         # criterion = nn.CrossEntropyLoss(ignore_index=10)    # ignore_index=10 allows to ignore the symbols 10 (i.e., the padding tokens for us, currently)
+
 
     def load_backbone_weights(self, checkpoint_path):
         self.model_backbone.load_state_dict(torch.load(checkpoint_path, weights_only=False)['model'], strict=False)
@@ -45,32 +66,12 @@ class VisReasModel(pl.LightningModule):
         for param in self.model_backbone.parameters():
             param.requires_grad = False
 
-    def shared_step(self, batch):
-        x, y, samples_task_id, y_true_size = batch   # [B, H, W], [B, H, W], [B], [B]
+    def create_predictions_mask(self, B: int, H: int, W: int, y_true_size: int) -> torch.Tensor:
+        """ Create a mask to ignore the padding tokens when computing the loss and accuracy. """
+        
+        mask = torch.zeros((B, H, W), dtype=torch.bool, device=self.device)  # [B, H, W] ; initialize all as 0/False (padded)
 
-        B, H, W = x.shape
-
-        if self.model_config.task_embedding.enabled:
-            # Enter the model forward pass with the task embeddings
-            y_hat = self(x, y, samples_task_id)    # computed logits
-        else:
-            # Enter the model forward pass
-            y_hat = self(x, y)   # computed logits
-
-
-        # Permute the dimensions of y_hat to be [B, num_classes, seq_len] instead of [B, seq_len, num_classes] to match Pytorch's cross_entropy function format
-        y_hat = y_hat.permute(0, 2, 1)  # [B, num_classes, seq_len] <-- [B, seq_len, num_classes]
-
-        # Flatten y
-        y = y.view(B, -1)  # if not padded: [B, H*W] <-- [B, H, W] ; if padded: [B, seq_len=H*W] <-- [B, H, W]
-
-        # TODO: check if my way to take into account the padding of the input grid and output grid when computing the loss and accuracy is correct
-        #       Essentially, the loss and accuracy should be computed only on the non-padded part of the grid.
-        #       Therefore, after having reshaping the grid to be 1D tensors, we can remove the padding from the input tensor until it reaches the real output tensor size.
-
-        # Create the mask based on the true sizes of y
-        mask = torch.zeros((B, H, W), dtype=torch.bool, device=y.device)  # [B, H, W] ; initialize all as 0/False (padded)
-
+        # Create mask for each sample of the batch
         for i in range(B):
             true_h = int(y_true_size[i][0])  # get actual height of the target y
             true_w = int(y_true_size[i][1])  # get actual width of the target y
@@ -78,129 +79,228 @@ class VisReasModel(pl.LightningModule):
 
         mask = mask.view(B, -1)  # flatten the 2D mask to match y's flattended shape: [B, seq_len]
 
-        return y_hat, y, mask
+        return mask
+
+    def shared_step(self, batch):
+        """ 
+        The same code is shared between training, validation and test steps. 
+        In theory, we would not need to compute and return the loss for testing, hence we would only call shared_step() in the test_step() method. 
+        However, we still do it, so the purpose of this shared_step() is lesser.
+        """
+
+        x, y, samples_task_id, y_true_size = batch   # [B, H, W], [B, H, W], [B], [B]
+
+        B, H, W = x.shape
+
+        # Flatten 2D tensor (grid image) y
+        y = y.view(B, -1)  # [B, seq_len=H*W] <-- [B, H, W]
+
+        # Forward pass of the model
+        if self.model_config.task_embedding.enabled:
+            # Forward pass with the task embeddings
+            y_hat = self(x, y, samples_task_id)    # computed logits
+        else:
+            # Forward pass
+            y_hat = self(x, y)   # computed logits
+
+        # Permute the dimensions of y_hat to be [B, num_classes, seq_len] instead of [B, seq_len, num_classes] to match PyTorch's cross_entropy function format
+        y_hat = y_hat.permute(0, 2, 1)  # [B, num_classes, seq_len] <-- [B, seq_len, num_classes]
+
+        # Create the mask based on the true sizes of y to only compute the metrics w.r.t. the actual tokens to predict in the target
+        mask = self.create_predictions_mask(B, H, W, y_true_size)
+
+        return x, y_hat, y, mask
 
     def step(self, batch, batch_idx):
 
-        y_hat, y, mask = self.shared_step(batch)    # [B, num_classes, seq_len], [B, seq_len], [B, seq_len]
+        x, y_hat, y, mask = self.shared_step(batch)    # [B, num_classes, seq_len], [B, seq_len], [B, seq_len]
+
+        B, H, W = x.shape
+        B, seq_len = y.shape
 
         # probabilities = F.softmax(y_hat, dim=1)  # compute the probabilities (normalized logits) of the model for each sample of the batch
 
-        # Compute the loss per token/symbol without taking into account that pad tokens should not be considered in the loss
-        # loss = F.cross_entropy(y_hat, y.long())    # compute the loss (averaged over the batch)
+        # TODO: See how we want to compute the loss and accuracies. For example, with or without the padding considered?
+        #       Also check if done correctly.
 
-        # Compute the loss per token/symbol and then apply the mask?
-        # TODO: am I considering the loss for the batch correctly?
-        loss = F.cross_entropy(y_hat, y.long(), reduction='none')  # [B, seq_len]
-        loss = (loss * mask).sum() / mask.sum()  # only consider non-padded elements
+        # Loss per symbol (with padding): compute the loss per token/symbol
+        per_sample_loss = F.cross_entropy(y_hat, y.long(), reduction='none').float()  # [B, seq_len]
+        loss_symbol_with_pad = (per_sample_loss.mean()).unsqueeze(0)
 
-        # Compute actual token predictions; we use greedy sampling with argmax to get the predicted tokens from the logits
-        preds = torch.argmax(y_hat, dim=1)  # [B, seq_len]; predictions of the model for each sample of the batch
-
-        # Reshape the sequence of predictions into a grid (i.e., 2D tensor of symbols)
-        # grid_preds = preds.view(preds.shape[0], 30, 30, -1)  # [B, H=30, W=30, num_classes]
-        # grid_target = y.view(y.shape[0], 30, 30, -1)  # [B, H=30, W=30, num_classes]
-
-        # Accuracy per symbol (i.e., the accuracy of the model in predicting the correct symbol for each pixel of the grid)
-        # symbol_acc = torch.sum(y == preds).float() / (y.numel())    # NOTE: (y == preds) yields a boolean tensor of shape [B, seq_len=900]. .float() converts True to 1.0 and False to 0.0, so get the sum of correctly predicted grid cells/symbols. y.numel() returns the total number of elements in the tensor y. That is, it is equivalent to dividing by B*seq_len
-
-        # Accuracy per symbol (ignoring padding)
-        # TODO: Am I considering the accuracy for the batch correctly?
-        correct = (preds == y) * mask   # only consider valid positions
-        symbol_acc = correct.sum().float() / mask.sum()  # only consider non-padded elements
-
-        # Grid accuracy (i.e., the accuracy of the model to predict the whole grid correctly)
-        # grid_acc = torch.sum(torch.all(y == preds, dim=1)).float() / len(y)     # torch.all(y == preds, dim=1) returns a boolean tensor of shape [B] where each element is True if all the symbols of the grid are correctly predicted and False otherwise. .float() converts True to 1.0 and False to 0.0. Then, we sum all the True values and divide by the total number of samples in the batch
-
-        # Grid accuracy (only count if entire true grid is correct) ?
-        # TODO: Am I considering the accuracy for the batch correctly?
-        grid_acc = torch.sum(torch.all((preds == y) | ~mask, dim=1)).float() / len(y)   # | ~mask ensures that we ignore padding when checking if all elements match
-
-        logs = {'loss': loss, 'acc': symbol_acc, 'grid_acc': grid_acc, 'preds': preds, 'y': y}
-
-        return loss, logs
-
-    def training_step(self, batch, batch_idx):
-        loss, logs = self.step(batch, batch_idx)
-
-        self.train_preds.append(logs.pop('preds'))
-        self.train_labels.append(logs.pop('y'))
-
-        self.log_dict({f"metrics/train_{k}": v for k,v in logs.items()}, prog_bar=True, logger=True, on_step=True, on_epoch=True)    # NOTE: this is monitored for best checkpoint and early stopping
-        
-        return loss
-
-    def validation_step(self, batch, batch_idx):
-        loss, logs = self.step(batch, batch_idx)
-
-        self.val_preds.append(logs.pop('preds'))
-        self.val_labels.append(logs.pop('y'))
-
-        self.log_dict({f"metrics/val_{k}": v for k, v in logs.items()}, prog_bar=True, logger=True, on_step=True, on_epoch=True)    # NOTE: this is monitored for best checkpoint and early stopping
-        self.log_dict({"learning_rate": self.lr_schedulers().get_last_lr()[-1]}, prog_bar=True, logger=True, on_step=True, on_epoch=True)    # NOTE: this is monitored for best checkpoint and early stopping. This yields learning_rate in the logs
-
-        return loss
-
-    def test_step(self, batch, batch_idx, dataloader_idx=0):
-
-        y_hat, y, mask = self.shared_step(batch)
-
-        # Compute the loss per token/symbol and the loss
-        # per_sample_loss = F.cross_entropy(y_hat, y.long(), reduction='none').float()   # loss for each sample of the batch
-        # loss = per_sample_loss.mean().unsqueeze(0)
-
-        # Compute the loss per token/symbol and then apply the mask?
-        loss = F.cross_entropy(y_hat, y.long(), reduction='none')  # [B, seq_len]
-        loss = (loss * mask).sum() / mask.sum()  # only consider non-padded elements
-        loss = loss.unsqueeze(0)
+        # Loss per symbol (without padding): compute the loss per token/symbol and then apply the mask to ignore the padding tokens
+        per_sample_loss = F.cross_entropy(y_hat, y.long(), reduction='none').float()  # [B, seq_len]
+        loss_symbol_no_pad = ((per_sample_loss * mask).sum() / mask.sum()).unsqueeze(0)  # only consider non-padding elements
 
         # Compute predictions
         preds = torch.argmax(y_hat, dim=1)  # [B, seq_len]; predictions for each token/symbol of the model for each sample of the batch
 
-        # Accuracy per symbol (i.e., the accuracy of the model in predicting the correct symbol for each pixel of the grid)
-        # symbol_acc = (y == preds).float().mean().unsqueeze(0) # same as line below
-        # symbol_acc = (torch.sum(y == preds).float() / (y.numel())).unsqueeze(0)    # NOTE: (y == preds) yields a boolean tensor of shape [B, seq_len=900]. .float() converts True to 1.0 and False to 0.0, so get the sum of correctly predicted grid cells/symbols. y.numel() returns the total number of elements in the tensor y. That is, it is equivalent to dividing by B*seq_len
+        # Accuracy per symbol (with padding) (i.e., the accuracy of the model in predicting the correct symbol for each pixel of the grid considering the whole max. padded grid, thus also the padding tokens)
+        # acc_symbol_with_pad = (torch.sum(y == preds).float() / (y.numel())).unsqueeze(0)    # same as line below
+        acc_symbol_with_pad = (y == preds).float().mean().unsqueeze(0)
 
-        # Accuracy per symbol (ignoring padding)
-        # TODO: am I considering the accuracy for the batch correctly?
-        correct = (preds == y) * mask   # only consider valid positions
-        symbol_acc = correct.sum().float() / mask.sum()  # only consider non-padded elements
-        symbol_acc = symbol_acc.unsqueeze(0)
+        # Accuracy per symbol (without padding) (i.e., the accuracy of the model in predicting the correct symbol for each pixel of the grid considering only the target grid, that is, without considering the padding tokens)
+        acc_symbol_no_pad = (((preds == y) * mask).sum().float() / mask.sum()).unsqueeze(0)  # only consider non-padding elements
 
-        # Grid accuracy (i.e., the accuracy of the model to predict the whole grid correctly)
-        # grid_acc = (torch.sum(torch.all(y == preds, dim=1)).float() / len(y)).unsqueeze(0)
-        # grid_acc = (torch.all(y == preds, dim=1).float().mean()).unsqueeze(0)
+        # Grid accuracy (only count as correct if the entire padded grid is correct)
+        # grid_acc = (torch.sum(torch.all(y == preds, dim=1)).float() / B).unsqueeze(0)    # same as line below
+        acc_grid_with_pad = torch.all(y == preds, dim=1).float().mean().unsqueeze(0)   # | ~mask ensures automatically count as correct the padding tokens
 
-        # Grid accuracy (only count if entire true grid is correct) ?
-        # TODO: am I considering the accuracy for the batch correctly?
-        grid_acc = torch.sum(torch.all((preds == y) | ~mask, dim=1)).float() / len(y)   # | ~mask ensures that we ignore padding when checking if all elements match
-        grid_acc = grid_acc.unsqueeze(0)
+        # Grid accuracy (only count as correct if entire non-padding grid is correct)
+        # acc_grid_no_pad = (torch.sum(torch.all((preds == y) | ~mask, dim=1)).float() / B).unsqueeze(0)    # same as line below
+        acc_grid_no_pad = torch.all((preds == y) | ~mask, dim=1).float().mean().unsqueeze(0)   # | ~mask ensures automatically count as correct the padding tokens
 
-        logs = {'loss': loss, 'acc': symbol_acc, 'grid_acc': grid_acc}
+        logs = {'loss': loss_symbol_with_pad, 
+                'acc': acc_symbol_with_pad, 
+                'acc_grid_with_pad': acc_grid_with_pad, 
+                'loss_no_pad': loss_symbol_no_pad, 
+                'acc_no_pad': acc_symbol_no_pad, 
+                'acc_grid_no_pad': acc_grid_no_pad
+                }
+        
+        loss = loss_symbol_with_pad
+
+        return loss, logs, preds, y
+
+    def training_step(self, batch, batch_idx):
+        x, y, samples_task_id, y_true_size = batch
+
+        B, H, W = x.shape
+
+        loss, logs, preds, y = self.step(batch, batch_idx)
+
+        # Logging
+        self.log_dict({f"metrics/train_{k}": v for k,v in logs.items()}, prog_bar=True, logger=True, on_step=True, on_epoch=True)    # NOTE: this is monitored for best checkpoint and early stopping
+        
+        # Save two batches (of inputs, preds, targets) per epoch for plotting of images at each epoch
+        if (batch_idx == 0) or (batch_idx == self.trainer.num_training_batches - 1):
+            self.train_inputs.append(x)
+            self.train_preds.append(preds)
+            self.train_targets.append(y)
+
+        # Save to plot locally
+        self.train_loss_step.append(logs['loss'])
+        self.train_acc_step.append(logs['acc'])
+        self.train_grid_acc_step.append(logs['acc_grid_with_pad'])
+
+        return loss
+
+    def validation_step(self, batch, batch_idx):
+        x, y, samples_task_id, y_true_size = batch
+
+        B, H, W = x.shape
+
+        # NOTE: val_loss is the monitored metric during training
+        loss, logs, preds, y = self.step(batch, batch_idx)
+
+        # Logging
+        self.log_dict({f"metrics/val_{k}": v for k, v in logs.items()}, prog_bar=True, logger=True, on_step=True, on_epoch=True)    # NOTE: this is monitored for best checkpoint and early stopping
+        self.log_dict({"learning_rate": self.lr_schedulers().get_last_lr()[-1]}, prog_bar=True, logger=True, on_step=True, on_epoch=True)    # NOTE: this is monitored for best checkpoint and early stopping. This yields learning_rate in the logs
+
+        # Save two batches (of inputs, preds, targets) per epoch for plotting of images at each epoch
+        if (batch_idx == 0) or (batch_idx == self.trainer.num_training_batches - 1):
+            self.val_inputs.append(x)
+            self.val_preds.append(preds)
+            self.val_targets.append(y)
+
+        # Save to plot locally
+        self.val_loss_step.append(logs['loss'])
+        self.val_acc_step.append(logs['acc'])
+        self.val_grid_acc_step.append(logs['acc_grid_with_pad'])
+
+        return loss
+
+
+    def on_train_epoch_end(self):
+        # NOTE: This method is called after the on_train_epoch_end() method of the Callback class.
+
+        if self.model_config.observe_preds.enabled:
+            # Plot a few training samples (inputs, predictions, targets) of the first and last batch seen during the epoch
+            observe_image_predictions("train", self.train_inputs, self.train_preds, self.train_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=0, epoch=self.current_epoch)
+            observe_image_predictions("train", self.train_inputs, self.train_preds, self.train_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=1, epoch=self.current_epoch)
+            
+            # Plot a few validation samples (inputs, predictions, targets) of the first and last batch seen during the epoch
+            observe_image_predictions("val", self.val_inputs, self.val_preds, self.val_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=0, epoch=self.current_epoch)
+            observe_image_predictions("val", self.val_inputs, self.val_preds, self.val_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=1, epoch=self.current_epoch)
+
+        # Reset the lists for the next epoch
+        self.train_inputs = []
+        self.train_preds = []
+        self.train_targets = []
+        self.val_inputs = []
+        self.val_preds = []
+        self.val_targets = []
+
+    def test_step(self, batch, batch_idx, dataloader_idx=0):
+        x, y, samples_task_id, y_true_size = batch
+
+        x, y_hat, y, mask = self.shared_step(batch)
+
+        B, H, W = x.shape
+        B, seq_len = y.shape
+
+        # TODO: See how we want to compute the loss and accuracies. For example, with or without the padding considered?
+        #       Also check if done correctly.
+
+        # Loss per symbol (with padding): compute the loss per token/symbol
+        per_sample_loss = F.cross_entropy(y_hat, y.long(), reduction='none').float()  # [B, seq_len]
+        loss_symbol_with_pad = (per_sample_loss.mean()).unsqueeze(0)
+
+        # Loss per symbol (without padding): compute the loss per token/symbol and then apply the mask to ignore the padding tokens
+        per_sample_loss = F.cross_entropy(y_hat, y.long(), reduction='none').float()  # [B, seq_len]
+        loss_symbol_no_pad = ((per_sample_loss * mask).sum() / mask.sum()).unsqueeze(0)  # only consider non-padding elements
+
+        # Compute predictions
+        preds = torch.argmax(y_hat, dim=1)  # [B, seq_len]; predictions for each token/symbol of the model for each sample of the batch
+
+        # Accuracy per symbol (with padding) (i.e., the accuracy of the model in predicting the correct symbol for each pixel of the grid considering the whole max. padded grid, thus also the padding tokens)
+        # acc_symbol_with_pad = (torch.sum(y == preds).float() / (y.numel())).unsqueeze(0)    # same as line below
+        acc_symbol_with_pad = (y == preds).float().mean().unsqueeze(0)
+
+        # Accuracy per symbol (without padding) (i.e., the accuracy of the model in predicting the correct symbol for each pixel of the grid considering only the target grid, that is, without considering the padding tokens)
+        acc_symbol_no_pad = (((preds == y) * mask).sum().float() / mask.sum()).unsqueeze(0)  # only consider non-padding elements
+
+        # Grid accuracy (only count as correct if the entire padded grid is correct)
+        # grid_acc = (torch.sum(torch.all(y == preds, dim=1)).float() / B).unsqueeze(0)    # same as line below
+        acc_grid_with_pad = torch.all(y == preds, dim=1).float().mean().unsqueeze(0)   # | ~mask ensures automatically count as correct the padding tokens
+
+        # Grid accuracy (only count as correct if entire non-padding grid is correct)
+        # acc_grid_no_pad = (torch.sum(torch.all((preds == y) | ~mask, dim=1)).float() / B).unsqueeze(0)    # same as line below
+        acc_grid_no_pad = torch.all((preds == y) | ~mask, dim=1).float().mean().unsqueeze(0)   # | ~mask ensures automatically count as correct the padding tokens
+
+        logs = {'loss': loss_symbol_with_pad, 
+                'acc': acc_symbol_with_pad, 
+                'acc_grid_with_pad': acc_grid_with_pad, 
+                'loss_no_pad': loss_symbol_no_pad, 
+                'acc_no_pad': acc_symbol_no_pad, 
+                'acc_grid_no_pad': acc_grid_no_pad
+                }
 
         if dataloader_idx == 0:
+            self.test_inputs.append(x)
             self.test_preds.append(preds)
-            self.test_labels.append(y)
+            self.test_targets.append(y)
 
             results = {f"test_{k}": v for k, v in logs.items()}
-            self.log_dict(results, logger=True, prog_bar=True)  # log metrics for progress bar visualization
+            self.log_dict(results, logger=True, prog_bar=True)
             self.test_step_results.append(results)
 
         elif dataloader_idx == 1:
+            self.gen_test_inputs.append(x)
             self.gen_test_preds.append(preds)
-            self.gen_test_labels.append(y)
+            self.gen_test_targets.append(y)
 
-            # TODO: currently in the code we assume that if there is only one dataloader, it will be considered as a test dataloader and not a gen test dataloader even though the data may be of systematic generalization. Fix this to be better maybe?
+            # TODO: Currently in the code we assume that if there is only one dataloader, it will be considered as a test dataloader and not a gen test dataloader even though the data may be of systematic generalization. Fix this to be better maybe?
             results = {f"gen_test_{k}": v for k, v in logs.items()}
-            self.log_dict(results, logger=True, prog_bar=True)  # log metrics for progress bar visualization
+            self.log_dict(results, logger=True, prog_bar=True)
             self.gen_test_step_results.append(results)
         
         else:
             raise ValueError(f"Unknown dataloader index given: {dataloader_idx}")
         
         return results
-
+    
     def on_test_epoch_end(self):
+
         if len(self.test_step_results) != 0:
             test_step_results = self.test_step_results
 
@@ -217,8 +317,10 @@ class VisReasModel(pl.LightningModule):
             
             self.test_results = test_results
 
+            # Plot a few test samples (inputs, predictions, targets) of the first and last batch of testing (single epoch)
             if self.model_config.observe_preds.enabled:
-                observe_image_predictions(self.test_preds, self.test_labels, self.model_config.observe_preds.n_samples)
+                observe_image_predictions("test", self.test_inputs, self.test_preds, self.test_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=0)
+                observe_image_predictions("test", self.test_inputs, self.test_preds, self.test_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=self.trainer.num_test_batches[0]-1)
 
         if len(self.gen_test_step_results) != 0:
             gen_test_step_results = self.gen_test_step_results
@@ -236,8 +338,11 @@ class VisReasModel(pl.LightningModule):
             
             self.gen_test_results = gen_test_results
 
+            # Plot a few test samples (inputs, predictions, targets) of the first and last batch of testing (single epoch)
             if self.model_config.observe_preds.enabled:
-                observe_image_predictions(self.gen_test_preds, self.gen_test_labels, self.model_config.observe_preds.n_samples)
+                observe_image_predictions("test_gen", self.gen_test_inputs, self.gen_test_preds, self.gen_test_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=0)
+                observe_image_predictions("test_gen", self.gen_test_inputs, self.gen_test_preds, self.gen_test_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=self.trainer.num_test_batches[1]-1)
+
 
     def on_train_end(self):
         # Plot learning rate values used during training
@@ -307,12 +412,12 @@ class VisReasModel(pl.LightningModule):
 
 
 class REARCModel(VisReasModel):
-    def __init__(self, model_config, backbone_network_config, head_network_config, image_size, **kwargs):
+    def __init__(self, base_config, model_config, backbone_network_config, head_network_config, image_size, **kwargs):
 
         # Save the hyperparameters so that they can be stored in the model checkpoint when using torch.save()
         self.save_hyperparameters() # saves all the arguments (kwargs too) of __init__() to the variable hparams
 
-        super().__init__(model_config=model_config)
+        super().__init__(model_config=model_config, image_size=image_size)
 
         self.model_config = model_config
 
@@ -323,35 +428,40 @@ class REARCModel(VisReasModel):
         # TODO: Should we include padding to predict due to grid size variability? Yes?
         self.num_classes = 10 + 1  # number of token categories; 1 extra token for padding as it has to be predicted
 
-        self.backbone_input_embed_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
-        self.head_input_dim = self.backbone_input_embed_dim   # embedding dimension of the backbone model, usually the same as its input embedding dimension
-        self.head_input_embed_dim = head_network_config.embed_dim   # dimension of the actual input that will be passed to the head network; initially assumed to be of dimension equal to the embedding dimension of the head model
-
-
         ## Model backbone/encoder
         if model_config.backbone == "resnet":
-            self.model_backbone, bb_num_out_features = get_resnet(model_config=model_config, 
-                                                                  network_config=backbone_network_config
-                                                                  )
-            self.head_input_dim = bb_num_out_features
+            self.encoder, bb_num_out_features = get_resnet(base_config=base_config,
+                                                           model_config=model_config,
+                                                           network_config=backbone_network_config,
+                                                           image_size=self.image_size,
+                                                           num_classes=self.num_classes,
+                                                           device=self.device
+                                                           )
+            self.backbone_input_embed_dim = bb_num_out_features   # embedding dimension backbone model
+
 
         elif model_config.backbone == "transformer":
-            self.encoder = get_transformer_encoder(model_config=self.model_config,
+            self.encoder = get_transformer_encoder(base_config=base_config,
+                                                   model_config=self.model_config,
                                                    network_config=backbone_network_config, 
                                                    image_size=self.image_size,
                                                    num_channels=self.num_channels,
                                                    num_classes=self.num_classes, 
                                                    device=self.device
                                                    )
+            self.backbone_input_embed_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
+            
 
         elif model_config.backbone == "my_vit":
-            self.encoder = get_my_vit(model_config=model_config,
+            self.encoder = get_my_vit(base_config=base_config,
+                                      model_config=model_config,
                                       network_config=backbone_network_config,
-                                      img_size=self.image_size,
+                                      image_size=self.image_size,
                                       num_channels=self.num_channels,
                                       num_classes=self.num_classes,
                                       device=self.device
                                       )
+            self.backbone_input_embed_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
 
         elif model_config.backbone == "looped_vit":
             raise NotImplementedError("Looped ViT not implemented yet")
@@ -359,6 +469,9 @@ class REARCModel(VisReasModel):
         else:
             raise ValueError(f"Unknown model backbone given: {model_config.backbone}")
         
+        self.head_input_dim = self.backbone_input_embed_dim   # embedding dimension of the backbone model, usually the same as its input embedding dimension
+        self.head_input_embed_dim = head_network_config.embed_dim   # dimension of the actual input that will be passed to the head network; initially assumed to be of dimension equal to the embedding dimension of the head model
+
 
         ## Task embedding
         if model_config.task_embedding.enabled:
@@ -371,7 +484,7 @@ class REARCModel(VisReasModel):
 
 
         ## Encoder to Decoder projection layer; useful to handle the task embedding that is concatenated
-        # TODO: Should we handle the task embedding differently? For example using FiLM or other methods?
+        # TODO: Should we handle the task embedding differently than a concatenation? For example using FiLM or other methods?
         if self.head_input_dim != self.head_input_embed_dim:
             self.enc_to_dec_proj = nn.Linear(self.head_input_dim, self.head_input_embed_dim, device=self.device)  # project the encoder output (of dimension backbone_network_config.embed_dim + task_embedding_dim) to the decoder embedding dimension
 
@@ -461,16 +574,12 @@ class REARCModel(VisReasModel):
     def training_decode(self, x_encoded, y):
         B, S, D = x_encoded.shape
 
-        self.tgt_projection = self.tgt_projection.to(device=self.device)
         self.tgt_mask = self.tgt_mask.to(device=self.device)
 
         # self.check_device_placement()
 
         # Preprocess the target sequence y so that it has the dimensions [B, seq_len, head_input_embed_dim] to be used by the Transformer decoder
-        tgt = y.view(B, -1)  # [B, seq_len]
-        tgt = tgt.to(device=self.device, dtype=torch.long)
-        tgt = self.tgt_projection(tgt)  # [B, seq_len, head_input_embed_dim], where head_input_embed_dim is the embed dim of the decoder; ensure that tgt is of type long
-        tgt = tgt.to(device=self.device, dtype=torch.float32)
+        tgt = self.tgt_projection(y.long())  # [B, seq_len, head_input_embed_dim], where head_input_embed_dim is the embed dim of the decoder; ensure that tgt is of type long
         
         # We use the full target sequence y as input to the decoder with a causal mask. Thus we predict the seq_len tokens of the target sequence in parallel
         # We are using full teacher forcing
@@ -482,7 +591,6 @@ class REARCModel(VisReasModel):
     def inference_decode(self, x_encoded):
         B, S, D = x_encoded.shape
 
-        self.tgt_projection = self.tgt_projection.to(device=self.device)
         self.tgt_mask = self.tgt_mask.to(device=self.device)
 
         # self.check_device_placement()
@@ -495,33 +603,27 @@ class REARCModel(VisReasModel):
             
             # Create a start token used to start the AR decoding
             # TODO: Is it correct to start with a tensor of zeros as the first token? What should the start token be?
-            # token_start = torch.zeros(B, 1, dtype=torch.long, device=self.device)    # [B, 1]; start with a token 0 as the first token
             start_token = 0
-            token_start = torch.full((B, 1), start_token, dtype=torch.long, device=self.device)  # [B, 1]; start with a token start_token as the first token
-            token_start = token_start.to(device=self.device, dtype=torch.long)
+            token_start = torch.full((B, 1), start_token, device=self.device)  # [B, 1]; start with a token start_token as the first token
 
             # Embed the start token
-            token_start = self.tgt_projection(token_start)  # [B, 1, head_input_embed_dim]
-            token_start = token_start.to(device=self.device, dtype=torch.float32)
+            token_start = self.tgt_projection(token_start.long())  # [B, 1, head_input_embed_dim]
             
             # Store the first token in the list; note that the list should contain the embedded tokens of each AR decoding step
             output_tokens.append(token_start)
             
             # Start the iterative AR decoding loop
             for t in range(self.seq_len-1): # we have seq_len logits/predictions to get
-                # TODO: Here issue with shape. It is [B, 1, 1, head_input_embed_dim] instead of [B, 1, head_input_embed_dim]. 
                 prev_tokens = torch.cat(output_tokens, dim=1)   # [B, t+1, head_input_embed_dim]; create a tensor from the list and detach to save memory
-                prev_tokens = prev_tokens.to(device=self.device, dtype=torch.float32)
 
                 # Decode up to step t; in theory we do not need to give a causal mask as we are only interested in the last token logits, but we give it to avoid possible errors if we were to analyze the logits of all tokens at each step
                 tgt_mask = self.tgt_mask[:t+1, :t+1]  # [t+1, t+1]; use the global causal mask for the first t+1 steps only
-                tgt_mask = tgt_mask.to(device=self.device)
 
                 # Compute the output embeddings up to position t
                 outputs = self.decoder(prev_tokens, x_encoded, tgt_mask=tgt_mask) # [B, t+1, head_input_embed_dim]; NOTE: The logits returned by PyTorch's TransformerDecoder are that of all the tokens in the tgt sequence given. So below we take only that of the last step
                 
                 # Get the output token at step t; we need to get an actual (i.e., not just logits) token since we use AR decoding
-                token_t_output = outputs[:, -1, :]   # [B, ...]; We take the logits of the last token (as it is the token of interest)
+                token_t_output = outputs[:, -1, :]   # [B, head_input_embed_dim]; We take the logits of the last token (as it is the token of interest)
                 
                 # Apply the linear output layer to get the logits from the predicted target sequence embeddings
                 token_t_logits = self.output_layer(token_t_output)  # [B, seq_len, num_classes] <-- [B, seq_len, head_input_embed_dim]
@@ -529,11 +631,10 @@ class REARCModel(VisReasModel):
                 # Get/sample the token at step t
                 # TODO: Implement better sampling? E.g., Beam search, etc. to sample the output token? 
                 token_t = token_t_logits.argmax(dim=-1, keepdim=True)  # [B, 1]; This extracts only the last step’s logits and finds the most probable token; Greedy decoding: take the token with the highest probability  
-                token_t = token_t.to(device=self.device, dtype=torch.long)
+                token_t = token_t.to(device=self.device, dtype=torch.float32)
             
                 # Embed the output token of position/step t
-                token_t = self.tgt_projection(token_t)  # [B, 1, head_input_embed_dim] <-- [B, 1]
-                token_t = token_t.to(device=self.device, dtype=torch.float32)
+                token_t = self.tgt_projection(token_t.long())  # [B, 1, head_input_embed_dim] <-- [B, 1]
 
                 # Store in the list the (embedded) output token at position/step t
                 output_tokens.append(token_t)    # TODO: Important to use .copy() here to avoid storing a reference of the tensor token_t since it is changing in the loop?
@@ -543,7 +644,7 @@ class REARCModel(VisReasModel):
 
         return output_target_seq
 
-    @timer_decorator
+    # @timer_decorator
     def decode_sequence(self, x_encoded, y):
         # AR Decoding
         if self.training:   # use PTL LightningModule's self.training attribute to check if the model is in training mode; could also use self.trainer.training, self.trainer.validating, self.trainer.testing
@@ -555,18 +656,26 @@ class REARCModel(VisReasModel):
 
     def forward(self, x, y, samples_task_id=None):
         B, H, W = x.shape
+        B, seq_len = y.shape
 
         # Encode the input sequence
-        x_encoded = self.encoder(src=x)  # [B, seq_len, backbone_input_embed_dim]; NOTE: the extra tokens will have been truncated so the encoded sequence will also have a dim seq_len 
+        x_encoded = self.encoder(x)  # [B, seq_len, backbone_input_embed_dim] or [B, backbone_input_embed_dim] if features aggregated to the cls token; NOTE: the extra tokens will have been truncated so the encoded sequence will also have a dim seq_len 
         
         # Handle the task embedding if needed
         if samples_task_id is not None:
             task_embedding = self.task_embedding(samples_task_id)   # [B, task_embedding_dim]
-            task_embedding = task_embedding.unsqueeze(1).repeat(1, x_encoded.shape[1], 1) # [B, seq_len, task_embedding_dim]
-            x_encoded = torch.cat([x_encoded, task_embedding], 2)  # [B, seq_len, backbone_input_embed_dim + task_embedding_dim]
 
-        # Transformer Decoder
+            if x_encoded.ndim == 2:
+                x_encoded = torch.cat([x_encoded, task_embedding], 1)  # [B, backbone_input_embed_dim + task_embedding_dim]
+            
+            elif x_encoded.ndim == 3:    
+                task_embedding = task_embedding.unsqueeze(1).repeat(1, x_encoded.shape[1], 1) # [B, seq_len, task_embedding_dim]
+                x_encoded = torch.cat([x_encoded, task_embedding], 2)  # [B, seq_len, backbone_input_embed_dim + task_embedding_dim]
+
+        # Decode the encoded input sequence
         if self.model_config.head in ["transformer", "my_vit"]:
+            # Transformer Decoder
+
             if self.head_input_dim != self.head_input_embed_dim:
                 # Map the encoded input sequence to the same embedding dimension as the decoder
                 x_encoded = self.enc_to_dec_proj(x_encoded)  # [B, seq_len, head_input_embed_dim]
@@ -577,8 +686,8 @@ class REARCModel(VisReasModel):
             # Apply the linear output layer to get the logits from the predicted target sequence embeddings
             logits = self.output_layer(output_target_seq)  # [B, seq_len, num_classes]
 
-        # MLP Decoder/Head
         elif self.model_config.head in ["mlp"]:
+            # MLP Decoder/Head
     
             # Forward pass through the model head
             logits = self.head(x_encoded)   # [B, seq_len, num_classes]
