@@ -6,7 +6,7 @@ import datetime
 import torch
 from omegaconf import OmegaConf
 import matplotlib.pyplot as plt
-from typing import Dict
+import shutil
 
 # Personal codebase dependencies
 from utility.logging import logger
@@ -100,6 +100,10 @@ def get_complete_config():
 
         # Convert the config to a dict
         resolved_complete_config_dict = OmegaConf.to_container(complete_config)
+
+        # Update the complete config dict with the WandB sweep config 
+        # TODO: See how to use the sweep config to update the complete config dict
+        #       Probably something like: the sweep config values for this run are resolved, and then we update the complete config dict with these resolved values
 
         # Convert dict to OmegaConf object so that we can then use dot notation to access the keys
         resolved_complete_config_oc = OmegaConf.create(resolved_complete_config_dict)
@@ -215,18 +219,37 @@ def plot_lr_schedule(lr_values):
     plt.title("Learning Rate Schedule")
     plt.legend()
     plt.grid()
-    plt.savefig("./figs/learning_rate_schedule.png")   # save the plot
+    plt.savefig("./figs/learning_rate_schedule.png")
     # plt.show()
     plt.close()
 
-def plot_positional_embeddings(pos_embed, num_prefix_tokens):
+def plot_absolute_positional_embeddings(pos_embed, num_prefix_tokens=None, viz_as_heatmap=False):
+    """ 
+    Plot the absolute positional embeddings (APE) used.
+    If needed, we can truncate the first num_prefix_tokens tokens from the embeddings plot.
+    TODO: Do we need to truncate the embeddings part for the prefix tokens from the plot?
+    """
+    # Ensure the figs directory exists
+    os.makedirs('./figs', exist_ok=True)
+
+    # Truncate the first num_prefix_tokens tokens from the embeddings plot if needed and convert embeddings to numpy
+    if num_prefix_tokens is not None:
+        embeddings = pos_embed[0, num_prefix_tokens:, :].detach().cpu().numpy()
+    else:
+        embeddings = pos_embed[0, :, :].detach().cpu().numpy()
+
     plt.figure(figsize=(10, 5))
-    plt.imshow(pos_embed[0, num_prefix_tokens:, :].detach().cpu().numpy())  # exclude the extra tokens (e.g., [cls] and registers) if they exist
+
+    if viz_as_heatmap:
+        ims = plt.imshow(embeddings, aspect='auto', label="Absolute Positional Embeddings")
+        plt.colorbar(ims)
+    else:
+        plt.plot(embeddings, label="Absolute Positional Embeddings")
+    
     plt.xlabel("Embedding position")
     plt.ylabel("Sequence position")
-    plt.colorbar()
     plt.title("Positional Embeddings")
-    plt.savefig('./figs/positional_embeddings.png')   # save the plot
+    plt.savefig('./figs/positional_embeddings.png')
     # plt.show()
     plt.close()
 
@@ -237,9 +260,25 @@ def timer_decorator(func):
 
     def wrapper(*args, **kwargs):
         start_time = time.time()
-        result = func(*args, **kwargs)  # call the function
+        result = func(*args, **kwargs)  # call the function decorated
         end_time = time.time()
         elapsed_time = end_time - start_time
         logger.warning(f"{func.__name__} took {elapsed_time:.4f} seconds to execute.")
         return result
     return wrapper
+
+def copy_folder(source_folder, destination_folder):
+    # Ensure destination folder exists
+    os.makedirs(destination_folder, exist_ok=True)
+    
+    # Copy all contents from source to destination
+    for item in os.listdir(source_folder):
+        source_path = os.path.join(source_folder, item)
+        destination_path = os.path.join(destination_folder, item)
+
+        if os.path.isdir(source_path):
+            # Copy subdirectories recursively
+            shutil.copytree(source_path, destination_path, dirs_exist_ok=True)  
+        else:
+            # Copy files
+            shutil.copy2(source_path, destination_path)  
