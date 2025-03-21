@@ -5,10 +5,10 @@ backbone_network:
   mlp_ratio: 4  # used instead of explicit ff_dim
   qkv_bias: true
   num_layers: 8  # 12
-  ape_dropout_rate: 0.0
-  attn_dropout_rate: 0.0
-  attn_proj_dropout_rate: 0.0
-  ff_dropout_rate: 0.0
+  ape_dropout_rate: 0.2
+  attn_dropout_rate: 0.2
+  attn_proj_dropout_rate: 0.2
+  ff_dropout_rate: 0.2
   init_weights_cfg:
     type: 'xavier'
     distribution: 'uniform'

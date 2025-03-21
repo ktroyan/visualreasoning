@@ -5,6 +5,7 @@ data:
   train_batch_size: 64
   val_batch_size: 50
   test_batch_size: 50
+  shuffle_train_dl: true  # whether to shuffle the training data loader or not
   transform:
     enabled: true # whether to apply data transformation (e.g., normalization, augmentation). TODO: We can add a field to specify the type of transformation
   use_gen_test_set: false

@@ -1,3 +1,3 @@
 inference:
   inference_model_ckpt: ''  # specify the path to the checkpoint to load for inference if no model is provided
-  inference_verbose: 1  # verbosity level: 0 for no verbose, 1 for most verbose
+  inference_verbose: 0  # verbosity level: 0 for no verbose, 1 for most verbose
