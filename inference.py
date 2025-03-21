@@ -3,6 +3,10 @@ import time
 import pandas as pd
 import torch
 import pytorch_lightning as pl
+import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
+import seaborn as sns
+
 
 # Personal codebase dependencies
 import data
@@ -79,6 +83,65 @@ def process_test_results(config, test_results, test_type="test", exp_logger=None
 
     return processed_test_results
 
+
+def observe_input_output_images(dataloader, batch_id=0, n_samples=4, split="test"):
+    
+    # Get the batch batch_id from the dataloader
+    for i, batch in enumerate(dataloader):
+        if i == batch_id:
+            break
+    
+    # Get the input and output images
+    inputs, outputs = batch[0], batch[1]
+
+    # Number of samples to observe
+    n_samples = min(n_samples, len(inputs))
+
+    logger.debug(f"Observing {n_samples} samples from {split} batch {batch_id}. See /figs folder.")
+
+    # Handle padding tokens. Replace the symbols for pad tokens with the background color
+    # TODO: How to handle the pad token properly? For example if its decided value is not 10.0 anymore as it was changed in the other parts of the code?
+    pad_token = 10
+    inputs[inputs == pad_token] = 0
+    outputs[outputs == pad_token] = 0
+
+    # Use the same color map as REARC
+    cmap = ListedColormap([
+        '#000', '#0074D9', '#FF4136', '#2ECC40', '#FFDC00',
+        '#AAAAAA', '#F012BE', '#FF851B', '#7FDBFF', '#870C25'
+    ])
+    
+    vmin = 0
+    vmax = 9
+
+    # Create a figure to plot the samples
+    fig, axs = plt.subplots(2, n_samples, figsize=(n_samples * 3, 6), dpi=150)
+
+    for i in range(n_samples):
+        input_img = inputs[i].cpu().numpy()
+        target_img = outputs[i].cpu().numpy()
+
+        for ax, img, title in zip([axs[0, i], axs[1, i]], 
+                                  [input_img, target_img], 
+                                  [f"Input {i} of batch {batch_id}", f"Output {i} of batch {batch_id}"]
+                                  ):
+            sns.heatmap(img, ax=ax, cbar=False, linewidths=0.05, linecolor='gray', square=True, cmap=cmap, vmin=vmin, vmax=vmax)
+            ax.set_title(title, fontsize=8)
+            ax.set_xticks([])
+            ax.set_yticks([])
+
+    fig.suptitle(f"{split} batch {batch_id}", fontsize=18)
+
+    plt.tight_layout()
+    # plt.show()
+
+    # Save the figure
+    os.makedirs("./figs", exist_ok=True)   # create the /figs folder if it does not exist
+    fig.savefig(f"./figs/{split}_image_input_output_batch{batch_id}.png")
+
+    plt.close(fig)
+
+
 def main(config, datamodule, model=None, model_ckpt_path=None, exp_logger=None):
 
     logger.info("*** Inference started ***")
@@ -114,12 +177,20 @@ def main(config, datamodule, model=None, model_ckpt_path=None, exp_logger=None):
     trainer.test(model=model, datamodule=datamodule, verbose=True)  # NOTE: if more than one test dataloader was created in the datamodule, all the test dataloaders will be used for testing
    
     if config.inference.inference_verbose == 1:
-        logger.info(f"Test predictions: {model.test_preds}")
-        logger.info(f"Test labels: {model.test_labels}")
+        logger.debug(f"Test predictions: {model.test_preds}")
+        logger.debug(f"Test targets: {model.test_targets}")
+
+        # TODO: Make it work or skip it for CVR
+        test_dataloader = datamodule.test_dataloader()[0] if isinstance(datamodule.test_dataloader(), list) else datamodule.test_dataloader()
+        observe_input_output_images(dataloader=test_dataloader, batch_id=0, n_samples=4, split="test")
 
         if config.data.use_gen_test_set:
-            logger.info(f"Sys-gen test predictions: {model.gen_test_preds}")
-            logger.info(f"Sys-gen test labels: {model.gen_test_labels}")
+            logger.debug(f"Sys-gen test predictions: {model.gen_test_preds}")
+            logger.debug(f"Sys-gen test targets: {model.gen_test_targets}")
+
+            # TODO: Make it work or skip it for CVR
+            gen_test_dataloader = datamodule.test_dataloader()[1]
+            observe_input_output_images(dataloader=gen_test_dataloader, batch_id=0, n_samples=4, split="gen_test")            
 
     test_results = model.test_results
     processed_test_results = process_test_results(config, test_results, test_type="test", exp_logger=None)
@@ -156,6 +227,10 @@ if __name__ == '__main__':
     datamodule = data_module(config.data)   # initialize the data with the data config
     logger.info(f"Data module instantiated. Now showing the total number of samples per dataloader:\n{datamodule}\n")
 
+    # Get the image size from the datamodule. Useful for the model backbone
+    image_size = datamodule.image_size
+    logger.info(f"Max. image size considered (with padding): {image_size}")
+
     # Model chosen
     model_ckpt = config.inference.inference_model_ckpt
     if model_ckpt is not None and model_ckpt != "":
@@ -163,7 +238,7 @@ if __name__ == '__main__':
         model = None
     else:
         model_module = vars(models)[config.base.model_module]
-        model = model_module(config.model, config.backbone_network, config.head_network)   # initialize the model with the model and network configs
+        model = model_module(config.base, config.model, config.backbone_network, config.head_network, image_size)   # initialize the model with the model and network configs
         logger.info(f"Model chosen for inference w.r.t. the current config files: {model}")
     
 
