@@ -11,8 +11,8 @@ import math
 
 import cv2
 
-from shape import Shape
-from utils import *
+from .shape import Shape
+from .utils import *
 
 render = render_cv
 

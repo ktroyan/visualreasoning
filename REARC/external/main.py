@@ -6,14 +6,14 @@ import json
 from random import seed as set_seed
 import random
 
-import dsl
-from dsl import *
+# import dsl
+from .dsl import *
 
-import utils as utils
-from utils import *
+from . import utils as utils
+from .utils import *
 
-import generators
-import verifiers
+from . import generators
+from . import verifiers
 
 
 def get_generators() -> dict:

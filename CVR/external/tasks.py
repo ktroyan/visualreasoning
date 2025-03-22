@@ -9,8 +9,8 @@ import cv2
 import itertools
 import math
 np.math = math  # NOTE: I changed this due to numpy version update
-from shape import Shape
-from utils import *
+from .shape import Shape
+from .utils import *
 
 render = render_cv
 
