@@ -1,6 +1,59 @@
 # visualreasoning
 Evaluating Neural Network architectures by studying Systematic Generalization, Sample Efficiency, Compositionality and ICL in Abstract Visual Reasoning (AVR) tasks from different data environments.
 
+## Repository Structure Overview
+```
+├── .python-version
+├── BEFOREARC
+├── CVR
+│   ├── CVR.md
+│   ├── create_cvr_datasets.ipynb
+│   ├── external
+│   └── generate_cvr_data.py
+├── REARC
+│   ├── REARC.md
+│   ├── create_rearc_datasets.ipynb
+│   ├── generate_rearc_data.py
+│   └── tasks_generated.txt
+├── configs
+│   ├── base.yaml
+│   ├── data.yaml
+│   ├── experiment.yaml
+│   ├── inference.yaml
+│   ├── models
+│   │   ├── CVRModel.yaml
+│   │   └── REARCModel.yaml
+│   ├── networks
+│   │   ├── backbones
+│   │   └── heads
+│   ├── sweep.yaml
+│   ├── training.yaml
+│   └── wandb.yaml
+├── data
+│   ├── cvr_data.py
+│   ├── data_base.py
+│   └── rearc_data.py
+├── experiment.py
+├── figs
+├── inference.py
+├── jobs
+├── models
+│   ├── cvr_model.py
+│   └── rearc_model.py
+├── networks
+│   ├── backbones
+│   └── heads
+├── pyproject.toml
+├── requirements.txt
+├── training.py
+├── utility
+│   ├── cvr
+│   ├── logging.py
+│   ├── rearc
+│   └── utils.py
+└── uv.lock
+```
+
 ## Environment Setup
 ### 1. Clone Repository  
 Clone the ```visualreasoning``` repository to your machine:
@@ -59,7 +112,7 @@ Then, create the experiment datasets using the notebook:
 
 This will create experiment datasets at the leaf folders of the folder ```/final_datasets``` created in the respective data environment folder.
 
-The model experiments can now be run using those datasets. See the section [Scripts](#scripts)
+The model experiments can now be run using those datasets. See the section [Scripts](#scripts).
 
 ---
 #### Data
@@ -85,9 +138,8 @@ See section [Program](#program) below for more information about running the ```
 #### Parameters
 All the config parameters for the different modules are found in the relevant YAML config files in ```/configs```.
 
----
 
-### Program
+## Program
 ### Simple Run
 An experiment is run as:
 ```bash
