@@ -8,6 +8,7 @@ requirements_backup.txt
 
 
 ### CVR ###
+/CVR/generated_data_128x128.zip
 /CVR/generated_data
 /CVR/generated_data_64x64
 /CVR/generated_data_128x128
@@ -17,14 +18,14 @@ requirements_backup.txt
 
 
 ### REARC ###
+/REARC/generated_data_with_difficulties.zip
 /REARC/external/arc_original
-/REARC/experiments
-/REARC/arc_original
 /REARC/generated_data
 /REARC/generated_data_lb0_ub04
 /REARC/generated_data_lb0_ub07
 /REARC/generated_data_lb07_ub1
 /REARC/final_datasets
+/REARC/experiments
 
 
 ### BEFOREARC ###
