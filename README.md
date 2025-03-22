@@ -1,19 +1,114 @@
 # visualreasoning
 Evaluating Neural Network architectures by studying Systematic Generalization, Sample Efficiency, Compositionality and ICL in Abstract Visual Reasoning (AVR) tasks from different data environments.
 
-# Use
-An experiment is run as
-```bash
-python experiment.py
+## Environment Setup
+### 1. Clone Repository  
+Clone the ```visualreasoning``` repository to your machine:
+```sh
+git clone https://github.com/ktroyan/visualreasoning.git
+```
+Enter the ```visualreasoning``` repository folder:
+```sh
+cd visualreasoning
 ```
 
-Using CLI arguments, an experiment can be run, for example, as
-```bash
-python experiment.py base.data_env="REARC" base.problem_approach="Vision" experiment.study="sample-efficiency" experiment.setting="exp_setting_1" experiment.name="experiment_1" training.max_epochs=5
-```
-This performs a run for the REARC data environment using a Vision modeling approach, for a Sample-Efficiency study, some experiment setting (as defined in the file `create_rearc_datasets.ipynb`), and some experiment part of that experiment setting. Moreover, the model is trained for 5 epochs at most.
+### 2. Create Virtual Environment
+Using [```uv```](https://docs.astral.sh/uv/), run the following commands to install the necessary dependencies (Python version, libraries).
 
-The parameters can be found in the YAML config files in the folder `/configs`.
+Create a virtual environment:
+```sh
+uv venv
+```
+
+Activate the virtual environment ```.venv```:
+```sh
+source .venv/bin/activate   # Linux
+
+.venv\Scripts\activate      # Windows
+```
+
+### 3. Install Dependencies  
+Install/update the dependencies from the pyproject.toml file:
+```sh
+uv sync
+```
+
+That's it!
+
+## Usage
+### Preliminary
+The working directory is assumed to be ```/visualreasoning```, unless changing directory is explicitly mentioned.
+
+---
+
+**TL;DR**  
+If you do not have access to the correctly generated data, run the following command to generate them:
+```sh
+# For REARC
+cd REARC
+uv run generate_rearc_data.py
+
+# For CVR
+cd CVR
+uv run generate_rearc_data.py
+```
+
+Then, create the experiment datasets using the notebook:
+- In the REARC directory, run the complete notebook ```create_rearc_datasets.ipynb```
+- In the CVR directory, run the complete notebook ```create_cvr_datasets.ipynb```
+
+This will create experiment datasets at the leaf folders of the folder ```/final_datasets``` created in the respective data environment folder.
+
+The model experiments can now be run using those datasets. See the section [Scripts](#scripts)
+
+---
+#### Data
+To be able to execute the different programs, correctly prepared data must be available. Such data are contained in a folder with dataset splits (of either JSON or CSV format depending on the data environment considered).
+
+More specifically, experiment folders containing data splits (i.e., train, val, test, and optionally test_gen) must exist in some folder of path ```./<data_env>/final_datasets/<study>/exp_setting_<index>/<experiment_name>```. 
+
+For example:  
+```./REARC/final_datasets/sample-efficiency/exp_setting_1/experiment_2```
+
+To create the datasets for a given data environment, the notebook ```create_<data_env>_datasets.ipynb``` can be executed, where <data_env> is either "cvr" or "rearc". Make sure that data were generated beforehand using the ```generate_<data_env>_data.py``` script.
+
+There is also the possibility to directly generate the data in the same notebook run. For this, in the notebook there is a global variable flag that decides wether data must be generated (using the data environment generator) or not. If the flag is set to False, it assumes that generated data already exist. If the flag is set to True, the notebook will first generate data given the parameters in the notebook before creating the datasets.
+
+#### Scripts
+There are essentialy three scripts that can be run:  
+- ```experiment.py``` to perform a full run of a (tracked) experiment with training, testing, and logs
+- ```training.py``` to only train a model
+- ```inference.py``` to only test a model
+
+See section [Program](#program) below for more information about running the ```experiment.py``` script.
+
+#### Parameters
+All the config parameters for the different modules are found in the relevant YAML config files in ```/configs```.
+
+---
+
+### Program
+### Simple Run
+An experiment is run as:
+```bash
+uv run experiment.py
+```
+
+[OmegaConf](https://omegaconf.readthedocs.io/en/2.3_branch/) CLI arguments can be used to overwrite the config arguments set in the config files located in ```/configs```.
+For example:
+```bash
+python experiment.py base.data_env="REARC" experiment.study="sample-efficiency" experiment.setting="exp_setting_1" experiment.name="experiment_1" training.max_epochs=5
+```
+This performs an experiment run for the REARC data environment for a Sample-Efficiency study of experiment setting and of some experiment part of that experiment setting. The model is trained for 5 epochs (at most).
+
+The study, experiment setting and experiment are defined explicitly in the file `create_<data_env>_datasets.ipynb` and the associated data environment README. Moreover, some useful metadata can be found in the created experiment folders.
+
+The result of an experiment run is complete logs of the configs, data, metrics, plots, etc.
+
+
+### Sweeps
+There is the possibility to perform experiments sweeps using [WandB Sweeps](https://docs.wandb.ai/guides/sweeps/). For this, simply set the parameters ```wandb.sweep.enabled ``` to True and the parameter ```wandb.sweep.num_sweeps``` to the number of parameter combinations to run experiments for. The sweep config can be found in ```/configs/sweep.yaml```.
+
 
 # General information
 The goal is to study Transformer-based vision models for Abstract Visual Reasoning (AVR) tasks across different data environments and experiment settings. 
@@ -51,13 +146,13 @@ A model is considered in order to evaluate its capabilities at learning AVR task
 <br>
 
 The models considered are the following: 
-- ResNet (safe baseline)
-- Vanilla ViT
-- ViT-ARC
-- ViT+registers
-- Looped-Transformer (i.e., without ACT)
-- Universal-Transformer
-- MDLM (Masked Discrete Language Model)
+- [ResNet](https://arxiv.org/pdf/1512.03385)
+- [Vanilla ViT](https://arxiv.org/pdf/2010.11929)
+- [ViT+registers](https://arxiv.org/pdf/2309.16588)
+- [ViTARC](https://openreview.net/pdf?id=0gOQeSHNX1)
+- Looped-Transformer (i.e., U-T without ACT)
+- [Universal-Transformer](https://arxiv.org/pdf/1807.03819)
+- [MDLM](https://arxiv.org/pdf/2406.07524)
 
 ### Experiment Settings
 An experiment setting for a (data environment, study) pair is a concrete configuration that determines the dataset, training procedure, evaluation procedure and metrics, as well as the different varying parameters - thus yielding different experiment runs - and additional constraints in order to assess a model's performance in a clear, structured and controlled manner.
