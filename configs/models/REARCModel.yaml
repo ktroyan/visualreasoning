@@ -1,6 +1,6 @@
 model:
-  backbone: 'transformer'  # choices: 'vit', 'transformer', 'resnet' (TODO: remove resnet as it does not make sense)
-  head: 'transformer'  # choices: 'transformer' (for transformer-based backbone), 'mlp' (for resnet backbone) (TODO: remove mlp as we remove resnet)
+  backbone: 'transformer'  # choices: 'my_vit', 'transformer', 'resnet'
+  head: 'transformer'  # choices: 'transformer' (for transformer-based backbone), 'mlp' (for resnet backbone)
   pretrained: null
   patch_size: 1
   use_ohe_repr: true # if True, use OHE for the possible tokens thus yielding as many artificial channels as there are different possible tokens; if False, use a simple sequence of tokens with an artificial channel only created to use convolution for linear projection of patches/pixels/tokens
