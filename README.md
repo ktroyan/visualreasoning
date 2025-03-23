@@ -13,6 +13,7 @@ Evaluating Neural Network architectures by studying Systematic Generalization, S
 ├── REARC
 │   ├── REARC.md
 │   ├── create_rearc_datasets.ipynb
+│   ├── external
 │   ├── generate_rearc_data.py
 │   └── tasks_generated.txt
 ├── configs
@@ -26,7 +27,8 @@ Evaluating Neural Network architectures by studying Systematic Generalization, S
 │   ├── networks
 │   │   ├── backbones
 │   │   └── heads
-│   ├── sweep.yaml
+│   ├── sweep_rearc.yaml
+│   ├── sweep_cvr.yaml
 │   ├── training.yaml
 │   └── wandb.yaml
 ├── data
