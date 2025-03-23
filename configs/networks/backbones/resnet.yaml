@@ -1,3 +1,4 @@
 backbone_network:
   name: 'resnet'
   network_size: 18  # choices: 18 (for ResNet18), 50 (for ResNet50)
+  embed_dim: 384  # this is the output dimension (i.e., number of channels) of the backbone network

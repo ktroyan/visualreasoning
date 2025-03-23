@@ -1,11 +1,13 @@
 import os
 import time
+from omegaconf import OmegaConf
 import pandas as pd
 import torch
 import pytorch_lightning as pl
 from pytorch_lightning.loggers.wandb import WandbLogger
 import wandb
 import matplotlib
+import yaml
 from typing import Any, Dict, List, Tuple
 
 # Personal codebase dependencies
@@ -27,18 +29,40 @@ def main() -> None:
     logger.info("*** Experiment started ***")
     exp_start_time = time.time()
 
-    # Get and log all the config arguments
-    config, _ = get_complete_config()
+    # Get all the config arguments for a regular experiment run
+    config, config_dict = get_complete_config()
+
+    # Setup experiment folders
+    experiment_name_timestamped = generate_timestamped_experiment_name("experiment")
+    experiment_folder = config.experiment.experiments_dir + f"/{experiment_name_timestamped}"
+    os.makedirs(experiment_folder, exist_ok=True)
+
+    # Initialize WandB project run tracking
+    run = wandb.init(
+        project=config.wandb.wandb_project_name,    # ignored if using sweeps
+        entity=config.wandb.wandb_entity_name,    # ignored if using sweeps
+        dir=experiment_folder,
+        name=experiment_name_timestamped,
+        # config=config
+        )
+    
+    if config.wandb.sweep.enabled:
+        # Merge the current sweep config arguments with the complete default config arguments
+        sweep_config = OmegaConf.create(dict(wandb.config))  # get the sweep config for the current run
+        # cfg_merged = OmegaConf.merge(config_dict, sweep_config)  # merge the default config with the sweep config
+        config, config_dict = get_complete_config(sweep_config) # use the sweep config to overwrite parameters (but before CLI arguments)
+        # wandb.config = dict(config)  # update the wandb.config with the merged config; the config to use through the program
+        wandb.config = config_dict  # update the wandb.config with the merged config; the config to use through the program
+        # config = OmegaConf.create(cfg_merged)   # OmegaConf merged config; the config to use through the program
+    else:
+        wandb.config = config_dict
+
+    # Log the complete and actual config used for the experiment
     log_config_dict(config, "*** All arguments contained in the config dict ***")
 
     # Seed everything for reproducibility
     if config.base.seed is not None:
         pl.seed_everything(config.base.seed)
-
-    # Setup experiment folders
-    experiment_name_timestamped = generate_timestamped_experiment_name(config.experiment.name)
-    experiment_folder = config.experiment.experiments_dir + f"/{experiment_name_timestamped}"
-    os.makedirs(experiment_folder, exist_ok=True)
 
     # Data chosen
     data_module = vars(data)[config.base.data_module]
@@ -56,15 +80,6 @@ def main() -> None:
     
     # Save the model metadata for future checkpoint use
     save_model_metadata_for_ckpt(experiment_folder, model)
-
-    # Initialize WandB project tracking with config config
-    run = wandb.init(
-        project=config.wandb.wandb_project_name,
-        entity=config.wandb.wandb_entity_name,
-        dir=experiment_folder,
-        name=experiment_name_timestamped,
-        config=config
-        )
 
     # Initialize the experiment logger
     if config.experiment.exp_logger == 'wandb':
@@ -152,4 +167,26 @@ if __name__ == '__main__':
 
     matplotlib.use('Agg')   # prevent the matplotlib GUI pop-ups from stealing focus
 
-    main()
+    # Get all the config arguments. This is needed to get the arguments that decide on whether to run sweeps or not and for how many sweeps
+    config, _ = get_complete_config()
+
+    if config.wandb.sweep.enabled:
+
+        # Get the sweep yaml file for the data environment specified in the base config
+        sweep_yaml_file = f"./configs/sweep_{(config.base.data_env).lower()}.yaml"
+
+        # Load the sweep config yaml file
+        with open(sweep_yaml_file, 'r') as f:
+            sweep_config = yaml.safe_load(f)
+
+        # Setup WandB sweep
+        sweep_id = wandb.sweep(sweep=sweep_config,
+                               project=config.wandb.wandb_project_name)
+
+        # Start sweep job
+        wandb.agent(sweep_id, 
+                    function=main,
+                    count=config.wandb.sweep.num_sweeps)
+
+    else:
+        main()

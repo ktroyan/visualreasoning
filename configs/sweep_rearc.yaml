@@ -1,0 +1,64 @@
+# NOTE: The parameters structure should follow that of the nested keys used in the config files in /configs by using "parameters" to create imbrication
+
+# Program to run
+program: experiment.py
+
+# Method to use for HPs optimization: random, grid, bayes
+method: grid
+
+# Project of the sweep
+# project: 'VisReas-project'
+# entity: 'klim-t'
+
+# Metric to optimize
+metric:
+  goal: minimize
+  name: metrics/val_loss  # TODO: see why metrics/val_loss does not exist in the Sweep section on WandB
+
+# Hyperparameters space to search
+parameters:
+  model:
+    parameters:
+      training_hparams:
+        parameters:
+          optimizer:
+            values: ['Adam', 'SGD']
+          scheduler:
+            values: ['ReduceLROnPlateau', 'StepLR', 'CosineAnnealingLR']
+          lr:
+            values: [0.0001, 0.0005, 0.001]
+          wd:
+            values: [0.001]
+      backbone:
+        values: ['transformer', 'vit']
+      head:
+        values: ['transformer']
+      use_ohe_repr:
+        values: [true]
+      ape_type:
+        values: ['2dsincos', 'learn']
+      num_reg_tokens:
+        values: [0, 4, 8]
+      task_embedding:
+        parameters:
+          enabled:
+            values: [true, false]
+          task_embedding_dim:
+            values: [128]
+  backbone_network:
+    parameters:
+      embed_dim:
+        values: [64, 256]
+      num_heads:
+        values: [4]
+      num_layers:
+        values: [4, 12]
+  data:
+    parameters:
+      train_batch_size:
+        values: [64, 128]
+# early_terminate:
+#   type: hyperband
+#   s: 2
+#   eta: 3
+#   max_iter: 10

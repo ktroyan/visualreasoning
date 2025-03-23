@@ -31,6 +31,9 @@ requirements_backup.txt
 ### BEFOREARC ###
 
 
+## wandb sweeps
+/wandb
+
 ## figs
 /figs
 

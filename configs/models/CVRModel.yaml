@@ -1,5 +1,5 @@
 model:
-  backbone: 'my_vit'  # choices: 'transformer', 'my_vit', 'vit', 'resnet'
+  backbone: 'vit'  # choices: 'transformer', 'vit', 'vit_timm', 'resnet'
   head: 'mlp'  # choices: 'mlp'
   pretrained: null
   patch_size: 16
@@ -17,6 +17,6 @@ model:
     enabled: true # TODO: we could add a field to specify the pooling technique for example
   training_hparams:
     optimizer: 'Adam' # it can be: Adam, AdamW, SGD
-    scheduler: 'ReduceLROnPlateau' # it can be: ReduceLROnPlateau, StepLR, MultiStepLR, ExponentialLR, CosineAnnealingLR
+    scheduler: 'ReduceLROnPlateau' # it can be: ReduceLROnPlateau, StepLR, CosineAnnealingLR
     lr: 0.001
     wd: 0.001

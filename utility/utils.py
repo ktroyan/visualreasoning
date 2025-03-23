@@ -12,16 +12,19 @@ import shutil
 from utility.logging import logger
 
 
-def get_complete_config():
+def get_complete_config(sweep_config=None):
     """
     Load and merge all relevant configuration files using OmegaConf.
+    If enabled, the WandB sweep config arguments take priority over the default config arguments.
+    The CLI arguments (provided with OmegaConf syntax) take priority (i.e., overwrite any other parameter value).
 
     Returns:
         resolved_complete_config_oc (OmegaConf): The complete resolved configuration as an OmegaConf object.
         resolved_complete_config_dict (dict): The complete resolved configuration as a dict.
     """
+
     try:
-        # Load base configurations
+        # Load base configs
         base_config = OmegaConf.load("configs/base.yaml")
         data_config = OmegaConf.load("configs/data.yaml")
         experiment_config = OmegaConf.load("configs/experiment.yaml")
@@ -29,16 +32,6 @@ def get_complete_config():
         training_config = OmegaConf.load("configs/training.yaml")
         inference_config = OmegaConf.load("configs/inference.yaml")
         cli_config = OmegaConf.from_cli()
-
-        # Merge common configurations
-        main_config = OmegaConf.merge(base_config,
-                                      data_config,
-                                      experiment_config,
-                                      wandb_config,
-                                      training_config,
-                                      inference_config,
-                                      cli_config
-                                      )
 
         # Create resolvers
         def resolve_if_then_else(enabled, set_value):
@@ -50,63 +43,160 @@ def get_complete_config():
             elif data_env == "REARC":
                 return img_size
 
-        # Register the resolvers
-        OmegaConf.register_new_resolver("resolve_if_then_else", resolve_if_then_else)
-        OmegaConf.register_new_resolver("resolve_data_env_img_size", resolve_data_env_img_size)
+        # Register the resolvers. Use replace=True to not try to re-register the resolver which would raise an error during WandB sweeps
+        OmegaConf.register_new_resolver("resolve_if_then_else", resolve_if_then_else, replace=True)
+        OmegaConf.register_new_resolver("resolve_data_env_img_size", resolve_data_env_img_size, replace=True)
 
-        # Explicitly resolve interpolations in the main config so that we get the values needed to load the specific configs below
-        OmegaConf.resolve(main_config)
+        # NOTE: 
+        # We handle configs differently for WandB sweeps as some of their arguments have to be overwritten by the sweep config.
+        # We need to do so to get the correct specific config files to load that may depend on some arguments of the sweep config.
+        # For example base.model_module decides of what model config to load.
+        # For example model.backbone decides of what backbone network config to load.
+        # For example model.head decides of what head network config to load.
+        
+        if sweep_config is not None:
+            log_config_dict(sweep_config, "*** Parameter values selected from the sweep config ***")
 
-        # Load model-specific config
-        model_module = main_config.base.get("model_module", None)
-        if not model_module:
-            raise ValueError("Error: 'base.model_module' is missing in base.yaml")
-
-        model_config_path = f"configs/models/{model_module}.yaml"
-        if not os.path.exists(model_config_path):
-            raise FileNotFoundError(f"Error: Model config file '{model_config_path}' not found.")
-        model_config = OmegaConf.load(model_config_path)
-
-        # Load backbone network-specific config
-        backbone_network_name = model_config.model.get("backbone", None)
-        if not backbone_network_name:
-            raise ValueError("Error: 'model.backbone' is missing in model config.")
-
-        backbone_network_config_path = f"configs/networks/backbones/{backbone_network_name}.yaml"
-        if not os.path.exists(backbone_network_config_path):
-            raise FileNotFoundError(f"Error: Backbone network config file '{backbone_network_config_path}' not found.")
-        backbone_network_config = OmegaConf.load(backbone_network_config_path)
-
-        # Load head network-specific config
-        head_network_name = model_config.model.get("head", None)
-        if not head_network_name:
-            raise ValueError("Error: 'model.head' is missing in model config.")
-
-        head_network_config_path = f"configs/networks/heads/{head_network_name}.yaml"
-        if not os.path.exists(head_network_config_path):
-            raise FileNotFoundError(f"Error: Head network config file '{head_network_config_path}' not found.")
-        head_network_config = OmegaConf.load(head_network_config_path)
-
-        # Merge all configs into a single hierarchical object
-        complete_config = OmegaConf.merge(main_config,
-                                          model_config,
-                                          backbone_network_config,
-                                          head_network_config,
+            # Merge non-specific configs
+            main_config = OmegaConf.merge(base_config,
+                                          data_config,
+                                          experiment_config,
+                                          wandb_config,
+                                          training_config,
+                                          inference_config,
+                                          sweep_config,
                                           cli_config
                                           )
 
-        # Explicitly resolve value interpolations in the complete config
-        OmegaConf.resolve(complete_config)
+            # Explicitly resolve interpolations in the main config so that we get the values needed to load the specific configs below
+            OmegaConf.resolve(main_config)
 
-        # Convert the config to a dict
-        resolved_complete_config_dict = OmegaConf.to_container(complete_config)
+            # Load model-specific config
+            model_module = main_config.base.get("model_module", None)
+            if not model_module:
+                raise ValueError("Error: 'base.model_module' is missing in base.yaml")
 
-        # Update the complete config dict with the WandB sweep config 
-        # TODO: See how to use the sweep config to update the complete config dict
-        #       Probably something like: the sweep config values for this run are resolved, and then we update the complete config dict with these resolved values
+            model_config_path = f"configs/models/{model_module}.yaml"
+            if not os.path.exists(model_config_path):
+                raise FileNotFoundError(f"Error: Model config file '{model_config_path}' not found.")
+            model_config = OmegaConf.load(model_config_path)
 
-        # Convert dict to OmegaConf object so that we can then use dot notation to access the keys
-        resolved_complete_config_oc = OmegaConf.create(resolved_complete_config_dict)
+            # Merge the main config with the specific config into a single hierarchical object
+            main_config = OmegaConf.merge(main_config,
+                                          model_config,
+                                          sweep_config,
+                                          cli_config
+                                          )
+            
+            # Explicitly resolve interpolations in the main config so that we get the values needed to load the specific configs below
+            OmegaConf.resolve(main_config)
+            
+            # Load backbone network-specific config
+            backbone_network_name = main_config.model.get("backbone", None)
+            if not backbone_network_name:
+                raise ValueError("Error: 'model.backbone' is missing in model config.")
+
+            backbone_network_config_path = f"configs/networks/backbones/{backbone_network_name}.yaml"
+            if not os.path.exists(backbone_network_config_path):
+                raise FileNotFoundError(f"Error: Backbone network config file '{backbone_network_config_path}' not found.")
+            backbone_network_config = OmegaConf.load(backbone_network_config_path)
+
+            # Merge the main config with the specific config into a single hierarchical object
+            main_config = OmegaConf.merge(main_config,
+                                          backbone_network_config,
+                                          sweep_config,
+                                          cli_config
+                                          )
+            
+            # Explicitly resolve interpolations in the main config so that we get the values needed to load the specific configs below
+            OmegaConf.resolve(main_config)
+
+            # Load head network-specific config
+            head_network_name = main_config.model.get("head", None)
+            if not head_network_name:
+                raise ValueError("Error: 'model.head' is missing in model config.")
+
+            head_network_config_path = f"configs/networks/heads/{head_network_name}.yaml"
+            if not os.path.exists(head_network_config_path):
+                raise FileNotFoundError(f"Error: Head network config file '{head_network_config_path}' not found.")
+            head_network_config = OmegaConf.load(head_network_config_path)
+
+            # Merge all configs into a single hierarchical object
+            main_config = OmegaConf.merge(main_config,
+                                          head_network_config,
+                                          sweep_config,
+                                          cli_config
+                                          )
+            
+            # Explicitly resolve interpolations in the main config so that we get the values needed to load the specific configs below
+            OmegaConf.resolve(main_config)
+
+            # Convert the config to a dict
+            resolved_complete_config_dict = OmegaConf.to_container(main_config)
+
+            # Convert dict to OmegaConf object so that we can then use dot notation to access the keys
+            resolved_complete_config_oc = OmegaConf.create(resolved_complete_config_dict)
+
+        else:
+            # Merge non-specific configs
+            main_config = OmegaConf.merge(base_config,
+                                        data_config,
+                                        experiment_config,
+                                        wandb_config,
+                                        training_config,
+                                        inference_config,
+                                        cli_config
+                                        )
+
+            # Explicitly resolve interpolations in the main config so that we get the values needed to load the specific configs below
+            OmegaConf.resolve(main_config)
+
+            # Load model-specific config
+            model_module = main_config.base.get("model_module", None)
+            if not model_module:
+                raise ValueError("Error: 'base.model_module' is missing in base.yaml")
+
+            model_config_path = f"configs/models/{model_module}.yaml"
+            if not os.path.exists(model_config_path):
+                raise FileNotFoundError(f"Error: Model config file '{model_config_path}' not found.")
+            model_config = OmegaConf.load(model_config_path)
+
+            # Load backbone network-specific config
+            backbone_network_name = model_config.model.get("backbone", None)
+            if not backbone_network_name:
+                raise ValueError("Error: 'model.backbone' is missing in model config.")
+
+            backbone_network_config_path = f"configs/networks/backbones/{backbone_network_name}.yaml"
+            if not os.path.exists(backbone_network_config_path):
+                raise FileNotFoundError(f"Error: Backbone network config file '{backbone_network_config_path}' not found.")
+            backbone_network_config = OmegaConf.load(backbone_network_config_path)
+
+            # Load head network-specific config
+            head_network_name = model_config.model.get("head", None)
+            if not head_network_name:
+                raise ValueError("Error: 'model.head' is missing in model config.")
+
+            head_network_config_path = f"configs/networks/heads/{head_network_name}.yaml"
+            if not os.path.exists(head_network_config_path):
+                raise FileNotFoundError(f"Error: Head network config file '{head_network_config_path}' not found.")
+            head_network_config = OmegaConf.load(head_network_config_path)
+
+            # Merge all configs into a single hierarchical object
+            complete_config = OmegaConf.merge(main_config,
+                                            model_config,
+                                            backbone_network_config,
+                                            head_network_config,
+                                            cli_config
+                                            )
+
+            # Explicitly resolve value interpolations in the complete config
+            OmegaConf.resolve(complete_config)
+
+            # Convert the config to a dict
+            resolved_complete_config_dict = OmegaConf.to_container(complete_config)
+
+            # Convert dict to OmegaConf object so that we can then use dot notation to access the keys
+            resolved_complete_config_oc = OmegaConf.create(resolved_complete_config_dict)
 
     except Exception as e:
         raise RuntimeError(f"Error loading or merging configurations: {e}")
@@ -115,7 +205,7 @@ def get_complete_config():
 
 def log_config_dict(config_dict, log_message=""):
     """
-    Logs the config dictionary in a structured format.
+    Log the config dictionary in a structured format.
 
     Args:
         config_dict (dict): The configuration dictionary to log.
@@ -227,6 +317,7 @@ def plot_absolute_positional_embeddings(pos_embed, num_prefix_tokens=None, viz_a
     """ 
     Plot the absolute positional embeddings (APE) used.
     If needed, we can truncate the first num_prefix_tokens tokens from the embeddings plot.
+    TODO: Fix the labeling of the plot as currently the y-axis does not correspond to the sequence position but to the positional embedding value for each dimension.
     TODO: Do we need to truncate the embeddings part for the prefix tokens from the plot?
     """
     # Ensure the figs directory exists

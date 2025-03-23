@@ -1,5 +1,5 @@
 model:
-  backbone: 'transformer'  # choices: 'my_vit', 'transformer', 'resnet' (TODO: remove resnet as it does not make sense)
+  backbone: 'transformer'  # choices: 'vit', 'transformer', 'resnet' (TODO: remove resnet as it does not make sense)
   head: 'transformer'  # choices: 'transformer' (for transformer-based backbone), 'mlp' (for resnet backbone) (TODO: remove mlp as we remove resnet)
   pretrained: null
   patch_size: 1
@@ -17,7 +17,7 @@ model:
   output_embed_dim: 128
   training_hparams:
     optimizer: 'Adam' # choices: Adam, AdamW, SGD
-    scheduler: 'ReduceLROnPlateau' # choices: ReduceLROnPlateau, StepLR, MultiStepLR, ExponentialLR, CosineAnnealingLR
+    scheduler: 'ReduceLROnPlateau' # choices: ReduceLROnPlateau, StepLR, CosineAnnealingLR
     lr: 0.001
     wd: 0.001
   observe_preds:
