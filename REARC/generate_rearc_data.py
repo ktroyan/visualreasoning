@@ -3,6 +3,7 @@ This file can be used as a script or its main function can be called.
 In both cases, its purpose is to generate REARC data.
 """
 
+
 # Personal codebase dependencies
 from external.main import generate_dataset
 
@@ -30,22 +31,17 @@ def main(base_data_dir, seed, n_tasks, n_examples, difficulties_lb, difficulties
         path = f'{base_data_dir}_lb{diff_lb_name}_ub{diff_ub_name}'
 
         print(f"Generating data with level of difficulty in the range [{diff_lb}, {diff_ub}]")
-        generate_dataset(path=path, seed=seed, n_tasks=n_tasks, n_examples=n_examples, diff_lb=diff_lb, diff_ub=diff_ub, specific_tasks=specific_tasks)
+        generate_dataset(path=path, seed=seed, n_tasks=n_tasks, n_examples=n_examples, diff_lb=diff_lb, diff_ub=diff_ub, specific_tasks=specific_tasks, use_tqdm=False)
         print(f"Generation done! Data saved at: {path}")
         print(f"Performed {index+1}/{len(difficulties_lb)} generations of data")
-
-    # generate_dataset(path='./generated_data_lb0_ub04', seed=1997, n_tasks=n_tasks, n_examples=n_examples, diff_lb=0, diff_ub=0.4, specific_tasks=[])
-    # generate_dataset(path='./generated_data_lb0_ub07', seed=1997, n_tasks=n_tasks, n_examples=n_examples, diff_lb=0, diff_ub=0.7, specific_tasks=[])
-    # generate_dataset(path='./generated_data_lb07_ub1', seed=1997, n_tasks=n_tasks, n_examples=n_examples, diff_lb=0.7, diff_ub=1, specific_tasks=[])
-
 
 if __name__ == '__main__':
 
     # Parameters
     base_data_dir = './generated_data'
-    seed = 1997
+    seed = 2025
     n_tasks = 10    # max is 400; tasks are randomly selected unless specific_tasks is provided
-    n_examples = 10000
+    n_examples = 102000 # for training + validation + test
     difficulties_lb = [0.0, 0.0, 0.7]
     difficulties_ub = [0.4, 0.7, 1.0]
     specific_tasks = []

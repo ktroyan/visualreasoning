@@ -80,7 +80,8 @@ def generate_dataset(
     n_examples: int = 1000,
     diff_lb: float = 0,
     diff_ub: float = 1,
-    specific_tasks: list = []
+    specific_tasks: list = [],
+    use_tqdm: bool = True
 ) -> None:
     """
     generates dataset
@@ -116,9 +117,13 @@ def generate_dataset(
             f.write(f'{key}\n')
 
     k = len(keys)
-    desc = f'task 0/{k}, example 0/{n_examples}'
-    pbar = tqdm.tqdm(enumerate(keys), desc=desc,
-                     position=0, leave=True, total=k)
+    if use_tqdm:
+        desc = f'task 0/{k}, example 0/{n_examples}'
+        pbar = tqdm.tqdm(enumerate(keys), desc=desc,
+                        position=0, leave=True, total=k)
+    else:
+        pbar = enumerate(keys)
+
     metadata = dict()
     for i, key in pbar:
         generator = generators_mapper[key]
@@ -156,8 +161,13 @@ def generate_dataset(
                 seen.add(identifier)
                 stats['rng_difficulties'].append(get_rng_difficulty(example))
                 stats['pso_difficulties'].append(get_pso_difficulty(example))
-                desc = f'task {i+1}/{k}, example {len(examples)}/{n_examples}'
-                pbar.set_description(desc)
+                if use_tqdm:
+                    desc = f'task {i+1}/{k}, example {len(examples)}/{n_examples}'
+                    pbar.set_description(desc)
+                else:
+                    desc = f'task {i+1}/{k}, example {len(examples)}/{n_examples}'
+                    print(desc)
+        
         end = time.time()
         stats['runtime'] = end - start
         with open(os.path.join(tasks_path, f'{key}.json'), 'w') as fp:
