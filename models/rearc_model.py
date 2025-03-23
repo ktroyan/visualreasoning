@@ -6,7 +6,7 @@ import pytorch_lightning as pl
 # Personal codebase dependencies
 from networks.backbones.resnet import get_resnet
 from networks.backbones.transformer import get_transformer_encoder
-from networks.backbones.my_vit import get_my_vit
+from networks.backbones.vit import get_vit
 from networks.heads.mlp import get_mlp_head
 from networks.heads.transformer import get_transformer_decoder
 from utility.utils import plot_lr_schedule, timer_decorator
@@ -390,6 +390,9 @@ class VisReasModel(pl.LightningModule):
         elif self.model_config.training_hparams.optimizer == 'AdamW':
             optimizer = torch.optim.AdamW(self.parameters(), lr=self.model_config.training_hparams.lr, weight_decay=self.model_config.training_hparams.wd)
         
+        elif self.model_config.training_hparams.optimizer == 'SGD':
+            optimizer = torch.optim.SGD(self.parameters(), lr=self.model_config.training_hparams.lr, momentum=0.9, weight_decay=self.model_config.training_hparams.wd)
+        
         else:
             raise ValueError(f"Unknown optimizer given: {self.model_config.training_hparams.optimizer}")
 
@@ -399,6 +402,12 @@ class VisReasModel(pl.LightningModule):
         
         elif self.model_config.training_hparams.scheduler == 'CosineAnnealingLR':
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
+
+        elif self.model_config.training_hparams.scheduler == 'StepLR':
+            scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
+
+        else:
+            raise ValueError(f"Unknown scheduler given: {self.model_config.training_hparams.scheduler}")
 
         optimizer_config = {
             "optimizer": optimizer,
@@ -452,8 +461,8 @@ class REARCModel(VisReasModel):
             self.backbone_input_embed_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
             
 
-        elif model_config.backbone == "my_vit":
-            self.encoder = get_my_vit(base_config=base_config,
+        elif model_config.backbone == "vit":
+            self.encoder = get_vit(base_config=base_config,
                                       model_config=model_config,
                                       network_config=backbone_network_config,
                                       image_size=self.image_size,
@@ -490,8 +499,7 @@ class REARCModel(VisReasModel):
 
 
         ## Model head or decoder
-        # TODO: Should we use an MLP head? Or stick to a transformer decoder/head only for REARC?
-        if model_config.backbone in ["transformer", "my_vit"]:
+        if model_config.backbone in ["transformer", "vit"]:
 
             if model_config.head == "transformer":
                 self.decoder = get_transformer_decoder(model_config=self.model_config,
@@ -673,7 +681,7 @@ class REARCModel(VisReasModel):
                 x_encoded = torch.cat([x_encoded, task_embedding], 2)  # [B, seq_len, backbone_input_embed_dim + task_embedding_dim]
 
         # Decode the encoded input sequence
-        if self.model_config.head in ["transformer", "my_vit"]:
+        if self.model_config.head in ["transformer", "vit"]:
             # Transformer Decoder
 
             if self.head_input_dim != self.head_input_embed_dim:

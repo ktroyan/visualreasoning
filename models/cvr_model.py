@@ -4,8 +4,9 @@ from torch.nn import functional as F
 import pytorch_lightning as pl
 
 # Personal codebase dependencies
+from networks.backbones.vit_timm import get_vit_timm
 from networks.backbones.vit import get_vit
-from networks.backbones.my_vit import get_my_vit
+from networks.backbones.transformer import get_transformer_encoder
 from networks.backbones.resnet import get_resnet
 from networks.heads.mlp import get_mlp_head
 from utility.utils import plot_lr_schedule  # noqa: F401
@@ -219,6 +220,9 @@ class VisReasModel(pl.LightningModule):
         elif self.model_config.training_hparams.optimizer == 'AdamW':
             optimizer = torch.optim.AdamW(self.parameters(), lr=self.model_config.training_hparams.lr, weight_decay=self.model_config.training_hparams.wd)
         
+        elif self.model_config.training_hparams.optimizer == 'SGD':
+            optimizer = torch.optim.SGD(self.parameters(), lr=self.model_config.training_hparams.lr, momentum=0.9, weight_decay=self.model_config.training_hparams.wd)
+        
         else:
             raise ValueError(f"Unknown optimizer given: {self.model_config.training_hparams.optimizer}")
 
@@ -228,6 +232,12 @@ class VisReasModel(pl.LightningModule):
         
         elif self.model_config.training_hparams.scheduler == 'CosineAnnealingLR':
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
+
+        elif self.model_config.training_hparams.scheduler == 'StepLR':
+            scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
+
+        else:
+            raise ValueError(f"Unknown scheduler given: {self.model_config.training_hparams.scheduler}")
 
         optimizer_config = {
             "optimizer": optimizer,
@@ -269,8 +279,8 @@ class CVRModel(VisReasModel):
                                                            )
             self.head_input_dim = bb_num_out_features
 
-        elif model_config.backbone == "vit":
-            self.encoder, bb_num_out_features = get_vit(base_config=base_config,
+        elif model_config.backbone == "vit_timm":
+            self.encoder, bb_num_out_features = get_vit_timm(base_config=base_config,
                                                         model_config=model_config, 
                                                         network_config=backbone_network_config,
                                                         image_size=self.img_size,
@@ -279,8 +289,8 @@ class CVRModel(VisReasModel):
                                                         )
             self.head_input_dim = bb_num_out_features
 
-        elif model_config.backbone == "my_vit":
-            self.encoder = get_my_vit(base_config=base_config,
+        elif model_config.backbone == "vit":
+            self.encoder = get_vit(base_config=base_config,
                                       model_config=model_config,
                                       network_config=backbone_network_config,
                                       image_size=self.image_size,
@@ -289,6 +299,17 @@ class CVRModel(VisReasModel):
                                       device=self.device
                                       )
             self.head_input_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
+
+        elif model_config.backbone == "transformer":
+            self.encoder = get_transformer_encoder(base_config=base_config,
+                                      model_config=model_config,
+                                      network_config=backbone_network_config,
+                                      image_size=self.image_size,
+                                      num_channels=self.num_channels,
+                                      num_classes=self.num_classes,
+                                      device=self.device
+                                      )
+            self.head_input_dim = backbone_network_config.embed_dim   # embedding dimension backbone model 
 
         elif model_config.backbone == "looped_vit":
             raise NotImplementedError("Looped ViT not implemented yet")
@@ -308,7 +329,7 @@ class CVRModel(VisReasModel):
 
 
         # Model head or decoder (depending on the backbone chosen)
-        if model_config.backbone in ["resnet", "vit", "my_vit"]: 
+        if model_config.backbone in ["resnet", "vit_timm", "vit", "transformer"]: 
             if model_config.dp_sim.enabled:
                 # NOTE: the approach here from the CVR code is to give feature embeddings (obtained from the backbone model)
                 # to the MLP head which will then create latent embeddings that are used to compute the pairwise dot products
