@@ -8,9 +8,9 @@ import numpy as np
 
 from PIL import Image
 
-from tasks import TASKS
-from generalization_tasks import TASKS as TASKS_GEN
-from utils import render_ooo
+from .tasks import TASKS
+from .generalization_tasks import TASKS as TASKS_GEN
+from .utils import render_ooo
 
 
 TASKS_IDX={
