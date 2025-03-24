@@ -23,4 +23,5 @@ Associated paper: [Addressing ARC via Procedural Example Generation](https://arx
  
 # License
 The RE-ARC code used (and modified) is located in the /external folder.  
+
 RE-ARC is released under the MIT License.
