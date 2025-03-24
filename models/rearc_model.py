@@ -196,7 +196,7 @@ class VisReasModel(pl.LightningModule):
         self.log_dict({"learning_rate": self.lr_schedulers().get_last_lr()[-1]}, prog_bar=True, logger=True, on_step=True, on_epoch=True)    # NOTE: this is monitored for best checkpoint and early stopping. This yields learning_rate in the logs
 
         # Save two batches (of inputs, preds, targets) per epoch for plotting of images at each epoch
-        if (batch_idx == 0) or (batch_idx == self.trainer.num_training_batches - 1):
+        if (batch_idx == 0) or (batch_idx == self.trainer.num_val_batches - 1):
             self.val_inputs.append(x)
             self.val_preds.append(preds)
             self.val_targets.append(y)
@@ -215,11 +215,11 @@ class VisReasModel(pl.LightningModule):
         if self.model_config.observe_preds.enabled:
             # Plot a few training samples (inputs, predictions, targets) of the first and last batch seen during the epoch
             observe_image_predictions("train", self.train_inputs, self.train_preds, self.train_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=0, epoch=self.current_epoch)
-            observe_image_predictions("train", self.train_inputs, self.train_preds, self.train_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=1, epoch=self.current_epoch)
+            observe_image_predictions("train", self.train_inputs, self.train_preds, self.train_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=-1, epoch=self.current_epoch)
             
             # Plot a few validation samples (inputs, predictions, targets) of the first and last batch seen during the epoch
             observe_image_predictions("val", self.val_inputs, self.val_preds, self.val_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=0, epoch=self.current_epoch)
-            observe_image_predictions("val", self.val_inputs, self.val_preds, self.val_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=1, epoch=self.current_epoch)
+            observe_image_predictions("val", self.val_inputs, self.val_preds, self.val_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=-1, epoch=self.current_epoch)
 
         # Reset the lists for the next epoch
         self.train_inputs = []
