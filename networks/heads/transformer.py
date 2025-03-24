@@ -77,7 +77,7 @@ class TransformerDecoder(nn.TransformerDecoder):
         self.apply(self._init_weights)
 
     # NOTE: Masks for the forward() method
-    # 1) Causal (Look-ahead) mask. Use tgt_mask in forward() of nn.TransformerDecoder. Prevents the decoder from looking at the future tokens/positions. Use an upper triangular matrix where future positions are -inf and diagonal is 1.
+    # 1) Causal (Look-ahead) (Self-Attention) (additive) mask. Use tgt_mask in forward() of nn.TransformerDecoder. Prevents the decoder from looking at the future tokens/positions. Use an upper triangular matrix where future positions are -inf and otherwise 0.
     # 2) [Not needed] Padding mask. Use tgt_key_padding_mask in forward() of nn.TransformerDecoder. Similar to the encoder. It is used to mask the padding tokens in the target sequence.
     # 3) [Not needed] Cross-Attention masks. Use memory_mask in forward() of nn.TransformerDecoder. It is used for custom attention masking of the memory sequence. Use value 0 for allowed and -inf for masked positions.
     # 4) [Not needed] Use memory_key_padding_mask in forward() of nn.TransformerDecoder. It is essentially the same as src_key_padding_mask for the forward() of nn.TransformerEncoder. It is used to prevent the decoder from attending to the padding tokens in the memory sequence.

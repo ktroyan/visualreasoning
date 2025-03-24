@@ -23,7 +23,14 @@ from utility.utils import plot_absolute_positional_embeddings
 
 __all__ = ['get_vit_timm']
 
-class Vit(VisionTransformer):
+class VitTimm(VisionTransformer):
+    """
+    Vanilla Vision Transformer (ViT) model from the timm library.
+    This code is principally used for safety check reproduction of the results of the CVR paper. 
+
+    Args:
+        VisionTransformer (nn.Module): VisionTransformer class from timm library
+    """
     def __init__(self, 
                  img_size,
                  num_channels,
@@ -86,7 +93,7 @@ class Vit(VisionTransformer):
         # NOTE: https://github.com/facebookresearch/moco-v3/issues/36Note
         # Handle [cls] token
         if self.use_cls_token:
-            assert self.num_prefix_tokens == 1, 'Assuming one and only one token, [cls]'    # TODO: change if we also use register tokens
+            assert self.num_prefix_tokens == 1, 'Assuming one and only one token, [cls]'
             pe_token = torch.zeros([1, 1, self.embed_dim], dtype=torch.float32)     # define the PE of the [cls] token to be concatenated at the beginning of the PE of the patches
             self.pos_embed = nn.Parameter(torch.cat([pe_token, pos_emb], dim=1))    # [1, (num_patches+1), embed_dim]; the PE will be added to the input embeddings of the ViT in the forward pass of the ViT backbone (VisionTransformer)
         else:
@@ -122,12 +129,12 @@ def get_vit_timm(base_config, model_config, network_config, image_size, num_chan
     # model = timm.create_model(
     #     vit_model_name,
     #     pretrained=False,  # use pre-trained weights
-    #     in_chans=1,  # number of input channels (1 for grayscale images, 3 for RGB)
+    #     in_chans=3,  # number of input channels (1 for grayscale images, 3 for RGB)
     #     num_classes=0,  # no final classification head and thus get feature embeddings
     # )
 
     ## Method 2 to get the model
-    model = Vit(
+    model = VitTimm(
         img_size=image_size,
         num_channels=num_channels,
         num_classes=num_classes,
@@ -144,7 +151,6 @@ def get_vit_timm(base_config, model_config, network_config, image_size, num_chan
         cls_aggreg_method=model_config['encoder_aggregation']['method'],  # "" for no global pooling to get a sequence as output, "mean" for global average pooling, "token" for using the [cls] token to aggregate features
         )
 
-    # TODO: should we use that default config? Does not seem useful, as it is devised for 1K-ImageNet
     default_cfg = _cfg()
 
     model.default_cfg = default_cfg
