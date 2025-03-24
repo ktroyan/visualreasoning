@@ -15,12 +15,13 @@ Run the scripts from the REARC folder.
 RE-ARC is Reverse-Engineering the Abstraction and Reasoning Corpus. We use its code for generating data that we use to conduct experiments.
 <br>
 
-The original and official repository can be found [here](https://github.com/serre-lab/CVR).
+The original and official repository can be found [here](https://github.com/michaelhodel/re-arc).
 <br>
 
 Associated paper: [Addressing ARC via Procedural Example Generation](https://arxiv.org/abs/2404.07353)
 
  
 # License
+The RE-ARC code used (and modified) is located in the /external folder.  
 
 RE-ARC is released under the MIT License.

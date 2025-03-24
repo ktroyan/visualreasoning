@@ -151,7 +151,7 @@ uv run experiment.py
 [OmegaConf](https://omegaconf.readthedocs.io/en/2.3_branch/) CLI arguments can be used to overwrite the config arguments set in the config files located in ```/configs```.
 For example:
 ```bash
-python experiment.py base.data_env="REARC" experiment.study="sample-efficiency" experiment.setting="exp_setting_1" experiment.name="experiment_1" training.max_epochs=5
+uv run experiment.py base.data_env="REARC" experiment.study="sample-efficiency" experiment.setting="exp_setting_1" experiment.name="experiment_1" training.max_epochs=5
 ```
 This performs an experiment run for the REARC data environment for a Sample-Efficiency study of experiment setting and of some experiment part of that experiment setting. The model is trained for 5 epochs (at most).
 
@@ -161,7 +161,7 @@ The result of an experiment run is complete logs of the configs, data, metrics, 
 
 
 ### Sweeps
-There is the possibility to perform experiments sweeps using [WandB Sweeps](https://docs.wandb.ai/guides/sweeps/). For this, simply set the parameters ```wandb.sweep.enabled ``` to True and the parameter ```wandb.sweep.num_sweeps``` to the number of parameter combinations to run experiments for. The sweep config can be found in ```/configs/sweep_<data_env>.yaml```.
+There is the possibility to perform experiments sweeps using [WandB Sweeps](https://docs.wandb.ai/guides/sweeps/). For this, simply set the parameters ```wandb.sweep.enabled ``` to true and the parameter ```wandb.sweep.num_sweeps``` to the number of parameter combinations to run experiments for. The sweep config can be found in ```/configs/sweep_<data_env>.yaml```.
 
 
 # General information
