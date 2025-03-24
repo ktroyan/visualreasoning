@@ -1,7 +1,7 @@
 backbone_network:
   name: 'vit_timm'
   embed_dim: 384  # 384 for small, 768 for base
-  num_heads: 6  # 8
+  num_heads: 8  # 8
   mlp_ratio: 4  # used instead of explicit ff_dim
   qkv_bias: true
   num_layers: 8  # 12

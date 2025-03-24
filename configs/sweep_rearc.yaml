@@ -48,7 +48,7 @@ parameters:
   backbone_network:
     parameters:
       embed_dim:
-        values: [64, 256]
+        values: [128, 256]
       num_heads:
         values: [4]
       num_layers:

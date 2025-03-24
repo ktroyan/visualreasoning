@@ -43,19 +43,14 @@ def main() -> None:
         entity=config.wandb.wandb_entity_name,    # ignored if using sweeps
         dir=experiment_folder,
         name=experiment_name_timestamped,
-        # config=config
         )
     
     if config.wandb.sweep.enabled:
         # Merge the current sweep config arguments with the complete default config arguments
         sweep_config = OmegaConf.create(dict(wandb.config))  # get the sweep config for the current run
-        # cfg_merged = OmegaConf.merge(config_dict, sweep_config)  # merge the default config with the sweep config
         config, config_dict = get_complete_config(sweep_config) # use the sweep config to overwrite parameters (but before CLI arguments)
-        # wandb.config = dict(config)  # update the wandb.config with the merged config; the config to use through the program
-        wandb.config = config_dict  # update the wandb.config with the merged config; the config to use through the program
-        # config = OmegaConf.create(cfg_merged)   # OmegaConf merged config; the config to use through the program
-    else:
-        wandb.config = config_dict
+    
+    wandb.config = config_dict  # set to wandb the config to use through the program; if sweep enabled, update the wandb.config with the merged config
 
     # Log the complete and actual config used for the experiment
     log_config_dict(config, "*** All arguments contained in the config dict ***")

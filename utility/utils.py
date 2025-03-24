@@ -17,6 +17,7 @@ def get_complete_config(sweep_config=None):
     Load and merge all relevant configuration files using OmegaConf.
     If enabled, the WandB sweep config arguments take priority over the default config arguments.
     The CLI arguments (provided with OmegaConf syntax) take priority (i.e., overwrite any other parameter value).
+    Essentially, the merging order in OmegaConf.merge() is important.
 
     Returns:
         resolved_complete_config_oc (OmegaConf): The complete resolved configuration as an OmegaConf object.
@@ -161,8 +162,17 @@ def get_complete_config(sweep_config=None):
                 raise FileNotFoundError(f"Error: Model config file '{model_config_path}' not found.")
             model_config = OmegaConf.load(model_config_path)
 
+            # Merge the main config with the specific config into a single hierarchical object
+            main_config = OmegaConf.merge(main_config,
+                                          model_config,
+                                          cli_config
+                                          )
+            
+            # Explicitly resolve interpolations in the main config so that we get the values needed to load the specific configs below
+            OmegaConf.resolve(main_config)
+
             # Load backbone network-specific config
-            backbone_network_name = model_config.model.get("backbone", None)
+            backbone_network_name = main_config.model.get("backbone", None)
             if not backbone_network_name:
                 raise ValueError("Error: 'model.backbone' is missing in model config.")
 
@@ -171,8 +181,17 @@ def get_complete_config(sweep_config=None):
                 raise FileNotFoundError(f"Error: Backbone network config file '{backbone_network_config_path}' not found.")
             backbone_network_config = OmegaConf.load(backbone_network_config_path)
 
+            # Merge the main config with the specific config into a single hierarchical object
+            main_config = OmegaConf.merge(main_config,
+                                          backbone_network_config,
+                                          cli_config
+                                          )
+            
+            # Explicitly resolve interpolations in the main config so that we get the values needed to load the specific configs below
+            OmegaConf.resolve(main_config)
+
             # Load head network-specific config
-            head_network_name = model_config.model.get("head", None)
+            head_network_name = main_config.model.get("head", None)
             if not head_network_name:
                 raise ValueError("Error: 'model.head' is missing in model config.")
 
@@ -182,18 +201,16 @@ def get_complete_config(sweep_config=None):
             head_network_config = OmegaConf.load(head_network_config_path)
 
             # Merge all configs into a single hierarchical object
-            complete_config = OmegaConf.merge(main_config,
-                                            model_config,
-                                            backbone_network_config,
-                                            head_network_config,
-                                            cli_config
-                                            )
-
-            # Explicitly resolve value interpolations in the complete config
-            OmegaConf.resolve(complete_config)
+            main_config = OmegaConf.merge(main_config,
+                                          head_network_config,
+                                          cli_config
+                                          )
+            
+            # Explicitly resolve interpolations in the main config so that we get the values needed to load the specific configs below
+            OmegaConf.resolve(main_config)
 
             # Convert the config to a dict
-            resolved_complete_config_dict = OmegaConf.to_container(complete_config)
+            resolved_complete_config_dict = OmegaConf.to_container(main_config)
 
             # Convert dict to OmegaConf object so that we can then use dot notation to access the keys
             resolved_complete_config_oc = OmegaConf.create(resolved_complete_config_dict)
