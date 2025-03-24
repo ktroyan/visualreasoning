@@ -182,13 +182,17 @@ class VisReasModel(pl.LightningModule):
         return
 
     def optimizer_step(self, epoch, batch_idx, optimizer, optimizer_closure):
-        """Override the PyTorch Lightning optimizer_step method to add custom logic before the optimizer.step() call.
-        
-        NOTE: We use it for learning rate warm-up, as it is important for Transformer model training.
         """
+        Override the PyTorch Lightning optimizer_step method to add custom logic before the optimizer.step() call.
+        
+        NOTE: We overwrite it for learning rate warm-up.
+        TODO: See if ok to define the LR warm-up like this.
+        """
+        
         # Manual LR warm up
-        if self.trainer.global_step < 500:
-            lr_scale = min(1.0, float(self.trainer.global_step + 1) / 500.0)
+        num_lr_warmup_steps = 50.0    # 1000.0
+        if self.trainer.global_step < num_lr_warmup_steps:
+            lr_scale = min(1.0, float(self.trainer.global_step + 1) / num_lr_warmup_steps)
             for pg in optimizer.param_groups:
                 pg["lr"] = lr_scale * self.model_config.training_hparams.lr
 
@@ -268,7 +272,7 @@ class CVRModel(VisReasModel):
 
         assert self.num_classes == self.nb_images_in_one_sample, f"Number of classes ({self.num_classes}) should be equal to the number of images within one sample ({self.nb_images_in_one_sample})"
 
-        # Model backbone or encoder
+        ## Model backbone or encoder
         if model_config.backbone == "resnet":
             self.encoder, bb_num_out_features = get_resnet(base_config=base_config,
                                                            model_config=model_config,
@@ -318,7 +322,7 @@ class CVRModel(VisReasModel):
             raise ValueError(f"Unknown model backbone given: {model_config.backbone}")
         
 
-        # Task embedding
+        ## Task embedding
         if model_config.task_embedding.enabled:
             task_embedding_dim = model_config.task_embedding.task_embedding_dim
             self.task_embedding = nn.Embedding(model_config.n_tasks, embedding_dim=task_embedding_dim)   # NOTE: 103 is the total number of tasks because the input is a task id (i.e., a number between 0 and 102)
@@ -328,8 +332,8 @@ class CVRModel(VisReasModel):
             self.task_embedding = None
 
 
-        # Model head or decoder (depending on the backbone chosen)
-        if model_config.backbone in ["resnet", "vit_timm", "vit", "transformer"]: 
+        ## Model head or decoder (depending on the backbone chosen)
+        if model_config.head == "mlp": 
             if model_config.dp_sim.enabled:
                 # NOTE: the approach here from the CVR code is to give feature embeddings (obtained from the backbone model)
                 # to the MLP head which will then create latent embeddings that are used to compute the pairwise dot products
@@ -341,7 +345,7 @@ class CVRModel(VisReasModel):
             self.head = get_mlp_head(head_network_config, embed_dim=self.head_input_dim, output_dim=self.head_output_layer_dim, activation='relu', num_layers=2)
         
         else:
-            raise ValueError(f"Unknown model backbone given: {model_config.backbone}")
+            raise ValueError(f"Unknown model head given: {model_config.head}")
 
 
     def forward(self, x, samples_task_id=None):

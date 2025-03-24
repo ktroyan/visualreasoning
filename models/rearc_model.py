@@ -15,6 +15,11 @@ from utility.logging import logger
 
 
 class VisReasModel(pl.LightningModule):
+    """
+    Model module class that handles the training, validation and testing logic of the model.
+    It is based on PTL's LightningModule class.
+    """
+    
     def __init__(self, model_config, image_size):
         super().__init__()
 
@@ -54,9 +59,6 @@ class VisReasModel(pl.LightningModule):
         # Learning rate values for plotting LR schedule
         self.lr_values = []
 
-        # Criterion / Loss Function
-        # criterion = nn.CrossEntropyLoss(ignore_index=10)    # ignore_index=10 allows to ignore the symbols 10 (i.e., the padding tokens for us, currently)
-
 
     def load_backbone_weights(self, checkpoint_path):
         self.model_backbone.load_state_dict(torch.load(checkpoint_path, weights_only=False)['model'], strict=False)
@@ -67,7 +69,7 @@ class VisReasModel(pl.LightningModule):
             param.requires_grad = False
 
     def create_predictions_mask(self, B: int, H: int, W: int, y_true_size: int) -> torch.Tensor:
-        """ Create a mask to ignore the padding tokens when computing the loss and accuracy. """
+        """ Create a multiplicative mask to ignore the non-symbol (e.g., padding) tokens when computing the loss and accuracy. """
         
         mask = torch.zeros((B, H, W), dtype=torch.bool, device=self.device)  # [B, H, W] ; initialize all as 0/False (padded)
 
@@ -97,7 +99,7 @@ class VisReasModel(pl.LightningModule):
 
         # Forward pass of the model
         if self.model_config.task_embedding.enabled:
-            # Forward pass with the task embeddings
+            # Forward pass (with the task embeddings)
             y_hat = self(x, y, samples_task_id)    # computed logits
         else:
             # Forward pass
@@ -106,7 +108,7 @@ class VisReasModel(pl.LightningModule):
         # Permute the dimensions of y_hat to be [B, num_classes, seq_len] instead of [B, seq_len, num_classes] to match PyTorch's cross_entropy function format
         y_hat = y_hat.permute(0, 2, 1)  # [B, num_classes, seq_len] <-- [B, seq_len, num_classes]
 
-        # Create the mask based on the true sizes of y to only compute the metrics w.r.t. the actual tokens to predict in the target
+        # Create the multiplicative mask based on the true sizes of y to only compute the metrics w.r.t. the actual tokens to predict in the target
         mask = self.create_predictions_mask(B, H, W, y_true_size)
 
         return x, y_hat, y, mask
@@ -119,9 +121,6 @@ class VisReasModel(pl.LightningModule):
         B, seq_len = y.shape
 
         # probabilities = F.softmax(y_hat, dim=1)  # compute the probabilities (normalized logits) of the model for each sample of the batch
-
-        # TODO: See how we want to compute the loss and accuracies. For example, with or without the padding considered?
-        #       Also check if done correctly.
 
         # Loss per symbol (with padding): compute the loss per token/symbol
         per_sample_loss = F.cross_entropy(y_hat, y.long(), reduction='none').float()  # [B, seq_len]
@@ -143,7 +142,7 @@ class VisReasModel(pl.LightningModule):
 
         # Grid accuracy (only count as correct if the entire padded grid is correct)
         # grid_acc = (torch.sum(torch.all(y == preds, dim=1)).float() / B).unsqueeze(0)    # same as line below
-        acc_grid_with_pad = torch.all(y == preds, dim=1).float().mean().unsqueeze(0)   # | ~mask ensures automatically count as correct the padding tokens
+        acc_grid_with_pad = torch.all(y == preds, dim=1).float().mean().unsqueeze(0)
 
         # Grid accuracy (only count as correct if entire non-padding grid is correct)
         # acc_grid_no_pad = (torch.sum(torch.all((preds == y) | ~mask, dim=1)).float() / B).unsqueeze(0)    # same as line below
@@ -238,12 +237,9 @@ class VisReasModel(pl.LightningModule):
         B, H, W = x.shape
         B, seq_len = y.shape
 
-        # TODO: See how we want to compute the loss and accuracies. For example, with or without the padding considered?
-        #       Also check if done correctly.
-
         # Loss per symbol (with padding): compute the loss per token/symbol
         per_sample_loss = F.cross_entropy(y_hat, y.long(), reduction='none').float()  # [B, seq_len]
-        loss_symbol_with_pad = (per_sample_loss.mean()).unsqueeze(0)
+        loss_symbol_with_pad = per_sample_loss.mean().unsqueeze(0)
 
         # Loss per symbol (without padding): compute the loss per token/symbol and then apply the mask to ignore the padding tokens
         per_sample_loss = F.cross_entropy(y_hat, y.long(), reduction='none').float()  # [B, seq_len]
@@ -259,11 +255,11 @@ class VisReasModel(pl.LightningModule):
         # Accuracy per symbol (without padding) (i.e., the accuracy of the model in predicting the correct symbol for each pixel of the grid considering only the target grid, that is, without considering the padding tokens)
         acc_symbol_no_pad = (((preds == y) * mask).sum().float() / mask.sum()).unsqueeze(0)  # only consider non-padding elements
 
-        # Grid accuracy (only count as correct if the entire padded grid is correct)
+        # Grid accuracy with pad (only count as correct if the entire padded grid is correct)
         # grid_acc = (torch.sum(torch.all(y == preds, dim=1)).float() / B).unsqueeze(0)    # same as line below
-        acc_grid_with_pad = torch.all(y == preds, dim=1).float().mean().unsqueeze(0)   # | ~mask ensures automatically count as correct the padding tokens
+        acc_grid_with_pad = torch.all(y == preds, dim=1).float().mean().unsqueeze(0)
 
-        # Grid accuracy (only count as correct if entire non-padding grid is correct)
+        # Grid accuracy without pad (only count as correct if entire non-padding grid is correct)
         # acc_grid_no_pad = (torch.sum(torch.all((preds == y) | ~mask, dim=1)).float() / B).unsqueeze(0)    # same as line below
         acc_grid_no_pad = torch.all((preds == y) | ~mask, dim=1).float().mean().unsqueeze(0)   # | ~mask ensures automatically count as correct the padding tokens
 
@@ -281,7 +277,7 @@ class VisReasModel(pl.LightningModule):
             self.test_targets.append(y)
 
             results = {f"test_{k}": v for k, v in logs.items()}
-            self.log_dict(results, logger=True, prog_bar=True)
+            self.log_dict(results, logger=True, on_step=True, prog_bar=True)
             self.test_step_results.append(results)
 
         elif dataloader_idx == 1:
@@ -291,7 +287,7 @@ class VisReasModel(pl.LightningModule):
 
             # TODO: Currently in the code we assume that if there is only one dataloader, it will be considered as a test dataloader and not a gen test dataloader even though the data may be of systematic generalization. Fix this to be better maybe?
             results = {f"gen_test_{k}": v for k, v in logs.items()}
-            self.log_dict(results, logger=True, prog_bar=True)
+            self.log_dict(results, logger=True, on_step=True, prog_bar=True)
             self.gen_test_step_results.append(results)
         
         else:
@@ -350,15 +346,17 @@ class VisReasModel(pl.LightningModule):
         return
 
     def optimizer_step(self, epoch, batch_idx, optimizer, optimizer_closure):
-        """Override the PyTorch Lightning optimizer_step method to add custom logic before the optimizer.step() call.
-        
-        NOTE: We overwrite it for learning rate warm-up, as it is important for Transformer model training.
-        TODO: See if ok to define the LR warm-up like this.
-
         """
+        Override the PyTorch Lightning optimizer_step method to add custom logic before the optimizer.step() call.
+        
+        NOTE: We overwrite it for learning rate warm-up.
+        TODO: See if ok to define the LR warm-up like this.
+        """
+
         # Manual LR warm up
-        if self.trainer.global_step < 1000:
-            lr_scale = min(1.0, float(self.trainer.global_step + 1) / 1000.0)
+        num_lr_warmup_steps = 100.0    # 1000.0
+        if self.trainer.global_step < num_lr_warmup_steps:
+            lr_scale = min(1.0, float(self.trainer.global_step + 1) / num_lr_warmup_steps)
             for pg in optimizer.param_groups:
                 pg["lr"] = lr_scale * self.model_config.training_hparams.lr
 
@@ -463,13 +461,13 @@ class REARCModel(VisReasModel):
 
         elif model_config.backbone == "vit":
             self.encoder = get_vit(base_config=base_config,
-                                      model_config=model_config,
-                                      network_config=backbone_network_config,
-                                      image_size=self.image_size,
-                                      num_channels=self.num_channels,
-                                      num_classes=self.num_classes,
-                                      device=self.device
-                                      )
+                                   model_config=model_config,
+                                   network_config=backbone_network_config,
+                                   image_size=self.image_size,
+                                   num_channels=self.num_channels,
+                                   num_classes=self.num_classes,
+                                   device=self.device
+                                   )
             self.backbone_input_embed_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
 
         elif model_config.backbone == "looped_vit":
@@ -493,48 +491,33 @@ class REARCModel(VisReasModel):
 
 
         ## Encoder to Decoder projection layer; useful to handle the task embedding that is concatenated
-        # TODO: Should we handle the task embedding differently than a concatenation? For example using FiLM or other methods?
+        # TODO: Should we handle the task embedding differently from using a concatenation? For example using FiLM or other methods?
         if self.head_input_dim != self.head_input_embed_dim:
             self.enc_to_dec_proj = nn.Linear(self.head_input_dim, self.head_input_embed_dim, device=self.device)  # project the encoder output (of dimension backbone_network_config.embed_dim + task_embedding_dim) to the decoder embedding dimension
 
-
+        
         ## Model head or decoder
-        if model_config.backbone in ["transformer", "vit"]:
-
-            if model_config.head == "transformer":
-                self.decoder = get_transformer_decoder(model_config=self.model_config,
-                                                       network_config=head_network_config,
-                                                       max_seq_len=self.seq_len,
-                                                       device=self.device)
-            else:
-                raise ValueError(f"Unknown model head given: {model_config.head}")
+        if model_config.head == "transformer":
+            self.decoder = get_transformer_decoder(model_config=self.model_config,
+                                                    network_config=head_network_config,
+                                                    max_seq_len=self.seq_len,
+                                                    device=self.device)
             
-            # Create a mask to prevent the Transformer Decoder from looking at the future tokens/positions
-            # Try 1: we have -inf where we want to mask and 0 where we want to keep
-            self.tgt_mask = torch.triu(torch.full((self.seq_len, self.seq_len), float("-inf"), dtype=torch.float32, device=self.device), diagonal=1)  # similar to torch's generate_square_subsequent_mask
-            
-            # Try 2: we have 1's where we want to mask and 0's where we want to keep
-            # self.tgt_mask = torch.triu(torch.ones(self.seq_len, self.seq_len), diagonal=1).bool().to(device=self.device, dtype=torch.float32)  # [seq_len, seq_len]; masked positions are filled with True, unmasked positions are filled with False
-            
-            # Try 3: same as Try 1
-            # self.tgt_mask = torch.triu(torch.ones(self.seq_len, self.seq_len), diagonal=1)
-            # self.tgt_mask = self.tgt_mask.masked_fill(self.tgt_mask == 1, float('-inf'))
+            # Create an additive mask to prevent the Transformer Decoder from looking at the future tokens/positions in self-attention module
+            # The mask is a square Tensor of size [seq_len, seq_len] with -inf where we want to mask and 0 where we want to keep
+            self.tgt_mask = torch.triu(torch.full((self.seq_len, self.seq_len), float("-inf"), dtype=torch.float32, device=self.device), diagonal=1)    # [seq_len, seq_len]; diagonal=1 specifies from which diagonal to set the elements as -inf
 
             # Create a target projection layer to map the ground truth target tokens/sequence (obtained from y) to the decoder embedding dimension as a Transformer Decoder needs to receive the target sequence in an embedding space
             self.tgt_projection = nn.Embedding(num_embeddings=self.num_classes, embedding_dim=self.head_input_embed_dim, device=self.device)
 
 
-        elif model_config.backbone in ["resnet"]:
-            if model_config.head == "mlp":
-
-                self.head = get_mlp_head(network_config=head_network_config, 
-                                         embed_dim=self.head_input_dim, 
-                                         output_dim=self.num_classes, 
-                                         activation='relu', num_layers=2)
-            else:
-                raise ValueError(f"Unknown model head given: {model_config.head}")
+        elif model_config.head == "mlp":
+            self.decoder = get_mlp_head(network_config=head_network_config, 
+                                        embed_dim=self.head_input_dim, 
+                                        output_dim=self.num_classes, 
+                                        activation='relu', num_layers=2)
         else:
-            raise ValueError(f"Unknown model backbone given: {model_config.backbone}")
+            raise ValueError(f"Unknown model head given: {model_config.head}")
 
 
         ## Output layer to go from the decoder output to logits
@@ -667,18 +650,13 @@ class REARCModel(VisReasModel):
         B, seq_len = y.shape
 
         # Encode the input sequence
-        x_encoded = self.encoder(x)  # [B, seq_len, backbone_input_embed_dim] or [B, backbone_input_embed_dim] if features aggregated to the cls token; NOTE: the extra tokens will have been truncated so the encoded sequence will also have a dim seq_len 
+        x_encoded = self.encoder(x)  # [B, seq_len, backbone_input_embed_dim]; NOTE: the extra tokens will have been truncated so the encoded sequence will also have a dim seq_len 
         
         # Handle the task embedding if needed
         if samples_task_id is not None:
             task_embedding = self.task_embedding(samples_task_id)   # [B, task_embedding_dim]
-
-            if x_encoded.ndim == 2:
-                x_encoded = torch.cat([x_encoded, task_embedding], 1)  # [B, backbone_input_embed_dim + task_embedding_dim]
-            
-            elif x_encoded.ndim == 3:    
-                task_embedding = task_embedding.unsqueeze(1).repeat(1, x_encoded.shape[1], 1) # [B, seq_len, task_embedding_dim]
-                x_encoded = torch.cat([x_encoded, task_embedding], 2)  # [B, seq_len, backbone_input_embed_dim + task_embedding_dim]
+            task_embedding = task_embedding.unsqueeze(1).repeat(1, x_encoded.shape[1], 1) # [B, seq_len, task_embedding_dim]
+            x_encoded = torch.cat([x_encoded, task_embedding], 2)  # [B, seq_len, backbone_input_embed_dim + task_embedding_dim]
 
         # Decode the encoded input sequence
         if self.model_config.head in ["transformer", "vit"]:
@@ -698,6 +676,8 @@ class REARCModel(VisReasModel):
             # MLP Decoder/Head
     
             # Forward pass through the model head
-            logits = self.head(x_encoded)   # [B, seq_len, num_classes]
+            # We can treat each pixel/token independently as part of a sequence, so we can directly apply a Linear layer 
+            # where the last dimension is the features dimension, instead of reshaping the tensor
+            logits = self.decoder(x_encoded)   # [B, seq_len, num_classes] <-- [B, seq_len=H*W, C=self.network_config.embed_dim]
 
         return logits
