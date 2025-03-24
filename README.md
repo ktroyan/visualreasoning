@@ -151,7 +151,7 @@ uv run experiment.py
 [OmegaConf](https://omegaconf.readthedocs.io/en/2.3_branch/) CLI arguments can be used to overwrite the config arguments set in the config files located in ```/configs```.
 For example:
 ```bash
-python experiment.py base.data_env="REARC" experiment.study="sample-efficiency" experiment.setting="exp_setting_1" experiment.name="experiment_1" training.max_epochs=5
+uv run experiment.py base.data_env="REARC" experiment.study="sample-efficiency" experiment.setting="exp_setting_1" experiment.name="experiment_1" training.max_epochs=5
 ```
 This performs an experiment run for the REARC data environment for a Sample-Efficiency study of experiment setting and of some experiment part of that experiment setting. The model is trained for 5 epochs (at most).
 
