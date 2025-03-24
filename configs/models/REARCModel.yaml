@@ -16,8 +16,11 @@ model:
     task_embedding_dim: ${resolve_if_then_else:${model.task_embedding.enabled},128}
   output_embed_dim: 128
   training_hparams:
-    optimizer: 'Adam' # choices: Adam, AdamW, SGD
-    scheduler: 'ReduceLROnPlateau' # choices: ReduceLROnPlateau, StepLR, CosineAnnealingLR
+    optimizer: 'AdamW' # choices: Adam, AdamW, SGD
+    scheduler: 'CosineAnnealingLR' # choices: ReduceLROnPlateau, StepLR, CosineAnnealingLR
+    lr_warmup:
+      enabled: true
+      num_steps: 100.0
     lr: 0.001
     wd: 0.001
   observe_preds:

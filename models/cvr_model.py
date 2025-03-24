@@ -189,12 +189,13 @@ class VisReasModel(pl.LightningModule):
         TODO: See if ok to define the LR warm-up like this.
         """
         
-        # Manual LR warm up
-        num_lr_warmup_steps = 50.0    # 1000.0
-        if self.trainer.global_step < num_lr_warmup_steps:
-            lr_scale = min(1.0, float(self.trainer.global_step + 1) / num_lr_warmup_steps)
-            for pg in optimizer.param_groups:
-                pg["lr"] = lr_scale * self.model_config.training_hparams.lr
+        if self.model_config.training_hparams.lr_warmup.enabled:
+            # Manual linear LR warm up
+            num_lr_warmup_steps = self.model_config.training_hparams.lr_warmup.num_steps
+            if self.trainer.global_step < num_lr_warmup_steps:
+                lr_scale = min(1.0, float(self.trainer.global_step + 1) / num_lr_warmup_steps)
+                for pg in optimizer.param_groups:
+                    pg["lr"] = lr_scale * self.model_config.training_hparams.lr
 
         self.lr_values.append(optimizer.param_groups[0]["lr"])
 
