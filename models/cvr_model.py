@@ -9,37 +9,46 @@ from networks.backbones.vit import get_vit
 from networks.backbones.transformer import get_transformer_encoder
 from networks.backbones.resnet import get_resnet
 from networks.heads.mlp import get_mlp_head
+from utility.cvr.utils import observe_image_predictions
 from utility.utils import plot_lr_schedule  # noqa: F401
 from utility.logging import logger
 
 
 class VisReasModel(pl.LightningModule):
-    def __init__(self, model_config, image_size):
+    def __init__(self, base_config, model_config, image_size):
         super().__init__()
 
+        self.base_config = base_config
         self.model_config = model_config
-        self.img_size = image_size
+        self.image_size = image_size
 
+        self.train_inputs = []
         self.train_preds = []
         self.train_targets = []
+
+        self.val_inputs = []
         self.val_preds = []
         self.val_targets = []
+
+        self.test_inputs = []
         self.test_preds = []
         self.test_targets = []
+
+        self.gen_test_inputs = []
         self.gen_test_preds = []
         self.gen_test_targets = []
 
-        # Not used for now
+        # Metrics for local plotting
         self.train_loss_step = []
         self.train_acc_step = []
-        self.train_grid_acc_step = []
         self.val_loss_step = []
         self.val_acc_step = []
-        self.val_grid_acc_step = []
 
+        # Test results for logging
         self.test_step_results = [] # NOTE: this is needed to store the results of the test step for each batch (i.e., at each step), and display the final results at the end of the epoch
         self.gen_test_step_results = [] # NOTE: this is needed to store the results of the generalization test step for each batch (i.e., at each step), and display the final results at the end of the epoch
 
+        # Learning rate values for plotting LR schedule
         self.lr_values = []
 
     def load_backbone_weights(self, checkpoint_path):
@@ -50,78 +59,131 @@ class VisReasModel(pl.LightningModule):
         for param in self.model_backbone.parameters():
             param.requires_grad = False
 
+    def mix_input_and_create_artificial_labels(self, x):
+        """
+        Mix the images within each input sample of the batch and create the associated ground-truth (artificial) labels. 
+        That is, randomly permute the images in each sample so that the odd image is not always the last one (which we don't want the model to learn).
+        """
+        x_shape = x.shape
+        nb_images_in_one_sample = 4
+        perms = torch.stack([torch.randperm(nb_images_in_one_sample, device=self.device) for _ in range(x_shape[0])], 0)     # for each sample in the batch, we randomly permute the four images contained in a sample
+        y = perms.argmax(1)   # get the new index of the odd image in the sample for each sample of the batch
+        perms = perms + torch.arange(x_shape[0], device=self.device)[:, None]*nb_images_in_one_sample
+        perms = perms.flatten()
+        x = x.reshape([x_shape[0]*nb_images_in_one_sample, x_shape[2], x_shape[3], x_shape[4]])[perms].reshape([x_shape[0], nb_images_in_one_sample, x_shape[2], x_shape[3], x_shape[4]])
+        return x, y
+
     def shared_step(self, batch):
         # The input batch is a tuple of 2 elements (samples, labels), where a label is the task name
         x, samples_task_id = batch  # ([B, nb_images_in_one_sample, C, H, W], [B])
 
         x_shape = x.shape    # B x nb_images in the sample (4) x C (3) x H (128) x W (128)
 
-        # Create artificial labels. That is, randomly permute the images in each sample so that the odd image is not always the last one (which we don't want the model to learn)
-        nb_images_in_one_sample = 4 
-        perms = torch.stack([torch.randperm(nb_images_in_one_sample, device=self.device) for _ in range(x_shape[0])], 0)     # for each sample in the batch, we randomly permute the four images contained in a sample
-        y = perms.argmax(1)   # get the new index of the odd image in the sample for each sample of the batch
-        perms = perms + torch.arange(x_shape[0], device=self.device)[:, None]*nb_images_in_one_sample
-        perms = perms.flatten()
-        x = x.reshape([x_shape[0]*nb_images_in_one_sample, x_shape[2], x_shape[3], x_shape[4]])[perms].reshape([x_shape[0], nb_images_in_one_sample, x_shape[2], x_shape[3], x_shape[4]])
-
-        # logger.debug(f"Actual model input x after reshaping has dimensions: {x.size()}")    # NOTE: size should be [C, nb_images_in_one_sample, C, H, W])
+        x, y = self.mix_input_and_create_artificial_labels(x)
 
         if self.model_config.task_embedding.enabled:
-            # Enter the model forward pass with the task embeddings
+            # Forward pass (with the task embeddings)
             y_hat = self(x, samples_task_id)
         else:
+            # Forward pass
             y_hat = self(x)
 
-        # logger.debug(f"Shape of y_hat: {y_hat.shape}")
-        # logger.debug(f"Shape of y: {y.shape}")
-
-        return y_hat, y
+        return x, y_hat, y
 
     def step(self, batch, batch_idx):
 
-        y_hat, y = self.shared_step(batch)
+        x, y_hat, y = self.shared_step(batch)
+
+        B, N, C, H, W = x.shape
 
         loss = F.cross_entropy(y_hat, y)    # compute the loss (averaged over the batch)
         preds = torch.argmax(y_hat, dim=1)  # predictions of the model for each sample of the batch
 
         acc = (torch.sum((y == preds)).float() / len(y))  # compute the accuracy (averaged over the batch)
 
-        logs = {"loss": loss, "acc": acc, 'preds': preds, 'y': y}
+        logs = {"loss": loss, 
+                "acc": acc, 
+                }
 
-        return loss, logs
+        return loss, logs, preds, y, x
 
     def training_step(self, batch, batch_idx):
-        loss, logs = self.step(batch, batch_idx)
 
-        self.train_preds.append(logs.pop('preds'))
-        self.train_targets.append(logs.pop('y'))
+        loss, logs, preds, y, x = self.step(batch, batch_idx)
+
+        self.train_preds.append(preds)
+        self.train_targets.append(y)
 
         self.log_dict({f"metrics/train_{k}": v for k,v in logs.items()}, prog_bar=True, logger=True, on_step=True, on_epoch=True)    # NOTE: this is monitored for best checkpoint and early stopping
-        
+
+        # Save two batches (of inputs, preds, targets) per epoch for plotting of images at each epoch
+        if (batch_idx == 0) or (batch_idx == self.trainer.num_training_batches - 1):
+            self.train_inputs.append(x)
+            self.train_preds.append(preds)
+            self.train_targets.append(y)
+
+        # Save to plot locally
+        self.train_loss_step.append(logs['loss'])
+        self.train_acc_step.append(logs['acc'])
+
         return loss
 
     def validation_step(self, batch, batch_idx):
-        loss, logs = self.step(batch, batch_idx)
 
-        self.val_preds.append(logs.pop('preds'))
-        self.val_targets.append(logs.pop('y'))
+        loss, logs, preds, y, x = self.step(batch, batch_idx)
+
+        self.val_preds.append(preds)
+        self.val_targets.append(y)
 
         self.log_dict({f"metrics/val_{k}": v for k, v in logs.items()}, prog_bar=True, logger=True, on_step=True, on_epoch=True)    # NOTE: this is monitored for best checkpoint and early stopping
         self.log_dict({"learning_rate": self.lr_schedulers().get_last_lr()[-1]}, prog_bar=True, logger=True, on_step=True, on_epoch=True)    # NOTE: this is monitored for best checkpoint and early stopping. This yields learning_rate in the logs
 
+        # Save two batches (of inputs, preds, targets) per epoch for plotting of images at each epoch
+        if (batch_idx == 0) or (batch_idx == self.trainer.num_val_batches[0] - 1):
+            self.val_inputs.append(x)
+            self.val_preds.append(preds)
+            self.val_targets.append(y)
+
+        # Save to plot locally
+        self.val_loss_step.append(logs['loss'])
+        self.val_acc_step.append(logs['acc'])
+
         return loss
+
+    def on_train_epoch_end(self):
+        # NOTE: This method is called after the on_train_epoch_end() method of the Callback class.
+
+        if self.model_config.observe_preds.enabled:
+            # Plot a few training samples (inputs, predictions, targets) of the first and last batch seen during the epoch
+            observe_image_predictions("train", self.train_inputs, self.train_preds, self.train_targets, n_samples=self.model_config.observe_preds.n_samples, batch_index=0, epoch=self.current_epoch)
+            observe_image_predictions("train", self.train_inputs, self.train_preds, self.train_targets, n_samples=self.model_config.observe_preds.n_samples, batch_index=-1, epoch=self.current_epoch)
+            
+            # Plot a few validation samples (inputs, predictions, targets) of the first and last batch seen during the epoch
+            observe_image_predictions("val", self.val_inputs, self.val_preds, self.val_targets, n_samples=self.model_config.observe_preds.n_samples, batch_index=0, epoch=self.current_epoch)
+            observe_image_predictions("val", self.val_inputs, self.val_preds, self.val_targets, n_samples=self.model_config.observe_preds.n_samples, batch_index=-1, epoch=self.current_epoch)
+
+        # Reset the lists for the next epoch
+        self.train_inputs = []
+        self.train_preds = []
+        self.train_targets = []
+        self.val_inputs = []
+        self.val_preds = []
+        self.val_targets = []
 
     def test_step(self, batch, batch_idx, dataloader_idx=0):
 
-        y_hat, y = self.shared_step(batch)
+        x, y_hat, y = self.shared_step(batch)
         per_sample_loss = F.cross_entropy(y_hat, y, reduction='none').float()   # loss for each sample of the batch
         loss = per_sample_loss.mean().unsqueeze(0)
         preds = torch.argmax(y_hat, dim=1)
         acc = (y == preds).float().mean().unsqueeze(0)
 
-        logs = {"loss": loss, "acc": acc}
+        logs = {"loss": loss, 
+                "acc": acc
+                }
 
         if dataloader_idx == 0:
+            self.test_inputs.append(x)
             self.test_preds.append(preds)
             self.test_targets.append(y)
 
@@ -130,6 +192,7 @@ class VisReasModel(pl.LightningModule):
             self.test_step_results.append(results)
 
         elif dataloader_idx == 1:
+            self.gen_test_inputs.append(x)
             self.gen_test_preds.append(preds)
             self.gen_test_targets.append(y)
 
@@ -144,6 +207,7 @@ class VisReasModel(pl.LightningModule):
         return results
 
     def on_test_epoch_end(self):
+
         if len(self.test_step_results) != 0:
             test_step_results = self.test_step_results
 
@@ -157,8 +221,13 @@ class VisReasModel(pl.LightningModule):
                 log_message += f"{k}: {v} \n"
 
             logger.info(log_message)
-            
+
             self.test_results = test_results
+
+            # Plot a few test samples (inputs, predictions, targets) of the first and last batch of testing (single epoch)
+            if self.model_config.observe_preds.enabled:
+                observe_image_predictions("test", self.test_inputs, self.test_preds, self.test_targets, n_samples=self.model_config.observe_preds.n_samples, batch_index=0)
+                observe_image_predictions("test", self.test_inputs, self.test_preds, self.test_targets, n_samples=self.model_config.observe_preds.n_samples, batch_index=self.trainer.num_test_batches[0]-1)
 
         if len(self.gen_test_step_results) != 0:
             gen_test_step_results = self.gen_test_step_results
@@ -175,6 +244,12 @@ class VisReasModel(pl.LightningModule):
             logger.info(log_message)
             
             self.gen_test_results = gen_test_results
+
+            # Plot a few test samples (inputs, predictions, targets) of the first and last batch of testing (single epoch)
+            if self.model_config.observe_preds.enabled:
+                observe_image_predictions("test_gen", self.gen_test_inputs, self.gen_test_preds, self.gen_test_targets, n_samples=self.model_config.observe_preds.n_samples, batch_index=0)
+                observe_image_predictions("test_gen", self.gen_test_inputs, self.gen_test_preds, self.gen_test_targets, n_samples=self.model_config.observe_preds.n_samples, batch_index=self.trainer.num_test_batches[1]-1)
+
 
     def on_train_end(self):
         # Plot learning rate values used during training
@@ -262,7 +337,7 @@ class CVRModel(VisReasModel):
         # Save the hyperparameters so that they can be stored in the model checkpoint when using torch.save()
         self.save_hyperparameters() # saves all the arguments (kwargs too) of __init__() to the variable hparams
 
-        super().__init__(model_config=model_config, image_size=image_size)
+        super().__init__(base_config=base_config, model_config=model_config, image_size=image_size)
 
         self.model_config = model_config
 
@@ -286,34 +361,34 @@ class CVRModel(VisReasModel):
 
         elif model_config.backbone == "vit_timm":
             self.encoder, bb_num_out_features = get_vit_timm(base_config=base_config,
-                                                        model_config=model_config, 
-                                                        network_config=backbone_network_config,
-                                                        image_size=self.img_size,
-                                                        num_channels=self.num_channels,
-                                                        num_classes=self.num_classes
-                                                        )
+                                                             model_config=model_config,
+                                                             network_config=backbone_network_config,
+                                                             image_size=self.image_size,
+                                                             num_channels=self.num_channels,
+                                                             num_classes=self.num_classes
+                                                             )
             self.head_input_dim = bb_num_out_features
 
         elif model_config.backbone == "vit":
             self.encoder = get_vit(base_config=base_config,
-                                      model_config=model_config,
-                                      network_config=backbone_network_config,
-                                      image_size=self.image_size,
-                                      num_channels=self.num_channels,
-                                      num_classes=self.num_classes,
-                                      device=self.device
-                                      )
+                                   model_config=model_config,
+                                   network_config=backbone_network_config,
+                                   image_size=self.image_size,
+                                   num_channels=self.num_channels,
+                                   num_classes=self.num_classes,
+                                   device=self.device
+                                   )
             self.head_input_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
 
         elif model_config.backbone == "transformer":
             self.encoder = get_transformer_encoder(base_config=base_config,
-                                      model_config=model_config,
-                                      network_config=backbone_network_config,
-                                      image_size=self.image_size,
-                                      num_channels=self.num_channels,
-                                      num_classes=self.num_classes,
-                                      device=self.device
-                                      )
+                                                   model_config=model_config,
+                                                   network_config=backbone_network_config,
+                                                   image_size=self.image_size,
+                                                   num_channels=self.num_channels,
+                                                   num_classes=self.num_classes,
+                                                   device=self.device
+                                                   )
             self.head_input_dim = backbone_network_config.embed_dim   # embedding dimension backbone model 
 
         elif model_config.backbone == "looped_vit":
