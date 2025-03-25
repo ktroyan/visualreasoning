@@ -57,17 +57,25 @@ class PatchEmbed(nn.Module):
 def create_absolute_positional_encoding(ape_type: str, seq_len: int, embed_dim: int, patch_embed: PatchEmbed, num_extra_tokens: int) -> nn.Parameter:
     """ 
     Create and return the desired APE (absolute positional embedding).
-    NOTE: The PE is considered for the actual tokens, the pad tokens, and also the extra tokens (e.g., [cls] and register tokens).
-    TODO: See if we should consider the extra tokens for the PE or not. For example, CVR does consider the cls token for 2dsincos PE.
-          However, I did not find information in the paper "ViTs Need Registers" about PE for register tokens.
     
+    NOTE: The PE is considered for the actual tokens and other special types of tokens to predict (e.g., pad tokens)
+          However, the extra tokens (e.g., [cls] and register tokens) are not considered for the PE.
+          The PE should still be of the correct size since it is added to the whole input embeddings which include the extra tokens.
     """
 
     num_pos_embeds = seq_len + num_extra_tokens
 
     if ape_type == 'learn':    # learned positional encoding
-        pos_embed = nn.Parameter(torch.randn(1, num_pos_embeds, embed_dim))  # [1, seq_len, embed_dim]
-        pos_embed.requires_grad = True    # NOTE: set to True for the PE to be learned
+
+        pos_embed_learned = nn.Parameter(torch.randn(1, seq_len, embed_dim))  # [1, seq_len, embed_dim]; by default requires_grad=True
+
+        if num_extra_tokens > 0:
+            # Set the PE for the extra tokens to zero (i.e., no PE for the extra tokens since PE is added to the input embeddings and the PE is not learned)
+            pos_embed_extra_tokens = torch.zeros(1, num_extra_tokens, embed_dim, dtype=torch.float32, requires_grad=False)     # define the PE for the [cls] and register tokens to be concatenated at the beginning of the PE for the patches
+            pos_embed = torch.cat([pos_embed_extra_tokens, pos_embed_learned], dim=1)   # [1, num_pos_embeds, embed_dim]
+        
+        else:
+            pos_embed = pos_embed_learned
 
     elif ape_type == '2dsincos':    # 2D sin-cos fixed positional embedding
         h, w = (patch_embed.grid_size, patch_embed.grid_size)
@@ -84,19 +92,20 @@ def create_absolute_positional_encoding(ape_type: str, seq_len: int, embed_dim: 
 
         # Handle extra tokens such as the [cls] and register tokens
         if num_extra_tokens > 0:
+            # Set the PE for the extra tokens to zero (i.e., no PE for the extra tokens since PE is added to the input embeddings and the PE is not learned)
             pos_embed_extra_tokens = torch.zeros([1, num_extra_tokens, embed_dim], dtype=torch.float32)     # define the PE for the [cls] and register tokens to be concatenated at the beginning of the PE for the patches
-            pos_embed = nn.Parameter(torch.cat([pos_embed_extra_tokens, pos_embed], dim=1))    # [1, (num_patches+num_extra_tokens), embed_dim]; the PE will be added to the input embeddings of the ViT in the forward pass of the ViT backbone (VisionTransformer)
+            pos_embed = nn.Parameter(torch.cat([pos_embed_extra_tokens, pos_embed], dim=1))    # [1, (num_patches+num_extra_tokens), embed_dim]
 
         else:
             pos_embed = nn.Parameter(pos_embed)
         
-        pos_embed.requires_grad = False    # NOTE: set to False for the PE to not be learned; TODO: so the PE of the extra tokens is fixed to zero?
+        pos_embed.requires_grad = False    # NOTE: set to False for the PE to not be learned
 
     else:
         raise ValueError(f"Invalid positional encoding type: {ape_type}. Choose from ['learn', '2dsincos']")
 
     # Visualize PE
-    plot_absolute_positional_embeddings(pos_embed)
+    plot_absolute_positional_embeddings(pos_embed, num_prefix_tokens=num_extra_tokens)
 
     return pos_embed    # [1, num_patches(+num_extra_tokens), embed_dim]
 
