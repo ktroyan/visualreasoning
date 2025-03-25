@@ -1,5 +1,6 @@
 import os
 import torch
+import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 import seaborn as sns
@@ -7,6 +8,7 @@ from typing import Dict
 
 # Personal codebase dependencies
 from utility.logging import logger
+
 
 def one_hot_encode(x: torch.Tensor, num_token_categories: int) -> torch.Tensor:
     """
@@ -21,6 +23,79 @@ def one_hot_encode(x: torch.Tensor, num_token_categories: int) -> torch.Tensor:
     x_ohe = x_ohe.permute(0, 3, 1, 2).float()  # [B, C=num_token_categories, H, W] 
 
     return x_ohe
+
+def plot_metrics_locally(training_folder, metrics):
+    """
+    Generate and save plots for training and validation epoch metrics.
+
+    Args:
+        training_folder (str): Path to save the plots.
+        metrics (dict): Dictionary containing metric lists.
+    """
+
+    # Create the /figs folder in the folder for training if it does not exist
+    figs_folder_path = os.path.join(training_folder, "figs")
+    os.makedirs(figs_folder_path, exist_ok=True)
+
+    # Make sure all elements in the values of the dictionary are on cpu
+    metrics = {k: [v.cpu().detach().numpy() for v in values] for k, values in metrics.items()}
+
+    # Set consistent style
+    sns.set_theme(style="darkgrid", font_scale=1.2)
+
+    # Plot the metrics and save the figure
+    def plot_and_save(x, y1, y2, xlabel, ylabel, title, filename, labels=("Train", "Validation")):
+        plt.figure(figsize=(8, 5))
+        plt.plot(x, y1, label=labels[0], color="b")
+        plt.plot(x, y2, label=labels[1], color="g")
+        plt.xlabel(xlabel)
+        plt.ylabel(ylabel)
+        plt.title(title)
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(os.path.join(training_folder, "figs", filename))
+        plt.close()
+
+    
+    ## Epoch-wise plots
+    assert len(metrics['train_acc_epoch']) == len(metrics['val_acc_epoch']) == len(metrics['train_loss_epoch']) == len(metrics['val_loss_epoch']) == len(metrics['train_grid_acc_epoch']) == len(metrics['val_grid_acc_epoch'])
+    
+    epochs = np.arange(len(metrics['val_acc_epoch'])) + 1
+
+    if len(epochs) == 0:
+        logger.warning("The plots cannot be created as there are no metrics saved in the list. The epochs list for the x-axis of the plot is empty.")
+
+    # Plot the training and validation loss per epoch
+    plot_and_save(
+        x=epochs,
+        y1=metrics['train_loss_epoch'],
+        y2=metrics['val_loss_epoch'],
+        xlabel="Epoch", ylabel="Loss",
+        title="Training & Validation Loss (Epoch-wise)",
+        filename="loss_epoch.png"
+    )
+
+    # Plot the training and validation accuracy per epoch
+    plot_and_save(
+        x=epochs,
+        y1=metrics['train_acc_epoch'],
+        y2=metrics['val_acc_epoch'],
+        xlabel="Epoch", ylabel="Accuracy",
+        title="Training & Validation Accuracy (Epoch-wise)",
+        filename="acc_epoch.png"
+    )
+
+    # Plot the training and validation grid accuracy per epoch
+    plot_and_save(
+        x=epochs,
+        y1=metrics['train_grid_acc_epoch'],
+        y2=metrics['val_grid_acc_epoch'],
+        xlabel="Epoch", ylabel="Grid Accuracy",
+        title="Training & Validation Grid Accuracy (Epoch-wise)",
+        filename="grid_acc_epoch.png"
+    )
+
+    logger.info(f"Local plots of relevant training metrics saved in: {figs_folder_path}")
 
 def observe_image_predictions(split: str, 
                               inputs: torch.Tensor | list, 
