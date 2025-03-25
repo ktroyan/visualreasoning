@@ -240,7 +240,6 @@ def plot_absolute_positional_embeddings(pos_embed, num_prefix_tokens=None, viz_a
     Plot the absolute positional embeddings (APE) used.
     If needed, we can truncate the first num_prefix_tokens tokens from the embeddings plot.
     TODO: Fix the labeling of the plot as currently the y-axis does not correspond to the sequence position but to the positional embedding value for each dimension.
-    TODO: Do we need to truncate the embeddings part for the prefix tokens from the plot?
     """
     # Ensure the figs directory exists
     os.makedirs('./figs', exist_ok=True)
@@ -276,9 +275,13 @@ def timer_decorator(func):
         result = func(*args, **kwargs)  # call the function decorated
         end_time = time.time()
         elapsed_time = end_time - start_time
-        logger.warning(f"{func.__name__} took {elapsed_time:.4f} seconds to execute.")
+        logger.info(f"{func.__name__} took {elapsed_time:.4f} seconds to execute.")
         return result
     return wrapper
+
+def delete_folder_content(folder_path):
+    shutil.rmtree(folder_path)  
+    os.makedirs(folder_path)
 
 def copy_folder(source_folder, destination_folder):
     # Ensure destination folder exists
