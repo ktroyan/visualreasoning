@@ -15,7 +15,7 @@ import data
 import models
 import training
 import inference
-from utility.utils import log_config_dict, get_complete_config, generate_timestamped_experiment_name, save_model_metadata_for_ckpt, copy_folder
+from utility.utils import delete_folder_content, log_config_dict, get_complete_config, generate_timestamped_experiment_name, save_model_metadata_for_ckpt, copy_folder
 from utility.logging import logger
 
 torch.backends.cudnn.benchmark = False
@@ -28,6 +28,11 @@ def main() -> None:
 
     logger.info("*** Experiment started ***")
     exp_start_time = time.time()
+
+    # Empty the /figs folder to avoid the later copying of old figures from previous experiments
+    figs_folder = "./figs"
+    os.makedirs(figs_folder, exist_ok=True)
+    delete_folder_content("./figs")
 
     # Get all the config arguments for a regular experiment run
     config, config_dict = get_complete_config()
