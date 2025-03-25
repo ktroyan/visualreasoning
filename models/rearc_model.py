@@ -196,7 +196,7 @@ class VisReasModel(pl.LightningModule):
         self.log_dict({"learning_rate": self.lr_schedulers().get_last_lr()[-1]}, prog_bar=True, logger=True, on_step=True, on_epoch=True)    # NOTE: this is monitored for best checkpoint and early stopping. This yields learning_rate in the logs
 
         # Save two batches (of inputs, preds, targets) per epoch for plotting of images at each epoch
-        if (batch_idx == 0) or (batch_idx == self.trainer.num_val_batches - 1):
+        if (batch_idx == 0) or (batch_idx == self.trainer.num_val_batches[0] - 1):
             self.val_inputs.append(x)
             self.val_preds.append(preds)
             self.val_targets.append(y)
