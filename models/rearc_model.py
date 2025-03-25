@@ -20,9 +20,10 @@ class VisReasModel(pl.LightningModule):
     It is based on PTL's LightningModule class.
     """
     
-    def __init__(self, model_config, image_size):
+    def __init__(self, base_config, model_config, image_size):
         super().__init__()
 
+        self.base_config = base_config
         self.model_config = model_config
         self.image_size = image_size
 
@@ -425,7 +426,7 @@ class REARCModel(VisReasModel):
         # Save the hyperparameters so that they can be stored in the model checkpoint when using torch.save()
         self.save_hyperparameters() # saves all the arguments (kwargs too) of __init__() to the variable hparams
 
-        super().__init__(model_config=model_config, image_size=image_size)
+        super().__init__(base_config=base_config, model_config=model_config, image_size=image_size)
 
         self.model_config = model_config
 
