@@ -55,7 +55,7 @@ class VisReasModel(pl.LightningModule):
         self.model_backbone.load_state_dict(torch.load(checkpoint_path, weights_only=False)['model'], strict=False)
         logger.info(f"Loaded ckpt weights for backbone at ckpt path: {checkpoint_path}")
 
-    def freeze_backbone_model(self):
+    def freeze_backbone_weights(self):
         for param in self.model_backbone.parameters():
             param.requires_grad = False
 
@@ -108,6 +108,10 @@ class VisReasModel(pl.LightningModule):
         return loss, logs, preds, y, x
 
     def training_step(self, batch, batch_idx):
+        """
+        This method is called for each batch during the training phase.
+        This is a default PyTorch Lightning method that we override to define the training logic.
+        """
 
         loss, logs, preds, y, x = self.step(batch, batch_idx)
 
@@ -129,6 +133,10 @@ class VisReasModel(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
+        """
+        This method is called for each batch during the validation phase.
+        This is a default PyTorch Lightning method that we override to define the validation logic.
+        """
 
         loss, logs, preds, y, x = self.step(batch, batch_idx)
 
@@ -151,7 +159,11 @@ class VisReasModel(pl.LightningModule):
         return loss
 
     def on_train_epoch_end(self):
-        # NOTE: This method is called after the on_train_epoch_end() method of the Callback class.
+        """
+        This method is called at the end of each training epoch.
+        This is a default PyTorch Lightning method that we override to define the logic to be executed at the end of each training epoch.
+        NOTE: This method is called after the on_train_epoch_end() method of the Callback class.
+        """
 
         if self.model_config.observe_preds.enabled:
             # Plot a few training samples (inputs, predictions, targets) of the first and last batch seen during the epoch
@@ -171,6 +183,10 @@ class VisReasModel(pl.LightningModule):
         self.val_targets = []
 
     def test_step(self, batch, batch_idx, dataloader_idx=0):
+        """
+        This method is called for each batch during the testing phase.
+        This is a default PyTorch Lightning method that we override to define the testing logic.
+        """
 
         x, y_hat, y = self.shared_step(batch)
         per_sample_loss = F.cross_entropy(y_hat, y, reduction='none').float()   # loss for each sample of the batch
@@ -207,6 +223,10 @@ class VisReasModel(pl.LightningModule):
         return results
 
     def on_test_epoch_end(self):
+        """
+        This method is called at the end of the testing phase.
+        This is a default PyTorch Lightning method that we override to define the logic to be executed at the end of the testing phase.
+        """
 
         if len(self.test_step_results) != 0:
             test_step_results = self.test_step_results
@@ -252,6 +272,11 @@ class VisReasModel(pl.LightningModule):
 
 
     def on_train_end(self):
+        """
+        This method is called at the end of the training phase.
+        This is a default PyTorch Lightning method that we override to define the logic at the end of the training phase.
+        """
+
         # Plot learning rate values used during training
         plot_lr_schedule(self.lr_values)
         return

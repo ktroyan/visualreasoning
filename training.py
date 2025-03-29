@@ -281,7 +281,7 @@ def main(config, training_folder, datamodule, model, exp_logger=None):
 
     # Freeze the backbone model if needed
     if config.training.freeze_backbone:
-        model.freeze_backbone_model()
+        model.freeze_backbone_weights()
 
     # Training callbacks
     callbacks = init_callbacks(config, training_folder)
