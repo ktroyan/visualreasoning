@@ -14,6 +14,7 @@ import models
 from utility.utils import get_complete_config, log_config_dict, get_model_from_ckpt
 from utility.logging import logger
 
+
 torch.set_float32_matmul_precision('medium')
 torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.deterministic = True
@@ -156,9 +157,9 @@ def main(config, datamodule, model=None, model_ckpt_path=None, exp_logger=None):
 
     # Model
     if model is not None:
-        log_message = f"A specific model instance from class {model.__class__} was given for inference.\n\n"
+        log_message = f"A specific (most likely trained) model instance from class {model.__class__} was given for inference.\n\n"
         # log_message += f"Model: {model}\n"
-        log_message += "No model checkpoint is used."
+        log_message += "No model checkpoint was given directly."
         logger.info(log_message)
     
     elif model_ckpt_path is not None:
