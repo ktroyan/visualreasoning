@@ -36,13 +36,17 @@ parameters:
           wd:
             values: [0.001]
       backbone:
-        values: ['transformer', 'vit']
+        values: ['transformer', 'vit', 'resnet']
       head:
-        values: ['transformer']
+        values: ['transformer', 'mlp']
       use_ohe_repr:
         values: [true]
-      ape_type:
-        values: ['2dsincos', 'learn']
+      ape:
+        parameters:
+          enabled:
+            values: [true, false]
+          ape_type:
+            values: ['learn', '2dsincos']  # absolute positional encoding
       num_reg_tokens:
         values: [0, 4, 8]
       task_embedding:

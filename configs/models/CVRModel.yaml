@@ -3,7 +3,9 @@ model:
   head: 'mlp'  # choices: 'mlp'
   pretrained: null
   patch_size: 16
-  ape_type: '2dsincos'  # choices: 'learn', '2dsincos'; absolute positional encoding
+  ape:
+    enabled: true
+    ape_type: '2dsincos'  # choices: 'learn', '2dsincos'; absolute positional encoding
   use_cls_token: true # whether to use a cls token or not
   num_reg_tokens: 0
   encoder_aggregation:
@@ -23,3 +25,6 @@ model:
       num_steps: 100.0
     lr: 0.001
     wd: 0.001
+  observe_preds:
+    enabled: True
+    n_samples: 4

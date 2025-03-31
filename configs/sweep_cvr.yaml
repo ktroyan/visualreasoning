@@ -41,8 +41,12 @@ parameters:
         values: ['mlp']
       patch_size:
         values: [8, 16]
-      ape_type:
-        values: ['2dsincos', 'learn']
+      ape:
+        parameters:
+          enabled:
+            values: [true, false]
+          ape_type:
+            values: ['learn', '2dsincos']  # absolute positional encoding
       use_cls_token:
         values: [true]  # has to be true, otherwise does not work
       num_reg_tokens:

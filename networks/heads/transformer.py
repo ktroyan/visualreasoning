@@ -46,11 +46,18 @@ def create_absolute_positional_encoding(ape_type: str, ape_length: int, embed_di
 class TransformerDecoder(nn.TransformerDecoder):
     def __init__(self, model_config, network_config, decoder_layer, max_seq_len):
         super().__init__(decoder_layer, network_config.num_layers)
+        # TODO: See how we want to separate the model config interactions with this decoder class as in theory
+        #       we want to make as few changes as possible to the decoder since we want to compare the encoder networks.
+        #       So for example the APE in this class for the decoder should be decided by the decoder/head network config instead.
+
+        self.model_config = model_config
+        self.network_config = network_config
 
         self.max_seq_len = max_seq_len
 
         # Get the positional encoding
-        self.ape = create_absolute_positional_encoding(model_config.ape_type, self.max_seq_len, network_config.embed_dim)
+        if model_config.ape.enabled:
+            self.ape = create_absolute_positional_encoding(model_config.ape.ape_type, max_seq_len, network_config.embed_dim)
 
         ## Weights initialization of all the learnable components
         self.init_weights()
@@ -70,8 +77,9 @@ class TransformerDecoder(nn.TransformerDecoder):
 
     def init_weights(self):
         # Weights init: Positional Embedding
-        if self.ape.requires_grad:  # check if the PE is learnable
-            nn.init.trunc_normal_(self.ape, std=0.02)
+        if hasattr(self, 'ape'):
+            if self.ape.requires_grad:  # check if the PE is learnable
+                nn.init.trunc_normal_(self.ape, std=0.02)
 
         # Weights init: Transformer Encoder
         self.apply(self._init_weights)
@@ -94,7 +102,8 @@ class TransformerDecoder(nn.TransformerDecoder):
         #       That is why using a causal mask even for inference AR decoding is important in order to make sure we do not use future tokens, in case we would for some reason use the outputted token embeddings of previous steps.
 
         # We use APE on the tgt by simply truncating the PE (of length max_tgt_seq_len) to the length of the current tgt sequence
-        tgt += self.ape[:, :tgt_seq_len, :].to(tgt.device)  # [B, tgt_seq_len, embed_dim]
+        if self.model_config.ape.enabled:
+            tgt += self.ape[:, :tgt_seq_len, :].to(tgt.device)  # [B, tgt_seq_len, embed_dim]
 
         # Forward pass through the Transformer Decoder Layers
         tgt_decoded = super().forward(tgt, memory, tgt_mask, memory_mask, tgt_key_padding_mask, memory_key_padding_mask)    # [B, tgt_seq_len, embed_dim]

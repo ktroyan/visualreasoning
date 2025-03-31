@@ -17,8 +17,8 @@ from timm.models.vision_transformer import VisionTransformer, _cfg, init_weights
 from timm.layers import PatchEmbed
 
 # Personal codebase dependencies
-from utility.logging import logger
 from utility.utils import plot_absolute_positional_embeddings
+from utility.logging import logger
 
 
 __all__ = ['get_vit_timm']
@@ -133,6 +133,9 @@ def get_vit_timm(base_config, model_config, network_config, image_size, num_chan
     #     num_classes=0,  # no final classification head and thus get feature embeddings
     # )
 
+
+    ape = model_config['ape']['ape_type'] if model_config['ape']['enabled'] else ''
+
     ## Method 2 to get the model
     model = VitTimm(
         img_size=image_size,
@@ -145,7 +148,7 @@ def get_vit_timm(base_config, model_config, network_config, image_size, num_chan
         mlp_ratio=network_config['mlp_ratio'], 
         qkv_bias=network_config['qkv_bias'],
         norm_layer=partial(nn.LayerNorm, eps=1e-6),
-        ape=model_config['ape_type'],
+        ape=ape,
         use_cls_token=model_config['use_cls_token'],  # whether to use or not the cls token
         reg_tokens=model_config['num_reg_tokens'],  # number of register tokens
         cls_aggreg_method=model_config['encoder_aggregation']['method'],  # "" for no global pooling to get a sequence as output, "mean" for global average pooling, "token" for using the [cls] token to aggregate features

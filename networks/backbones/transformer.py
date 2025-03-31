@@ -2,9 +2,9 @@ import torch
 import torch.nn as nn
 
 # Personal codebase dependencies
-from utility.logging import logger
 from utility.utils import plot_absolute_positional_embeddings
 from utility.rearc.utils import one_hot_encode
+from utility.logging import logger
 
 
 __all__ = ['get_transformer_encoder']
@@ -62,8 +62,6 @@ def create_absolute_positional_encoding(ape_type: str, seq_len: int, embed_dim: 
           However, the extra tokens (e.g., [cls] and register tokens) are not considered for the PE.
           The PE should still be of the correct size since it is added to the whole input embeddings which include the extra tokens.
     """
-
-    num_pos_embeds = seq_len + num_extra_tokens
 
     if ape_type == 'learn':    # learned positional encoding
 
@@ -128,22 +126,23 @@ class TransformerEncoder(nn.TransformerEncoder):
         self.network_config = network_config
 
         self.image_size = image_size
+        self.seq_len = self.image_size * self.image_size    # NOTE: here image_size also takes into account border padding if relevant
         self.num_channels = num_channels
         self.num_classes = num_classes
 
-        self.patch_size = self.model_config.patch_size
+        self.patch_size = model_config.patch_size
 
-        self.num_all_tokens = 0     # essentially seq_len + extra tokens; number of tokens/positions in a sequence (i.e., the extra tokens are also accounted for)
+        self.num_all_tokens = self.seq_len  # essentially seq_len + extra tokens; number of tokens/positions in a sequence (i.e., the extra tokens are also accounted for)
 
         if base_config.data_env == 'REARC':
             self.num_token_categories = self.num_classes  # REARC: 10 symbols (0-9) + 1 pad token (<pad_token>) [+ 1 cls token] + [1 register token]
 
-        self.embed_dim = self.network_config.embed_dim
-        assert self.embed_dim % self.network_config.num_heads == 0, 'Embedding dimension must be divisible by the number of heads'
+        self.embed_dim = network_config.embed_dim
+        assert self.embed_dim % network_config.num_heads == 0, 'Embedding dimension must be divisible by the number of heads'
 
 
         ## [Optional] Extra tokens
-        # NOTE: They are concatenated (preprended) to the input embeddings during the forward pass of the model
+        # NOTE: They are concatenated (prepended) to the input embeddings during the forward pass of the model
         self.num_extra_tokens = 0
 
         # Create cls token
@@ -155,8 +154,8 @@ class TransformerEncoder(nn.TransformerEncoder):
                 self.num_token_categories += 1
 
         # Create register tokens
-        if self.model_config.num_reg_tokens > 0:
-            self.reg_tokens = nn.Parameter(torch.zeros(1, self.model_config.num_reg_tokens, self.embed_dim)) # create the register tokens
+        if model_config.num_reg_tokens > 0:
+            self.reg_tokens = nn.Parameter(torch.zeros(1, model_config.num_reg_tokens, self.embed_dim)) # create the register tokens
             self.num_all_tokens += model_config.num_reg_tokens
             self.num_extra_tokens += model_config.num_reg_tokens
             if base_config.data_env == 'REARC':
@@ -171,7 +170,7 @@ class TransformerEncoder(nn.TransformerEncoder):
         
         elif base_config.data_env == 'REARC':
             # NOTE: When patch_size=1 (i.e., consider pixels), this is equivalent to flattening the input image and projecting it to the embedding dimension
-            if self.model_config.use_ohe_repr:
+            if model_config.use_ohe_repr:
                 # We are in REARC and we want to use OHE (resulting in channels) for the possible tokens and thus create artificial channels for the linear projection of patches/pixels/tokens
                 # Using Channels: we create input x [B, C=num_token_categories, H, W] and we should get [B, seq_len=num_patches, embed_dim]
                 self.patch_embed = PatchEmbed(base_config, img_size=self.image_size, patch_size=self.patch_size, in_channels=self.num_channels, embed_dim=self.embed_dim, num_token_categories=self.num_token_categories)
@@ -180,22 +179,25 @@ class TransformerEncoder(nn.TransformerEncoder):
                 # Using Seq2Seq: we create input x [B, C=1, H, W] and we should get [B, seq_len, embed_dim]
                 self.patch_embed = PatchEmbed(base_config, img_size=self.image_size, patch_size=self.patch_size, in_channels=self.num_channels, embed_dim=self.embed_dim)
 
-        logger.info(f"The max sequence length (with padding) not embedded as patches is: {image_size * image_size}")
-        logger.info(f"The actual max sequence length (with padding) embedded as patches is: {self.patch_embed.num_patches}")
-        
+        log_message = f"The max sequence length (with padding) not embedded as patches is: {image_size * image_size}\n"
+        log_message += f"The actual max sequence length (with padding) embedded as patches is: {self.patch_embed.num_patches}\n"
+        log_message += "The two numbers should be equal if the image size is a square and the patch size is 1."
+        logger.info(log_message)
+
         self.seq_len = self.patch_embed.num_patches
 
 
         ## Absolute Positional Embeddings
-        # Create positional encoding
-        self.ape = create_absolute_positional_encoding(ape_type=self.model_config.ape_type,
-                                                       seq_len=self.seq_len,
-                                                       embed_dim=self.embed_dim,
-                                                       patch_embed=self.patch_embed,
-                                                       num_extra_tokens=self.num_extra_tokens
-                                                       )    # [1, num_all_tokens, embed_dim]
-        
-        self.ape_drop = nn.Dropout(p=self.network_config.ape_dropout_rate)    # dropout right after the positional encoding and residual
+        if model_config.ape.enabled:
+            # Create positional encoding
+            self.ape = create_absolute_positional_encoding(ape_type=model_config.ape.ape_type,
+                                                        seq_len=self.seq_len,
+                                                        embed_dim=self.embed_dim,
+                                                        patch_embed=self.patch_embed,
+                                                        num_extra_tokens=self.num_extra_tokens
+                                                        )    # [1, num_all_tokens, embed_dim]
+            
+            self.ape_drop = nn.Dropout(p=network_config.ape_dropout_rate)    # dropout right after the positional encoding and residual
 
 
         ## Weights initialization of all the learnable components
@@ -216,8 +218,9 @@ class TransformerEncoder(nn.TransformerEncoder):
 
     def init_weights(self):
         # Weights init: Positional Embedding
-        if self.ape.requires_grad:  # check if the PE is learnable
-            nn.init.trunc_normal_(self.ape, std=0.02)
+        if hasattr(self, 'ape'):
+            if self.ape.requires_grad:  # check if the PE is learnable
+                nn.init.trunc_normal_(self.ape, std=0.02)
 
         # Weights init: Extra tokens
         if hasattr(self, 'reg_tokens'):
@@ -243,9 +246,10 @@ class TransformerEncoder(nn.TransformerEncoder):
             cls_tokens = self.cls_token.expand(B, -1, -1)   # [B, 1, embed_dim]; use expand to create and add the token for each sample in the batch instead of just one sample
             x = torch.cat((cls_tokens, x), dim=1)   # [B, num_all_tokens, embed_dim]
         
-        # Add the positional encoding
-        x = x + self.ape  # [B, num_all_tokens, embed_dim], where num_all_tokens depends on the number of patches and extra tokens (if any) (e.g., cls ro register tokens)
-        x = self.ape_drop(x)    # [B, num_all_tokens, embed_dim]
+        if self.model_config.ape.enabled:
+            # Add the absolute positional encoding
+            x = x + self.ape  # [B, num_all_tokens, embed_dim], where num_all_tokens depends on the number of patches and extra tokens (if any) (e.g., cls ro register tokens)
+            x = self.ape_drop(x)    # [B, num_all_tokens, embed_dim]
 
         return x
 
@@ -274,12 +278,11 @@ class TransformerEncoder(nn.TransformerEncoder):
 
         return x
 
-    # NOTE: Masks for the forward() method
-    # 1) [Not needed] (Self-)Attention mask. Use mask in forward() of nn.TransformerEncoder. It is used for custom attention masking. Use value 0 for allowed and -inf for masked positions.
-    # 2) [Not needed] Padding mask. Use src_key_padding_mask in forward() of nn.TransformerEncoder. It is used to mask the padding (or other) tokens in the input sequence. Use value True for padding tokens and False for actual tokens.
-    def forward(self, src, mask=None, src_key_padding_mask=None):
 
-        src_shape = src.shape
+    def forward(self, src, mask=None, src_key_padding_mask=None):
+        # NOTE: Masks for the forward() method
+        # 1) [Not needed] (Self-)Attention mask. Use mask in forward() of nn.TransformerEncoder. It is used for custom attention masking. Use value 0 for allowed and -inf for masked positions.
+        # 2) [Not needed] Padding mask. Use src_key_padding_mask in forward() of nn.TransformerEncoder. It is used to mask the padding (or other) tokens in the input sequence. Use value True for padding tokens and False for actual tokens.
 
         # Embed the input image to an input sequence
         x = self.forward_embed(src)
