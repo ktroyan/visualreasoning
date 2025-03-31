@@ -25,6 +25,7 @@ dependencies = [
     "jupyter",
     "ipykernel",
     "seaborn>=0.13.2",
+    "rotary-embedding-torch>=0.8.6",
 ]
 
 [tool.uv.sources]

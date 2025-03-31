@@ -1,18 +1,22 @@
 import torch
 import torch.nn as nn
+# from torchtune.modules.position_embeddings import VisionRotaryPositionalEmbeddings
+from rotary_embedding_torch import RotaryEmbedding, apply_rotary_emb
+from einops import rearrange
 
 # Personal codebase dependencies
-from utility.logging import logger
 from utility.utils import plot_absolute_positional_embeddings
 from utility.rearc.utils import one_hot_encode
+from utility.logging import logger
 
 
 __all__ = ['get_vit']
 
 
-def create_relative_positional_encoding():
+def create_relative_positional_encoding(rpe_type='rope'):
     # TODO: See how to build and use the 2D RPE (relative positional encoding) in the Attention module.
     #       See ViTARC
+
     raise NotImplementedError("Relative Positional Encoding (RPE) not yet implemented")
 
 class PatchEmbed(nn.Module):
@@ -31,7 +35,6 @@ class PatchEmbed(nn.Module):
         super().__init__()
 
         # TODO: See if it is correct to create patches (in the forward pass) without the extra tokens but to consider them still for the number of channels
-
         self.base_config = base_config
         if self.base_config.data_env == 'REARC':
             self.num_token_categories = num_token_categories
@@ -52,7 +55,7 @@ class PatchEmbed(nn.Module):
             if self.num_token_categories is not None:
                 x = one_hot_encode(x, self.num_token_categories)  # add a channel dimension for the input image: [B, C=num_token_categories, H, W] <-- [B, H, W]
             else:
-                x = x.unsqueeze(1)  # add a channel dimension for the input image: [B, C=1, H, W] <-- [B, H, W]
+                x = x.unsqueeze(1).float()  # add a channel dimension for the input image: [B, C=1, H, W] <-- [B, H, W]; x is int64, so we need to convert it to float32 for the Conv2d layer (otherwise issue with the conv bias)
 
         x = self.patch_proj(x)    # [B, embed_dim, H_out//patch_size, W_out//patch_size], where H_out = ((H-1)/1)+1) = H and W_out = ((W-1)/1)+1) = W if the spatial dimensions have not been reduced, by having patch_size=1 and stride=patch_size
         x = x.flatten(2) # [B, embed_dim, num_patches]  # flatten the spatial dimensions to get a sequence of patches
@@ -115,12 +118,11 @@ def create_absolute_positional_encoding(ape_type: str, seq_len: int, embed_dim: 
 
     return pos_embed    # [1, num_patches(+num_extra_tokens), embed_dim]
 
-
 class MHSA(nn.Module):
     """ 
     Multi-Head Self-Attention block.
 
-    TODO: implement RPE (Relative Positional Encoding) 
+    TODO: implement RPE (Relative Positional Encoding) from ViTARC (Two-slope Alibi)
 
     """
     def __init__(self, embed_dim, num_heads=6, qkv_bias=False, attn_drop=0., proj_drop=0.):
@@ -134,28 +136,99 @@ class MHSA(nn.Module):
         self.proj_drop = nn.Dropout(proj_drop)
 
     def forward(self, x):
-        B, N, D = x.shape   # B is the batch size, N is the number of tokens (were a patch is considered a token), D is the embedding dimension
+        B, seq_len, embed_dim = x.shape
         
         # Compute the Queries, Keys, Values from the input embeddings by a linear projection
-        x_qkv = self.qkv_proj(x) # [B, N, 3*embed_dim]
+        x_qkv = self.qkv_proj(x) # [B, seq_len, 3*embed_dim]
 
-        # Reshape the Queries, Keysm Values for multi-head
-        head_embed_dim = D // self.num_heads
-        x_qkv = x_qkv.reshape(B, N, 3, self.num_heads, head_embed_dim).permute(2, 0, 3, 1, 4)  # [3, B, num_heads, N, head_embed_dim]
+        # Reshape the Queries, Keys, Values for multi-head
+        head_embed_dim = embed_dim // self.num_heads
+        x_qkv = x_qkv.reshape(B, seq_len, 3, self.num_heads, head_embed_dim).permute(2, 0, 3, 1, 4)  # [3, B, num_heads, seq_len, head_embed_dim]
 
-        # Get the Queries, Keys, Values
-        x_q, x_k, x_v = x_qkv[0], x_qkv[1], x_qkv[2]    # ([B, num_heads, N, head_embed_dim], [B, num_heads, N, head_embed_dim], [B, num_heads, N, head_embed_dim])
+        # Get the Queries, Keys, Values for all heads
+        x_q, x_k, x_v = x_qkv[0], x_qkv[1], x_qkv[2]    # ([B, num_heads, seq_len, head_embed_dim], [B, num_heads, seq_len, head_embed_dim], [B, num_heads, seq_len, head_embed_dim])
 
-        attn = (x_q @ x_k.transpose(-2, -1))    # [B, num_heads, N, N]
-        attn_scaled = attn * self.scale   # [B, num_heads, N, N]
-        attn_scores = self.softmax(attn_scaled)   # [B, num_heads, N, N]
-        attn_scores = self.attn_drop(attn_scores)   # [B, num_heads, N, N]; dropout
+        # Compute the attention scores
+        attn = (x_q @ x_k.transpose(-2, -1))    # [B, num_heads, seq_len, seq_len]
+        attn_scaled = attn * self.scale   # [B, num_heads, seq_len, seq_len]
+        attn_scores = self.softmax(attn_scaled)   # [B, num_heads, seq_len, seq_len]
+        attn_scores = self.attn_drop(attn_scores)   # [B, num_heads, seq_len, seq_len]; dropout
 
         # Get the new embeddings from the Values and Attention scores, and concatenate back the heads through reshaping
-        x = (attn_scores @ x_v).transpose(1, 2).reshape(B, N, D)  # [B, N, D] <-- [B, N, num_heads, head_embed_dim] <-- [B, num_heads, N, head_embed_dim] 
-        x = self.proj(x)    # [B, N, D]; linearly project the new embeddings
-        x = self.proj_drop(x)   # [B, N, D]; dropout
+        x = (attn_scores @ x_v).transpose(1, 2).reshape(B, seq_len, embed_dim)  # [B, seq_len, embed_dim] <-- [B, seq_len, num_heads, head_embed_dim] <-- [B, num_heads, seq_len, head_embed_dim] 
+        x = self.proj(x)    # [B, seq_len, embed_dim]; linearly project the new embeddings
+        x = self.proj_drop(x)   # [B, seq_len, embed_dim]; dropout
         return x
+
+class RoPEMHSA(nn.Module):
+    """ 
+    Multi-Head Self-Attention block including RoPE (RPE).
+    """
+    def __init__(self, image_size, embed_dim, num_heads=6, qkv_bias=False, attn_drop=0., proj_drop=0.):
+        super().__init__()
+        
+        self.num_heads = num_heads
+        self.scale = (embed_dim // num_heads) ** -0.5
+        self.qkv_proj = nn.Linear(embed_dim, embed_dim * 3, bias=qkv_bias)  # *3 because we want embeddings for q, k, v
+        self.head_embed_dim = embed_dim // self.num_heads
+        self.softmax = nn.Softmax(dim=-1)
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj = nn.Linear(embed_dim, embed_dim)
+        self.proj_drop = nn.Dropout(proj_drop)
+
+        ## 2D RoPE (Rotary Positional Embedding)
+        # Choose RoPE dim (half features per axis)
+        rope_dim = self.head_embed_dim // 4
+        rope_dim = rope_dim if rope_dim % 2 == 0 else max(2, rope_dim - (rope_dim % 2)) # ensure rope_dim is even
+
+        self.rotary_emb = RotaryEmbedding(
+            dim=rope_dim,   # half the dims rotated per axis; total rotated features is dim*4
+            freqs_for='pixel',  # use 'pixel' for 2D images
+            max_freq=image_size // 2,   # adjust max_freq based on the grid image size
+            )
+
+        # Get and store flattened axial frequencies
+        axial_freqs = self.rotary_emb.get_axial_freqs(image_size, image_size) # [H=image_size, W=image_size, rope_dim * 2]
+        flat_axial_freqs = rearrange(axial_freqs, 'h w d -> (h w) d') # [seq_len, rope_dim * 2]
+        self.register_buffer('rope_axial_freqs', flat_axial_freqs, persistent=False)
+
+    def forward(self, x):
+        B, seq_len, embed_dim = x.shape
+        
+        # Compute the Queries, Keys, Values from the input embeddings by a linear projection
+        x_qkv = self.qkv_proj(x) # [B, seq_len, 3*embed_dim]
+
+        # Reshape the Queries, Keys, Values for multi-head
+        x_qkv = x_qkv.reshape(B, seq_len, 3, self.num_heads, self.head_embed_dim).permute(2, 0, 3, 1, 4)  # [3, B, num_heads, seq_len, head_embed_dim]
+
+        # Get the Queries, Keys, Values
+        x_q, x_k, x_v = x_qkv[0], x_qkv[1], x_qkv[2]    # ([B, num_heads, seq_len, head_embed_dim], [B, num_heads, seq_len, head_embed_dim], [B, num_heads, seq_len, head_embed_dim])
+
+        ## Use RoPE (2D with Axial Rotary Embedding)
+        # Reshape q, k (to have seq_len and head_dim as the the two last dimensions) for apply_rotary_emb: [B*num_heads, seq_len, head_dim]
+        q_reshaped = rearrange(x_q, 'b h s d -> (b h) s d') # [B*num_heads, seq_len, head_dim]
+        k_reshaped = rearrange(x_k, 'b h s d -> (b h) s d') # [B*num_heads, seq_len, head_dim]
+
+        # Apply 2D RoPE using the precomputed axial freqs
+        q_rotated = apply_rotary_emb(self.rope_axial_freqs, q_reshaped, seq_dim=1)  # [B*num_heads, seq_len, head_dim]; seq_dim=1 aligns freqs axis 0 (seq_len) with input axis 1 (seq_len)
+        k_rotated = apply_rotary_emb(self.rope_axial_freqs, k_reshaped, seq_dim=1)  # [B*num_heads, seq_len, head_dim]; seq_dim=1 aligns freqs axis 0 (seq_len) with input axis 1 (seq_len)
+
+        # Reshape back
+        x_q = rearrange(q_rotated, '(b h) s d -> b h s d', h=self.num_heads)    # [B, num_heads, seq_len, head_embed_dim]
+        x_k = rearrange(k_rotated, '(b h) s d -> b h s d', h=self.num_heads)    # [B, num_heads, seq_len, head_embed_dim]
+
+        # Compute the attention scores
+        attn = (x_q @ x_k.transpose(-2, -1))    # [B, num_heads, seq_len, seq_len]; unscaled attention logits
+        attn_scaled = attn * self.scale   # [B, num_heads, seq_len, seq_len]; scaled attention logits
+        attn_scores = self.softmax(attn_scaled)   # [B, num_heads, seq_len, seq_len]; attention scores (normalized scaled attention logits)
+        attn_scores = self.attn_drop(attn_scores)   # [B, num_heads, seq_len, seq_len]; dropout
+
+        # Get the new embeddings from the Values and Attention scores, and concatenate back the heads through reshaping
+        x = (attn_scores @ x_v).transpose(1, 2).reshape(B, seq_len, embed_dim)  # [B, seq_len, embed_dim] <-- [B, seq_len, num_heads, head_embed_dim] <-- [B, num_heads, seq_len, head_embed_dim] 
+        x = self.proj(x)    # [B, seq_len, embed_dim]; linearly project the new embeddings
+        x = self.proj_drop(x)   # [B, seq_len, embed_dim]; dropout
+        return x
+    
 
 class FeedForward(nn.Module):
     """ Feed-Forward Neural Network block """
@@ -177,16 +250,30 @@ class FeedForward(nn.Module):
 
 class TransformerLayer(nn.Module):
     """ Transformer layer """
-    def __init__(self, embed_dim, num_heads=6, mlp_ratio=4., qkv_bias=False, attn_drop=0., attn_proj_drop=0., ff_drop=0.):
+    def __init__(self, image_size, embed_dim, num_heads=6, mlp_ratio=4., qkv_bias=False, attn_drop=0., attn_proj_drop=0., ff_drop=0., rpe_type=None):
         super().__init__()
+
         self.first_norm = nn.LayerNorm(embed_dim)
 
-        self.attn = MHSA(embed_dim,
-                         num_heads=num_heads,
-                         qkv_bias=qkv_bias,
-                         attn_drop=attn_drop,
-                         proj_drop=attn_proj_drop
-                         )
+        if rpe_type == 'rope':
+            self.attn = RoPEMHSA(image_size,
+                                embed_dim,
+                                num_heads=num_heads,
+                                qkv_bias=qkv_bias,
+                                attn_drop=attn_drop,
+                                proj_drop=attn_proj_drop
+                                )
+
+        elif rpe_type == 'vitarc-alibi':
+            raise NotImplementedError("RPE type 'vitarc-alibi' not yet implemented")
+
+        else:
+            self.attn = MHSA(embed_dim,
+                            num_heads=num_heads,
+                            qkv_bias=qkv_bias,
+                            attn_drop=attn_drop,
+                            proj_drop=attn_proj_drop
+                            )
         
         self.second_norm = nn.LayerNorm(embed_dim)
 
@@ -218,22 +305,23 @@ class VisionTransformer(nn.Module):
         self.network_config = network_config
 
         self.image_size = image_size
+        self.seq_len = self.image_size * self.image_size    # NOTE: here image_size also takes into account border padding if relevant
         self.num_channels = num_channels
         self.num_classes = num_classes
 
-        self.patch_size = self.model_config.patch_size
+        self.patch_size = model_config.patch_size
 
-        self.num_all_tokens = 0     # essentially seq_len + extra tokens; number of tokens/positions in a sequence (i.e., the extra tokens are also accounted for)
+        self.num_all_tokens = self.seq_len  # essentially seq_len + extra tokens; number of tokens/positions in a sequence (i.e., the extra tokens are also accounted for)
 
         if base_config.data_env == 'REARC':
-            self.num_token_categories = self.num_classes  # REARC: 10 symbols (0-9) + 1 pad token (<pad_token>) [+ 1 cls token] + [1 register token]
+            self.num_token_categories = self.num_classes  # 10 symbols (0-9) + 1 pad token [+ 3 x,y,xy border tokens] [+ 1 cls token] [+ 1 register token]
 
-        self.embed_dim = self.network_config.embed_dim
-        assert self.embed_dim % self.network_config.num_heads == 0, 'Embedding dimension must be divisible by the number of heads'
+        self.embed_dim = network_config.embed_dim
+        assert self.embed_dim % network_config.num_heads == 0, 'Embedding dimension must be divisible by the number of heads'
 
 
         ## [Optional] Extra tokens
-        # NOTE: They are concatenated (preprended) to the input embeddings during the forward pass of the model
+        # NOTE: They are concatenated (prepended) to the input embeddings during the forward pass of the model
         self.num_extra_tokens = 0
 
         # Create cls token
@@ -245,8 +333,8 @@ class VisionTransformer(nn.Module):
                 self.num_token_categories += 1
 
         # Create register tokens
-        if self.model_config.num_reg_tokens > 0:
-            self.reg_tokens = nn.Parameter(torch.zeros(1, self.model_config.num_reg_tokens, self.embed_dim)) # create the register tokens
+        if model_config.num_reg_tokens > 0:
+            self.reg_tokens = nn.Parameter(torch.zeros(1, model_config.num_reg_tokens, self.embed_dim)) # create the register tokens
             self.num_all_tokens += model_config.num_reg_tokens
             self.num_extra_tokens += model_config.num_reg_tokens
             if base_config.data_env == 'REARC':
@@ -261,7 +349,7 @@ class VisionTransformer(nn.Module):
         
         elif base_config.data_env == 'REARC':
             # NOTE: When patch_size=1 (i.e., consider pixels), this is equivalent to flattening the input image and projecting it to the embedding dimension
-            if self.model_config.use_ohe_repr:
+            if model_config.use_ohe_repr:
                 # We are in REARC and we want to use OHE (resulting in channels) for the possible tokens and thus create artificial channels for the linear projection of patches/pixels/tokens
                 # Using Channels: we create input x [B, C=num_token_categories, H, W] and we should get [B, seq_len=num_patches, embed_dim]
                 self.patch_embed = PatchEmbed(base_config, img_size=self.image_size, patch_size=self.patch_size, in_channels=self.num_channels, embed_dim=self.embed_dim, num_token_categories=self.num_token_categories)
@@ -270,34 +358,44 @@ class VisionTransformer(nn.Module):
                 # Using Seq2Seq: we create input x [B, C=1, H, W] and we should get [B, seq_len, embed_dim]
                 self.patch_embed = PatchEmbed(base_config, img_size=self.image_size, patch_size=self.patch_size, in_channels=self.num_channels, embed_dim=self.embed_dim)
 
-        logger.info(f"The max sequence length (with padding) not embedded as patches is: {image_size * image_size}")
-        logger.info(f"The actual max sequence length (with padding) embedded as patches is: {self.patch_embed.num_patches}")
+        log_message = f"The max sequence length (with padding) not embedded as patches is: {image_size * image_size}\n"
+        log_message += f"The actual max sequence length (with padding) embedded as patches is: {self.patch_embed.num_patches}\n"
+        log_message += "The two numbers should be equal if the image size is a square and the patch size is 1."
+        logger.info(log_message)
         
         self.seq_len = self.patch_embed.num_patches
 
 
         ## Absolute Positional Embeddings
-        # Create positional encoding
-        self.ape = create_absolute_positional_encoding(ape_type=self.model_config.ape_type,
-                                                       seq_len=self.seq_len,
-                                                       embed_dim=self.embed_dim,
-                                                       patch_embed=self.patch_embed,
-                                                       num_extra_tokens=self.num_extra_tokens
-                                                       )    # [1, num_all_tokens, embed_dim]
-        
-        self.ape_drop = nn.Dropout(p=self.network_config.ape_dropout_rate)    # dropout right after the positional encoding and residual
+        if model_config.ape.enabled:
+            # Create positional encoding
+            self.ape = create_absolute_positional_encoding(ape_type=model_config.ape.ape_type,
+                                                        seq_len=self.seq_len,
+                                                        embed_dim=self.embed_dim,
+                                                        patch_embed=self.patch_embed,
+                                                        num_extra_tokens=self.num_extra_tokens
+                                                        )    # [1, num_all_tokens, embed_dim]
+            
+            self.ape_drop = nn.Dropout(p=self.network_config.ape_dropout_rate)    # dropout right after the positional encoding and residual
 
+        ## Use RPE if enabled
+        if self.model_config.rpe.enabled:
+            rpe_type = self.model_config.rpe.rpe_type
+        else:
+            rpe_type = None
 
         ## Transformer Encoder Layers
         self.transformer_layers = nn.ModuleList([
             TransformerLayer(
+                image_size=self.image_size,
                 embed_dim=self.embed_dim,
                 num_heads=self.network_config.num_heads,
                 mlp_ratio=self.network_config.mlp_ratio,
                 qkv_bias=self.network_config.qkv_bias,
                 attn_drop=self.network_config.attn_dropout_rate,
                 attn_proj_drop=self.network_config.attn_proj_dropout_rate,
-                ff_drop=self.network_config.ff_dropout_rate
+                ff_drop=self.network_config.ff_dropout_rate,
+                rpe_type=rpe_type
             )
             for _ in range(self.network_config.num_layers)
             ])
@@ -323,8 +421,9 @@ class VisionTransformer(nn.Module):
 
     def init_weights(self):
         # Weights init: Positional Embedding
-        if self.ape.requires_grad:  # check if the PE is learnable
-            nn.init.trunc_normal_(self.ape, std=0.02)
+        if hasattr(self, 'ape'):
+            if self.ape.requires_grad:  # check if the PE is learnable
+                nn.init.trunc_normal_(self.ape, std=0.02)
 
         # Weights init: Extra tokens
         if hasattr(self, 'reg_tokens'):
@@ -353,8 +452,9 @@ class VisionTransformer(nn.Module):
             x = torch.cat((cls_tokens, x), dim=1)   # [B, num_all_tokens, embed_dim]
         
         # Add the positional encoding
-        x = x + self.ape  # [B, num_all_tokens, embed_dim], where num_all_tokens depends on the number of patches and extra tokens (if any) (e.g., cls ro register tokens)
-        x = self.ape_drop(x)    # [B, num_all_tokens, embed_dim]
+        if self.model_config.ape.enabled:
+            x = x + self.ape  # [B, num_all_tokens, embed_dim], where num_all_tokens depends on the number of patches and extra tokens (if any) (e.g., cls ro register tokens)
+            x = self.ape_drop(x)    # [B, num_all_tokens, embed_dim]
 
         return x
 
