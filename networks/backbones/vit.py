@@ -13,12 +13,6 @@ from utility.logging import logger
 __all__ = ['get_vit']
 
 
-def create_relative_positional_encoding(rpe_type='rope'):
-    # TODO: See how to build and use the 2D RPE (relative positional encoding) in the Attention module.
-    #       See ViTARC
-
-    raise NotImplementedError("Relative Positional Encoding (RPE) not yet implemented")
-
 class PatchEmbed(nn.Module):
     """ 
     Input image to Patch Embeddings.
@@ -250,7 +244,7 @@ class FeedForward(nn.Module):
 
 class TransformerLayer(nn.Module):
     """ Transformer layer """
-    def __init__(self, image_size, embed_dim, num_heads=6, mlp_ratio=4., qkv_bias=False, attn_drop=0., attn_proj_drop=0., ff_drop=0., rpe_type=None):
+    def __init__(self, image_size, embed_dim, num_heads, mlp_ratio=4., qkv_bias=False, attn_drop=0., attn_proj_drop=0., ff_drop=0., rpe_type=None):
         super().__init__()
 
         self.first_norm = nn.LayerNorm(embed_dim)
@@ -366,19 +360,19 @@ class VisionTransformer(nn.Module):
         self.seq_len = self.patch_embed.num_patches
 
 
-        ## Absolute Positional Embeddings
+        ## [Optional] Absolute Positional Embeddings (APE)
         if model_config.ape.enabled:
             # Create positional encoding
             self.ape = create_absolute_positional_encoding(ape_type=model_config.ape.ape_type,
-                                                        seq_len=self.seq_len,
-                                                        embed_dim=self.embed_dim,
-                                                        patch_embed=self.patch_embed,
-                                                        num_extra_tokens=self.num_extra_tokens
-                                                        )    # [1, num_all_tokens, embed_dim]
+                                                           seq_len=self.seq_len,
+                                                           embed_dim=self.embed_dim,
+                                                           patch_embed=self.patch_embed,
+                                                           num_extra_tokens=self.num_extra_tokens
+                                                           )    # [1, num_all_tokens, embed_dim]
             
             self.ape_drop = nn.Dropout(p=self.network_config.ape_dropout_rate)    # dropout right after the positional encoding and residual
 
-        ## Use RPE if enabled
+        ## [Optional] Relative Positional Embeddings (RPE)
         if self.model_config.rpe.enabled:
             rpe_type = self.model_config.rpe.rpe_type
         else:
@@ -420,7 +414,7 @@ class VisionTransformer(nn.Module):
             nn.init.ones_(m.weight)
 
     def init_weights(self):
-        # Weights init: Positional Embedding
+        # Weights init: Absolute Positional Embedding
         if hasattr(self, 'ape'):
             if self.ape.requires_grad:  # check if the PE is learnable
                 nn.init.trunc_normal_(self.ape, std=0.02)
@@ -492,10 +486,11 @@ class VisionTransformer(nn.Module):
 
         return x
 
-    # NOTE: Masks for the forward() method
-    # 1) [Not needed] (Self-)Attention mask. Use mask in forward() of nn.TransformerEncoder. It is used for custom attention masking. Use value 0 for allowed and -inf for masked positions.
-    # 2) [Not needed] Padding mask. Use src_key_padding_mask in forward() of nn.TransformerEncoder. It is used to mask the padding (or other) tokens in the input sequence. Use value True for padding tokens and False for actual tokens.
+
     def forward(self, src):
+        # NOTE: Masks for the forward() method
+        # 1) [Not needed] (Self-)Attention mask. Use mask in forward() of nn.TransformerEncoder. It is used for custom attention masking. Use value 0 for allowed and -inf for masked positions.
+        # 2) [Not needed] Padding mask. Use src_key_padding_mask in forward() of nn.TransformerEncoder. It is used to mask the padding (or other) tokens in the input sequence. Use value True for padding tokens and False for actual tokens.
 
         src_shape = src.shape
 
@@ -523,68 +518,3 @@ def get_vit(base_config, model_config, network_config, image_size, num_channels,
                                     )
     
     return vit_encoder
-    
-
-if __name__ == '__main__':
-
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-    # Test the ViT encoder
-    # Load the model and network configs
-    ...
-
-
-    # Instance 1: CVR approach. Good if we want to predict a single class from a sequence of tokens.
-    # Test instance 1
-    B = 2
-    C = 3
-    H = 128
-    W = 128
-    x = torch.randn(B, C, H, W)
-
-    # The config parameters that matter for this instance are:
-    # patch_size = 16
-    # encoder_aggregation.enabled = True
-    # encoder_aggregation.method = "token"
-    model = VisionTransformer(model_config=None,
-                              network_config=None,
-                              img_size=H,
-                              in_channels=C,
-                              num_classes=4,
-                              device=device
-                              )
-
-    # Get the predictions
-    print("Results using the model as a classifier outputting a single embedding for the input image")
-    y = model(x)  # [B, num_classes]; raw logits for each input sequence
-    print("Output shape: ", y.shape)
-    y = torch.argmax(y, dim=-1) # [B]; predicted classes
-    print("Predictions (output after softmax) shape: ", y.shape)
-    print("Predictions: ", y)
-
-
-    # Instance 2: REARC approach. Good if we want to use a Transformer decoder after a ViT encoder
-    # Test instance 2
-    B = 2
-    H = 30
-    W = 30
-    x = torch.randn(B, H, W)
-
-    # The config parameters that matter for this instance are:
-    # encoder_aggregation.enabled = False
-    # patch_size = 1
-    model = VisionTransformer(
-        model_config=None,
-        network_config=None,
-        img_size=H,
-        in_channels=1,
-        num_classes=4,
-        device=device
-    )
-
-    # Get the predictions
-    print("Results using the model as an encoder outputting features for each patch/token in the sequence")
-    y = model(x)    # [B, num_patches, embed_dim]; features embeddings for each token in the full input sequence encoded by the transformer
-    print("Output shape: ", y.shape)
-    print("Output (features embeddings resulting from encoding of each patch/token): ", y)    # features embeddings for each token in the full input sequence encoded by the transformer; we do not consider the extra tokens (e.g. cls or registers) in the output
-    # Then we would need to use a Transformer decoder to get predictions
