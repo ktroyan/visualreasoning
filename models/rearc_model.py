@@ -65,13 +65,13 @@ class VisReasModel(pl.LightningModule):
         self.model_backbone.load_state_dict(torch.load(checkpoint_path, weights_only=False)['model'], strict=False)
         logger.info(f"Loaded ckpt weights for backbone at ckpt path: {checkpoint_path}")
 
-    def freeze_backbone_model(self):
+    def freeze_backbone_weights(self):
         for param in self.model_backbone.parameters():
             param.requires_grad = False
 
     def create_predictions_mask(self, B: int, H: int, W: int, y_true_size: int) -> torch.Tensor:
-        """ Create a multiplicative mask to ignore the non-symbol (e.g., padding) tokens when computing the loss and accuracy. """
-        
+        """ Create a multiplicative mask to ignore all the non-symbol (e.g., padding) tokens when computing the loss and accuracy. """
+
         mask = torch.zeros((B, H, W), dtype=torch.bool, device=self.device)  # [B, H, W] ; initialize all as 0/False (padded)
 
         # Create mask for each sample of the batch
@@ -123,7 +123,7 @@ class VisReasModel(pl.LightningModule):
 
         # probabilities = F.softmax(y_hat, dim=1)  # compute the probabilities (normalized logits) of the model for each sample of the batch
 
-        # Loss per symbol (with padding): compute the loss per token/symbol
+        # Loss per symbol (with all sorts of padding considered): compute the loss per token/symbol
         per_sample_loss = F.cross_entropy(y_hat, y.long(), reduction='none').float()  # [B, seq_len]
         loss_symbol_with_pad = (per_sample_loss.mean()).unsqueeze(0)
 
@@ -162,6 +162,10 @@ class VisReasModel(pl.LightningModule):
         return loss, logs, preds, y
 
     def training_step(self, batch, batch_idx):
+        """
+        This method is called for each batch during the training phase.
+        This is a default PyTorch Lightning method that we override to define the training logic.
+        """
         x, y, samples_task_id, y_true_size = batch
 
         B, H, W = x.shape
@@ -185,6 +189,11 @@ class VisReasModel(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
+        """
+        This method is called for each batch during the validation phase.
+        This is a default PyTorch Lightning method that we override to define the validation logic.
+        """
+
         x, y, samples_task_id, y_true_size = batch
 
         B, H, W = x.shape
@@ -209,9 +218,12 @@ class VisReasModel(pl.LightningModule):
 
         return loss
 
-
     def on_train_epoch_end(self):
-        # NOTE: This method is called after the on_train_epoch_end() method of the Callback class.
+        """
+        This method is called at the end of each training epoch.
+        This is a default PyTorch Lightning method that we override to define the logic at the end of each training epoch.
+        NOTE: It is called after the on_train_epoch_end() method of the Callback class.
+        """
 
         if self.model_config.observe_preds.enabled:
             # Plot a few training samples (inputs, predictions, targets) of the first and last batch seen during the epoch
@@ -231,6 +243,11 @@ class VisReasModel(pl.LightningModule):
         self.val_targets = []
 
     def test_step(self, batch, batch_idx, dataloader_idx=0):
+        """
+        This method is called for each batch during the testing phase.
+        This is a default PyTorch Lightning method that we override to define the testing logic.
+        """
+
         x, y, samples_task_id, y_true_size = batch
 
         x, y_hat, y, mask = self.shared_step(batch)
@@ -238,11 +255,11 @@ class VisReasModel(pl.LightningModule):
         B, H, W = x.shape
         B, seq_len = y.shape
 
-        # Loss per symbol (with padding): compute the loss per token/symbol
+        # Loss per symbol (with all sort of padding considered): compute the loss per token/symbol
         per_sample_loss = F.cross_entropy(y_hat, y.long(), reduction='none').float()  # [B, seq_len]
         loss_symbol_with_pad = per_sample_loss.mean().unsqueeze(0)
 
-        # Loss per symbol (without padding): compute the loss per token/symbol and then apply the mask to ignore the padding tokens
+        # Loss per symbol (without padding considered): compute the loss per token/symbol and then apply the mask to ignore the padding tokens
         per_sample_loss = F.cross_entropy(y_hat, y.long(), reduction='none').float()  # [B, seq_len]
         loss_symbol_no_pad = ((per_sample_loss * mask).sum() / mask.sum()).unsqueeze(0)  # only consider non-padding elements
 
@@ -297,6 +314,10 @@ class VisReasModel(pl.LightningModule):
         return results
     
     def on_test_epoch_end(self):
+        """
+        This method is called at the end of the testing phase.
+        This is a default PyTorch Lightning method that we override to define the logic at the end of the testing phase.
+        """
 
         if len(self.test_step_results) != 0:
             test_step_results = self.test_step_results
@@ -340,8 +361,12 @@ class VisReasModel(pl.LightningModule):
                 observe_image_predictions("test_gen", self.gen_test_inputs, self.gen_test_preds, self.gen_test_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=0)
                 observe_image_predictions("test_gen", self.gen_test_inputs, self.gen_test_preds, self.gen_test_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=self.trainer.num_test_batches[1]-1)
 
-
     def on_train_end(self):
+        """
+        This method is called at the end of the training phase.
+        This is a default PyTorch Lightning method that we override to define the logic at the end of the training phase.
+        """
+
         # Plot learning rate values used during training
         plot_lr_schedule(self.lr_values)
         return
@@ -423,19 +448,33 @@ class VisReasModel(pl.LightningModule):
 class REARCModel(VisReasModel):
     def __init__(self, base_config, model_config, backbone_network_config, head_network_config, image_size, **kwargs):
 
-        # Save the hyperparameters so that they can be stored in the model checkpoint when using torch.save()
-        self.save_hyperparameters() # saves all the arguments (kwargs too) of __init__() to the variable hparams
+        # Save the hyperparameters to self.hparams so that they can be stored in the model checkpoint when using torch.save()
+        self.save_hyperparameters()
 
-        super().__init__(base_config=base_config, model_config=model_config, image_size=image_size)
+        # Update the max image size to take into account the border tokens
+        # self.image_size = image_size + 2  # add 2 for the border tokens (top-bottom and left-right)
+        self.image_size = image_size + 1  # add 1 for the border tokens (bottom and right)
+
+        logger.info(f"Image grid size with borders and padding): {self.image_size}x{self.image_size}")
+
+        super().__init__(base_config=base_config, model_config=model_config, image_size=self.image_size)
 
         self.model_config = model_config
 
-        self.image_size = image_size
-        self.seq_len = self.image_size * self.image_size    # the sequence length without extra tokens (but with padding)
+        self.seq_len = self.image_size * self.image_size    # the sequence length with data tokens and any sort of padding
         self.num_channels = 1
 
-        # TODO: Should we include padding to predict due to grid size variability? Yes?
-        self.num_classes = 10 + 1  # number of token categories; 1 extra token for padding as it has to be predicted
+        self.num_data_tokens = 10   # symbols in the grid (0-9)
+        self.num_special_tokens = 4  # PAD_TOKEN (10), X_ENDGRID_TOKEN (11), Y_ENDGRID_TOKEN (12), XY_ENDGRID_TOKEN (13)
+        self.PAD_TOKEN = 10
+        self.X_ENDGRID_TOKEN = 11   # not used directly here
+        self.Y_ENDGRID_TOKEN = 12   # not used directly here
+        self.XY_ENDGRID_TOKEN = 13  # not used directly here
+
+        self.num_classes = self.num_data_tokens + self.num_special_tokens   # number of token categories that can be predicted by the _whole_ model; 10 for symbols + 1 for each special token that could be predicted
+        self.vocab_size = self.num_classes + 2  # number of different tokens that we consider; +2 for the BOS and EOS tokens
+        # TODO: Is it ok to use vocab_size = num_classes + 2 instead of num_classes + 1 even though BOS never has to be predicted?
+        #       What I had done initially was using self.vocab_size (16) and self.decoder_vocab_size (15), but then it would mean that the logits converted to a class index would not represent the same thing for the decoder and the final output layer.
 
         ## Model backbone/encoder
         if model_config.backbone == "resnet":
@@ -504,26 +543,34 @@ class REARCModel(VisReasModel):
                                                     network_config=head_network_config,
                                                     max_seq_len=self.seq_len,
                                                     device=self.device)
-            
+
+            self.BOS_TOKEN = 14  # beginning of sequence token
+            self.EOS_TOKEN = 15  # end of sequence token
+
             # Create an additive mask to prevent the Transformer Decoder from looking at the future tokens/positions in self-attention module
             # The mask is a square Tensor of size [seq_len, seq_len] with -inf where we want to mask and 0 where we want to keep
-            self.tgt_mask = torch.triu(torch.full((self.seq_len, self.seq_len), float("-inf"), dtype=torch.float32, device=self.device), diagonal=1)    # [seq_len, seq_len]; diagonal=1 specifies from which diagonal to set the elements as -inf
+            self.register_buffer('tgt_mask', torch.triu(torch.full((self.seq_len, self.seq_len), float("-inf"), dtype=torch.float32, device=self.device), diagonal=1))  # [seq_len, seq_len]; register as buffer so that it moves device with the model
 
             # Create a target projection layer to map the ground truth target tokens/sequence (obtained from y) to the decoder embedding dimension as a Transformer Decoder needs to receive the target sequence in an embedding space
-            self.tgt_projection = nn.Embedding(num_embeddings=self.num_classes, embedding_dim=self.head_input_embed_dim, device=self.device)
+            self.tgt_projection = nn.Embedding(num_embeddings=self.vocab_size, embedding_dim=self.head_input_embed_dim, device=self.device)
 
 
         elif model_config.head == "mlp":
             self.decoder = get_mlp_head(network_config=head_network_config, 
                                         embed_dim=self.head_input_dim, 
                                         output_dim=self.num_classes, 
-                                        activation='relu', num_layers=2)
+                                        activation='relu',
+                                        num_layers=2)
         else:
             raise ValueError(f"Unknown model head given: {model_config.head}")
 
 
-        ## Output layer to go from the decoder output to logits
-        self.output_layer = nn.Linear(self.head_input_embed_dim, self.num_classes, device=self.device)
+        ## Output layer to go from a decoder output embedding to logits; we use vocab_size as the EOS token could be predicted
+        self.decoder_output_layer = nn.Linear(self.head_input_embed_dim, self.vocab_size, device=self.device)    
+
+
+        ## Output layer to go from the final decoded sequence (of token embeddings) to output logits; we use num_classes as the EOS cannot be predicted, only the data tokens and special tokens
+        self.final_output_layer = nn.Linear(self.head_input_embed_dim, self.num_classes, device=self.device)    
 
 
     def check_device_placement(self):
@@ -565,84 +612,98 @@ class REARCModel(VisReasModel):
 
     # @timer_decorator
     def training_decode(self, x_encoded, y):
-        B, S, D = x_encoded.shape
+        B, S_mem, D_mem = x_encoded.shape
+        B, S = y.shape
 
-        self.tgt_mask = self.tgt_mask.to(device=self.device)
+        # Prepare the decoder input: [BOS, y1, y2, ..., y_{S-1}]; the last token y_S is not used as part of the input to the decoder
+        start_token = torch.full((B, 1), self.BOS_TOKEN, dtype=torch.long, device=self.device)  # [B, 1]; we use a start token as the first token
+        y_shifted_right = y[:, :-1] # [B, S-1]
+        decoder_input_tokens = torch.cat([start_token, y_shifted_right], dim=1) # [B, S]
 
-        # self.check_device_placement()
+        # Embed the decoder input tokens
+        tgt = self.tgt_projection(decoder_input_tokens) # [B, S, E]
 
-        # Preprocess the target sequence y so that it has the dimensions [B, seq_len, head_input_embed_dim] to be used by the Transformer decoder
-        tgt = self.tgt_projection(y.long())  # [B, seq_len, head_input_embed_dim], where head_input_embed_dim is the embed dim of the decoder; ensure that tgt is of type long
-        
-        # We use the full target sequence y as input to the decoder with a causal mask. Thus we predict the seq_len tokens of the target sequence in parallel
-        # We are using full teacher forcing
-        output_target_seq = self.decoder(tgt=tgt, memory=x_encoded, tgt_mask=self.tgt_mask) # [B, seq_len, head_input_embed_dim]; NOTE: PyTorch's TransformerDecoder returns the logits for each token in the tgt sequence given
+        # AR decoding with full teacher forcing. All positions are predicted at the same time.
+        # The outputs at positions 0 to S-1 correspond to predictions for y_1 to y_S
+        output_target_seq = self.decoder(tgt=tgt,   # [B, S, E]
+                                         memory=x_encoded,  # [B, S_mem, E]
+                                         tgt_mask=self.tgt_mask # [S, S]
+                                         ) # [B, S, E]
 
         return output_target_seq
 
     # @timer_decorator
     def inference_decode(self, x_encoded):
-        B, S, D = x_encoded.shape
-
-        self.tgt_mask = self.tgt_mask.to(device=self.device)
-
-        # self.check_device_placement()
-
-        self.decoder.eval()  # set the decoder network to evaluation mode
+        B, S_mem, D_mem = x_encoded.shape
+        
+        # Make sure the decoder network is in evaluation mode
+        self.decoder.eval()
         with torch.no_grad():
-            # We use our predicted target sequence up to token at position t as input to the decoder. Thus we predict the seq_len tokens of the target sequence one by one in an auto-regressive manner
-            # We using auto-regressive decoding without teacher forcing
-            output_tokens = []  # list to store the output (tensor) tokens at each step. Instead of reserving memory for all timesteps at once, we append only the necessary data step-by-step, hence avoiding storing the intermediate states as using a list detaches all states from the computation graph
-            
-            # Create a start token used to start the AR decoding
-            # TODO: Is it correct to start with a tensor of zeros as the first token? What should the start token be?
-            start_token = 0
-            token_start = torch.full((B, 1), start_token, device=self.device)  # [B, 1]; start with a token start_token as the first token
 
-            # Embed the start token
-            token_start = self.tgt_projection(token_start.long())  # [B, 1, head_input_embed_dim]
-            
-            # Store the first token in the list; note that the list should contain the embedded tokens of each AR decoding step
-            output_tokens.append(token_start)
-            
-            # Start the iterative AR decoding loop
-            for t in range(self.seq_len-1): # we have seq_len logits/predictions to get
-                prev_tokens = torch.cat(output_tokens, dim=1)   # [B, t+1, head_input_embed_dim]; create a tensor from the list and detach to save memory
+            # Output embeddings from each step
+            output_embeddings = []
 
-                # Decode up to step t; in theory we do not need to give a causal mask as we are only interested in the last token logits, but we give it to avoid possible errors if we were to analyze the logits of all tokens at each step
-                tgt_mask = self.tgt_mask[:t+1, :t+1]  # [t+1, t+1]; use the global causal mask for the first t+1 steps only
+            # Initialize the decoded sequence with the start token BOS
+            decoded_sequence = torch.full((B, 1), self.BOS_TOKEN, dtype=torch.long, device=self.device) # [B, 1]
 
-                # Compute the output embeddings up to position t
-                outputs = self.decoder(prev_tokens, x_encoded, tgt_mask=tgt_mask) # [B, t+1, head_input_embed_dim]; NOTE: The logits returned by PyTorch's TransformerDecoder are that of all the tokens in the tgt sequence given. So below we take only that of the last step
+            # Keep track of the finished sequences (i.e., those that have already generated the EOS token)
+            finished_sequences_flag = torch.zeros(B, dtype=torch.bool, device=self.device)  # [B]
+
+            # AR decoding loop (no teacher forcing, one token at a time)
+            for t in range(self.seq_len):   # we have seq_len tokens to get
+
+                # Get the current length of the decoded sequence
+                current_len = decoded_sequence.shape[1] # t+1
+
+                # Embed the tokens part of the current decoded sequence
+                decoder_input_embedded = self.tgt_projection(decoded_sequence) # [B, current_len, E]
+
+                # Get the relevant tgt/causal mask by slicing the general tgt mask ([seq_len, seq_len]) created during initialization
+                tgt_mask = self.tgt_mask[:current_len, :current_len] # [current_len, current_len]
+
+                # Compute decoder output embeddings for positions up to t+1
+                # The outputs at positions 0 to S-1 correspond to predicted embeddings for tokens y_1 to y_S
+                outputs = self.decoder(tgt=decoder_input_embedded,  # [B, current_len, E]
+                                       memory=x_encoded,    # [B, S_mem, E]
+                                       tgt_mask=tgt_mask    # [current_len, current_len]
+                                       )    # [B, current_len, E]
                 
-                # Get the output token at step t; we need to get an actual (i.e., not just logits) token since we use AR decoding
-                token_t_output = outputs[:, -1, :]   # [B, head_input_embed_dim]; We take the logits of the last token (as it is the token of interest)
-                
-                # Apply the linear output layer to get the logits from the predicted target sequence embeddings
-                token_t_logits = self.output_layer(token_t_output)  # [B, seq_len, num_classes] <-- [B, seq_len, head_input_embed_dim]
-                
-                # Get/sample the token at step t
-                # TODO: Implement better sampling? E.g., Beam search, etc. to sample the output token? 
-                token_t = token_t_logits.argmax(dim=-1, keepdim=True)  # [B, 1]; This extracts only the last step’s logits and finds the most probable token; Greedy decoding: take the token with the highest probability  
-                token_t = token_t.to(device=self.device, dtype=torch.float32)
-            
-                # Embed the output token of position/step t
-                token_t = self.tgt_projection(token_t.long())  # [B, 1, head_input_embed_dim] <-- [B, 1]
+                # Get the embedding for the current prediction step (i.e., the last output embedding of the decoder)
+                output_embeddings_t = outputs[:, -1, :]   # [B, E]; embedding that allows to predict the next token
 
-                # Store in the list the (embedded) output token at position/step t
-                output_tokens.append(token_t)    # TODO: Important to use .copy() here to avoid storing a reference of the tensor token_t since it is changing in the loop?
+                # Store the output embedding for the current step
+                output_embeddings.append(output_embeddings_t)
+
+                # Predict the next token
+                predicted_token_logits = self.decoder_output_layer(output_embeddings_t) # [B, vocab_size] 
+                predicted_token = torch.argmax(predicted_token_logits, dim=-1)   # [B]; TODO: Implement better sampling than argmax (greedy) ?
+
+                # Modify the predicted token if needed. This is to handle appending a PAD_TOKEN if a sequence had already finished (i.e., it had predicted the EOS token)
+                newly_finished = (~finished_sequences_flag) & (predicted_token == self.EOS_TOKEN)   # [B]; identify the sequences that have finished generating tokens at this step, so it's True only if the sequence was not already finished (~finished_sequences_flag) AND its current predicted_token is the EOS_TOKEN
+                finished_sequences_flag |= newly_finished   # [B]; use element-wise OR where 1/True means finished and 0/False means not finished
+                finished_previously = finished_sequences_flag & (~newly_finished)   # [B]; identify the sequences that were already finished before the current step, as they will need to be appended a PAD_TOKEN instead of the predicted token
+                token_to_append = predicted_token.masked_fill(finished_previously, self.PAD_TOKEN)   # [B]; for previously finished sequences, masked_fill replaces their predicted_token with self.PAD_TOKEN, otherwise sequences still running or finishing now keep their predicted_token (which could be a regular token or the self.EOS_TOKEN)
+
+                # Append the correct newly predicted token. The current decoded sequence is then used for the next iteration's decoder input
+                decoded_sequence = torch.cat([decoded_sequence, token_to_append.unsqueeze(1)], dim=1)  # [B, current_len+1]
+
+                # Check if all sequences in the batch have finished generating (i.e., an EOS token has been generated for all sequences)
+                if finished_sequences_flag.all():
+                    break
             
-            # Stack the output tokens from the list to get the predicted target sequence
-            output_target_seq = torch.cat(output_tokens, dim=1)   # [B, seq_len, head_input_embed_dim]
+            # Prepare the sequence of output embeddings corresponding to the tokens generated during AR decoding. We stack embeddings along the sequence dimension
+            output_target_seq = torch.stack(output_embeddings, dim=1) # [B, seq_len, E]
 
         return output_target_seq
+    
 
     # @timer_decorator
     def decode_sequence(self, x_encoded, y):
-        # AR Decoding
         if self.training:   # use PTL LightningModule's self.training attribute to check if the model is in training mode; could also use self.trainer.training, self.trainer.validating, self.trainer.testing
+            # AR decoding with full teacher forcing. All positions are predicted at the same time.
             output_target_seq = self.training_decode(x_encoded, y)
         else:
+            # AR decoding. The model predicts one token at a time in an auto-regressive manner.
             output_target_seq = self.inference_decode(x_encoded)
 
         return output_target_seq
@@ -672,7 +733,7 @@ class REARCModel(VisReasModel):
             output_target_seq = self.decode_sequence(x_encoded, y)   # [B, seq_len, head_input_embed_dim]
 
             # Apply the linear output layer to get the logits from the predicted target sequence embeddings
-            logits = self.output_layer(output_target_seq)  # [B, seq_len, num_classes]
+            logits = self.final_output_layer(output_target_seq)  # [B, seq_len, num_classes]
 
         elif self.model_config.head in ["mlp"]:
             # MLP Decoder/Head

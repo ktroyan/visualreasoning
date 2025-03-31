@@ -146,10 +146,10 @@ def observe_image_predictions(split: str,
         logger.debug(f"Observing {n_samples} samples from a batch at {split} time. See /figs folder.")
 
     # Handle padding tokens. Replace the symbols for pad tokens with the background color
-    pad_token = 10.0
-    background_token = 0.0  # background (typically black color, as in REARC)
+    pad_token = 10
+    background_token = 0  # background (typically black color, as in REARC)
 
-    # Count pad tokens and background tokens BEFORE replacement
+    # Count pad tokens tokens BEFORE replacement
     input_pad_count = torch.sum(inputs[0] == pad_token).item()
     pred_pad_count = torch.sum(preds[0] == pad_token).item()
     target_pad_count = torch.sum(targets[0] == pad_token).item()
@@ -163,7 +163,7 @@ def observe_image_predictions(split: str,
     log_message += f"Before pad tokens replacement - Background Tokens: Input={input_background_count}, Pred={pred_background_count}, Target={target_background_count}\n"
     logger.debug(log_message)
 
-    # Replace pad tokens with background token
+    # Replace border tokens and pad tokens with background token
     inputs[inputs == pad_token] = background_token
     preds[preds == pad_token] = background_token
     targets[targets == pad_token] = background_token
@@ -189,15 +189,21 @@ def observe_image_predictions(split: str,
 
     # Use the same color map as REARC
     cmap = ListedColormap([
-        '#000', '#0074D9', '#FF4136', '#2ECC40', '#FFDC00',
-        '#AAAAAA', '#F012BE', '#FF851B', '#7FDBFF', '#870C25'
+        '#000',     # black (background)
+        '#0074D9',  # blue
+        '#FF4136',  # red
+        '#2ECC40',  # green
+        '#FFDC00',  # yellow
+        '#AAAAAA',  # gray
+        '#F012BE',  # pink
+        '#FF851B',  # orange
+        '#7FDBFF',  # light blue
+        '#870C25',   # burgundy
+        '#555555',  # dark gray (border tokens)
     ])
 
     vmin = 0
-    vmax = 9
-
-    # norm = Normalize(vmin=0, vmax=9)    # there are 10 possible symbols (0-9) to predict in the grid image
-    # args = {'cmap': cmap, 'norm': norm}
+    vmax = 9 + 1  # 10 possible symbols (0-9) to predict in the grid image + 1 for the borders' color
 
     # Create a figure to plot the samples (input, prediction, target) of the batch
     fig, axs = plt.subplots(3, n_samples, figsize=(n_samples*5, 12), dpi=150)
