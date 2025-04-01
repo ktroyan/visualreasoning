@@ -158,7 +158,7 @@ class RoPEMHSA(nn.Module):
     """ 
     Multi-Head Self-Attention block including RoPE (RPE).
     """
-    def __init__(self, image_size, embed_dim, num_heads=6, qkv_bias=False, attn_drop=0., proj_drop=0.):
+    def __init__(self, model_config, image_size, embed_dim, num_heads=6, qkv_bias=False, attn_drop=0., proj_drop=0., num_extra_tokens=0):
         super().__init__()
         
         self.num_heads = num_heads
@@ -169,6 +169,8 @@ class RoPEMHSA(nn.Module):
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(embed_dim, embed_dim)
         self.proj_drop = nn.Dropout(proj_drop)
+
+        self.num_extra_tokens = num_extra_tokens
 
         ## 2D RoPE (Rotary Positional Embedding)
         # Choose RoPE dim (half features per axis)
@@ -183,7 +185,7 @@ class RoPEMHSA(nn.Module):
 
         # Get and store flattened axial frequencies
         axial_freqs = self.rotary_emb.get_axial_freqs(image_size, image_size) # [H=image_size, W=image_size, rope_dim * 2]
-        flat_axial_freqs = rearrange(axial_freqs, 'h w d -> (h w) d') # [seq_len, rope_dim * 2]
+        flat_axial_freqs = rearrange(axial_freqs, 'h w d -> (h w) d') # [num_tokens, rope_dim * 2], where num_tokens is the sequence length that the axial frequencies are computed for
         self.register_buffer('rope_axial_freqs', flat_axial_freqs, persistent=False)
 
     def forward(self, x):
@@ -199,6 +201,13 @@ class RoPEMHSA(nn.Module):
         x_q, x_k, x_v = x_qkv[0], x_qkv[1], x_qkv[2]    # ([B, num_heads, seq_len, head_embed_dim], [B, num_heads, seq_len, head_embed_dim], [B, num_heads, seq_len, head_embed_dim])
 
         ## Use RoPE (2D with Axial Rotary Embedding)
+        if self.num_extra_tokens > 0:
+            # TODO: See if correct how I handle the extra tokens with RoPE (as the seq_len is not image_size**2 anymore)
+            # Remove the extra tokens (i.e., cls and register tokens) from the input embeddings before applying RoPE
+            x_q = x_q[:, :, self.num_extra_tokens:, :]
+            x_k = x_k[:, :, self.num_extra_tokens:, :]
+        
+
         # Reshape q, k (to have seq_len and head_dim as the the two last dimensions) for apply_rotary_emb: [B*num_heads, seq_len, head_dim]
         q_reshaped = rearrange(x_q, 'b h s d -> (b h) s d') # [B*num_heads, seq_len, head_dim]
         k_reshaped = rearrange(x_k, 'b h s d -> (b h) s d') # [B*num_heads, seq_len, head_dim]
@@ -210,6 +219,11 @@ class RoPEMHSA(nn.Module):
         # Reshape back
         x_q = rearrange(q_rotated, '(b h) s d -> b h s d', h=self.num_heads)    # [B, num_heads, seq_len, head_embed_dim]
         x_k = rearrange(k_rotated, '(b h) s d -> b h s d', h=self.num_heads)    # [B, num_heads, seq_len, head_embed_dim]
+
+        if self.num_extra_tokens > 0:
+            # Concatenate back the extra tokens to the embeddings after applying RoPE
+            x_q = torch.cat((x_q[:, :, :self.num_extra_tokens, :], x_q), dim=2)
+            x_k = torch.cat((x_k[:, :, :self.num_extra_tokens, :], x_k), dim=2)
 
         # Compute the attention scores
         attn = (x_q @ x_k.transpose(-2, -1))    # [B, num_heads, seq_len, seq_len]; unscaled attention logits
@@ -244,19 +258,21 @@ class FeedForward(nn.Module):
 
 class TransformerLayer(nn.Module):
     """ Transformer layer """
-    def __init__(self, image_size, embed_dim, num_heads, mlp_ratio=4., qkv_bias=False, attn_drop=0., attn_proj_drop=0., ff_drop=0., rpe_type=None):
+    def __init__(self, model_config, image_size, embed_dim, num_heads, mlp_ratio=4., qkv_bias=False, attn_drop=0., attn_proj_drop=0., ff_drop=0., num_extra_tokens=0, rpe_type=None):
         super().__init__()
 
         self.first_norm = nn.LayerNorm(embed_dim)
 
         if rpe_type == 'rope':
-            self.attn = RoPEMHSA(image_size,
-                                embed_dim,
-                                num_heads=num_heads,
-                                qkv_bias=qkv_bias,
-                                attn_drop=attn_drop,
-                                proj_drop=attn_proj_drop
-                                )
+            self.attn = RoPEMHSA(model_config,
+                                 image_size,
+                                 embed_dim,
+                                 num_heads=num_heads,
+                                 qkv_bias=qkv_bias,
+                                 attn_drop=attn_drop,
+                                 proj_drop=attn_proj_drop,
+                                 num_extra_tokens=num_extra_tokens
+                                 )
 
         elif rpe_type == 'vitarc-alibi':
             raise NotImplementedError("RPE type 'vitarc-alibi' not yet implemented")
@@ -381,6 +397,7 @@ class VisionTransformer(nn.Module):
         ## Transformer Encoder Layers
         self.transformer_layers = nn.ModuleList([
             TransformerLayer(
+                model_config=model_config,
                 image_size=self.image_size,
                 embed_dim=self.embed_dim,
                 num_heads=self.network_config.num_heads,
@@ -389,6 +406,7 @@ class VisionTransformer(nn.Module):
                 attn_drop=self.network_config.attn_dropout_rate,
                 attn_proj_drop=self.network_config.attn_proj_dropout_rate,
                 ff_drop=self.network_config.ff_dropout_rate,
+                num_extra_tokens=self.num_extra_tokens,
                 rpe_type=rpe_type
             )
             for _ in range(self.network_config.num_layers)
