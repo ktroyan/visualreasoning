@@ -9,8 +9,8 @@ from networks.backbones.transformer import get_transformer_encoder
 from networks.backbones.vit import get_vit
 from networks.heads.mlp import get_mlp_head
 from networks.heads.transformer import get_transformer_decoder
-from utility.utils import plot_lr_schedule, timer_decorator
-from utility.rearc.utils import observe_image_predictions
+from utility.utils import plot_lr_schedule
+from utility.rearc.utils import observe_image_predictions, plot_attention_scores
 from utility.logging import logger
 
 
@@ -20,11 +20,12 @@ class VisReasModel(pl.LightningModule):
     It is based on PTL's LightningModule class.
     """
     
-    def __init__(self, base_config, model_config, image_size):
+    def __init__(self, base_config, model_config, backbone_network_config, image_size):
         super().__init__()
 
         self.base_config = base_config
         self.model_config = model_config
+        self.backbone_network_config = backbone_network_config
         self.image_size = image_size
 
         # Test inputs, targets and predictions for local observation
@@ -59,6 +60,11 @@ class VisReasModel(pl.LightningModule):
 
         # Learning rate values for plotting LR schedule
         self.lr_values = []
+
+        # Store the attention scores
+        if self.model_config.attention_map.enabled:
+            self.train_attention_scores = []
+            self.val_attention_scores = []
 
 
     def load_backbone_weights(self, checkpoint_path):
@@ -175,13 +181,23 @@ class VisReasModel(pl.LightningModule):
         # Logging
         self.log_dict({f"metrics/train_{k}": v for k,v in logs.items()}, prog_bar=True, logger=True, on_step=True, on_epoch=True)    # NOTE: this is monitored for best checkpoint and early stopping
         
-        # Save two batches (of inputs, preds, targets) per epoch for plotting of images at each epoch
+        # For the first and last training batch of the epoch
         if (batch_idx == 0) or (batch_idx == self.trainer.num_training_batches - 1):
+            # Save batch (of inputs, preds, targets) for current epoch for plotting
             self.train_inputs.append(x)
             self.train_preds.append(preds)
             self.train_targets.append(y)
 
-        # Save to plot locally
+            if self.model_config.attention_map.enabled:
+                # Store attention scores
+                if hasattr(self.encoder, 'get_attention_scores'):
+                    attn_scores = self.encoder.get_attention_scores()
+                    if attn_scores is not None:
+                        self.train_attention_scores.append(attn_scores)
+                    else:
+                        logger.warning(f"Attention scores were None for train epoch {self.current_epoch} and batch {batch_idx}.")
+
+        # Store to plot locally
         self.train_loss_step.append(logs['loss'])
         self.train_acc_step.append(logs['acc'])
         self.train_grid_acc_step.append(logs['acc_grid_with_pad'])
@@ -205,11 +221,21 @@ class VisReasModel(pl.LightningModule):
         self.log_dict({f"metrics/val_{k}": v for k, v in logs.items()}, prog_bar=True, logger=True, on_step=True, on_epoch=True)    # NOTE: this is monitored for best checkpoint and early stopping
         self.log_dict({"learning_rate": self.lr_schedulers().get_last_lr()[-1]}, prog_bar=True, logger=True, on_step=True, on_epoch=True)    # NOTE: this is monitored for best checkpoint and early stopping. This yields learning_rate in the logs
 
-        # Save two batches (of inputs, preds, targets) per epoch for plotting of images at each epoch
+        # For the first and last validation batch of the epoch
         if (batch_idx == 0) or (batch_idx == self.trainer.num_val_batches[0] - 1):
+            # Save batch (of inputs, preds, targets) for current epoch for plotting
             self.val_inputs.append(x)
             self.val_preds.append(preds)
             self.val_targets.append(y)
+
+            if self.model_config.attention_map.enabled:
+                # Store attention scores
+                if hasattr(self.encoder, 'get_attention_scores'):
+                    attn_scores = self.encoder.get_attention_scores()
+                    if attn_scores is not None:
+                        self.val_attention_scores.append(attn_scores)
+                    else:
+                        logger.warning(f"Attention scores were None for val epoch {self.current_epoch} and batch {batch_idx}.")
 
         # Save to plot locally
         self.val_loss_step.append(logs['loss'])
@@ -225,14 +251,105 @@ class VisReasModel(pl.LightningModule):
         NOTE: It is called after the on_train_epoch_end() method of the Callback class.
         """
 
+        # Plot attention maps if attention maps are enabled and exist
+        if self.model_config.attention_map.enabled and hasattr(self.encoder, 'get_attention_scores'):
+            # Plot attention maps of some training samples of the first and last batch seen during the epoch
+            plot_attention_scores("train", 
+                                  self.train_inputs, 
+                                  self.train_attention_scores, 
+                                  self.model_config.attention_map.layer, 
+                                  self.backbone_network_config.num_heads, 
+                                  self.image_size, 
+                                  self.encoder.num_extra_tokens, 
+                                  self.encoder.seq_len, 
+                                  n_samples=self.model_config.attention_map.n_samples, 
+                                  epoch=self.current_epoch, 
+                                  batch_index=0
+                                  )
+            
+            plot_attention_scores("train",
+                                  self.train_inputs,
+                                  self.train_attention_scores,
+                                  self.model_config.attention_map.layer,
+                                  self.backbone_network_config.num_heads,
+                                  self.image_size,
+                                  self.encoder.num_extra_tokens,
+                                  self.encoder.seq_len,
+                                  n_samples=self.model_config.attention_map.n_samples,
+                                  epoch=self.current_epoch,
+                                  batch_index=-1
+                                  )
+            
+            # Plot attention maps of some validation samples of the first and last batch seen during the epoch
+            plot_attention_scores("val", 
+                                  self.val_inputs, 
+                                  self.val_attention_scores, 
+                                  self.model_config.attention_map.layer,
+                                  self.backbone_network_config.num_heads,
+                                  self.image_size,
+                                  self.encoder.num_extra_tokens,
+                                  self.encoder.seq_len,
+                                  n_samples=self.model_config.attention_map.n_samples,
+                                  epoch=self.current_epoch,
+                                  batch_index=0
+                                  )
+            
+            plot_attention_scores("val", 
+                                  self.val_inputs, 
+                                  self.val_attention_scores, 
+                                  self.model_config.attention_map.layer, 
+                                  self.backbone_network_config.num_heads,
+                                  self.image_size,
+                                  self.encoder.num_extra_tokens,
+                                  self.encoder.seq_len,
+                                  n_samples=self.model_config.attention_map.n_samples,
+                                  epoch=self.current_epoch,
+                                  batch_index=-1
+                                  )
+
+        # Plot model predictions
         if self.model_config.observe_preds.enabled:
             # Plot a few training samples (inputs, predictions, targets) of the first and last batch seen during the epoch
-            observe_image_predictions("train", self.train_inputs, self.train_preds, self.train_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=0, epoch=self.current_epoch)
-            observe_image_predictions("train", self.train_inputs, self.train_preds, self.train_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=-1, epoch=self.current_epoch)
+            observe_image_predictions("train", 
+                                      self.train_inputs, 
+                                      self.train_preds, 
+                                      self.train_targets, 
+                                      self.image_size, 
+                                      n_samples=self.model_config.observe_preds.n_samples,
+                                      batch_index=0,
+                                      epoch=self.current_epoch
+                                      )
+            
+            observe_image_predictions("train", 
+                                      self.train_inputs, 
+                                      self.train_preds, 
+                                      self.train_targets, 
+                                      self.image_size, 
+                                      n_samples=self.model_config.observe_preds.n_samples, 
+                                      batch_index=-1,
+                                      epoch=self.current_epoch
+                                      )
             
             # Plot a few validation samples (inputs, predictions, targets) of the first and last batch seen during the epoch
-            observe_image_predictions("val", self.val_inputs, self.val_preds, self.val_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=0, epoch=self.current_epoch)
-            observe_image_predictions("val", self.val_inputs, self.val_preds, self.val_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=-1, epoch=self.current_epoch)
+            observe_image_predictions("val", 
+                                      self.val_inputs, 
+                                      self.val_preds, 
+                                      self.val_targets, 
+                                      self.image_size, 
+                                      n_samples=self.model_config.observe_preds.n_samples, 
+                                      batch_index=0, 
+                                      epoch=self.current_epoch
+                                      )
+            
+            observe_image_predictions("val", 
+                                      self.val_inputs, 
+                                      self.val_preds, 
+                                      self.val_targets, 
+                                      self.image_size, 
+                                      n_samples=self.model_config.observe_preds.n_samples, 
+                                      batch_index=-1, 
+                                      epoch=self.current_epoch
+                                      )
 
         # Reset the lists for the next epoch
         self.train_inputs = []
@@ -241,6 +358,9 @@ class VisReasModel(pl.LightningModule):
         self.val_inputs = []
         self.val_preds = []
         self.val_targets = []
+
+        self.train_attention_scores = []
+        self.val_attention_scores = []
 
     def test_step(self, batch, batch_idx, dataloader_idx=0):
         """
@@ -455,9 +575,12 @@ class REARCModel(VisReasModel):
         # self.image_size = image_size + 2  # add 2 for the border tokens (top-bottom and left-right)
         self.image_size = image_size + 1  # add 1 for the border tokens (bottom and right)
 
-        logger.info(f"Image grid size with borders and padding): {self.image_size}x{self.image_size}")
+        logger.info(f"Image grid size with borders and padding: {self.image_size}x{self.image_size}")
 
-        super().__init__(base_config=base_config, model_config=model_config, image_size=self.image_size)
+        super().__init__(base_config=base_config, 
+                         model_config=model_config, 
+                         backbone_network_config=backbone_network_config, 
+                         image_size=self.image_size)
 
         self.model_config = model_config
 
@@ -466,14 +589,11 @@ class REARCModel(VisReasModel):
 
         self.num_data_tokens = 10   # symbols in the grid (0-9)
         self.num_special_tokens = 4  # PAD_TOKEN (10), X_ENDGRID_TOKEN (11), Y_ENDGRID_TOKEN (12), XY_ENDGRID_TOKEN (13)
-        self.PAD_TOKEN = 10
-        self.X_ENDGRID_TOKEN = 11   # not used directly here
-        self.Y_ENDGRID_TOKEN = 12   # not used directly here
-        self.XY_ENDGRID_TOKEN = 13  # not used directly here
 
         self.num_classes = self.num_data_tokens + self.num_special_tokens   # number of token categories that can be predicted by the _whole_ model; 10 for symbols + 1 for each special token that could be predicted
         self.vocab_size = self.num_classes + 2  # number of different tokens that we consider; +2 for the BOS and EOS tokens
         # TODO: Is it ok to use vocab_size = num_classes + 2 instead of num_classes + 1 even though BOS never has to be predicted?
+        #       The main reason to do +2 instead of +1 is to have a correct mapping for the layer that embeds tokens.
         #       What I had done initially was using self.vocab_size (16) and self.decoder_vocab_size (15), but then it would mean that the logits converted to a class index would not represent the same thing for the decoder and the final output layer.
 
         ## Model backbone/encoder
@@ -483,7 +603,6 @@ class REARCModel(VisReasModel):
                                                            network_config=backbone_network_config,
                                                            image_size=self.image_size,
                                                            num_classes=self.num_classes,
-                                                           device=self.device
                                                            )
             self.backbone_input_embed_dim = bb_num_out_features   # embedding dimension backbone model
 
@@ -495,7 +614,6 @@ class REARCModel(VisReasModel):
                                                    image_size=self.image_size,
                                                    num_channels=self.num_channels,
                                                    num_classes=self.num_classes, 
-                                                   device=self.device
                                                    )
             self.backbone_input_embed_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
             
@@ -507,7 +625,6 @@ class REARCModel(VisReasModel):
                                    image_size=self.image_size,
                                    num_channels=self.num_channels,
                                    num_classes=self.num_classes,
-                                   device=self.device
                                    )
             self.backbone_input_embed_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
 
@@ -540,19 +657,11 @@ class REARCModel(VisReasModel):
         ## Model head or decoder
         if model_config.head == "transformer":
             self.decoder = get_transformer_decoder(model_config=self.model_config,
-                                                    network_config=head_network_config,
-                                                    max_seq_len=self.seq_len,
-                                                    device=self.device)
-
-            self.BOS_TOKEN = 14  # beginning of sequence token
-            self.EOS_TOKEN = 15  # end of sequence token
-
-            # Create an additive mask to prevent the Transformer Decoder from looking at the future tokens/positions in self-attention module
-            # The mask is a square Tensor of size [seq_len, seq_len] with -inf where we want to mask and 0 where we want to keep
-            self.register_buffer('tgt_mask', torch.triu(torch.full((self.seq_len, self.seq_len), float("-inf"), dtype=torch.float32, device=self.device), diagonal=1))  # [seq_len, seq_len]; register as buffer so that it moves device with the model
-
-            # Create a target projection layer to map the ground truth target tokens/sequence (obtained from y) to the decoder embedding dimension as a Transformer Decoder needs to receive the target sequence in an embedding space
-            self.tgt_projection = nn.Embedding(num_embeddings=self.vocab_size, embedding_dim=self.head_input_embed_dim, device=self.device)
+                                                   network_config=head_network_config,
+                                                   num_classes=self.num_classes,
+                                                   vocab_size=self.vocab_size,
+                                                   seq_len=self.seq_len,
+                                                   )
 
 
         elif model_config.head == "mlp":
@@ -560,17 +669,11 @@ class REARCModel(VisReasModel):
                                         embed_dim=self.head_input_dim, 
                                         output_dim=self.num_classes, 
                                         activation='relu',
-                                        num_layers=2)
+                                        num_layers=2
+                                        )
+        
         else:
             raise ValueError(f"Unknown model head given: {model_config.head}")
-
-
-        ## Output layer to go from a decoder output embedding to logits; we use vocab_size as the EOS token could be predicted
-        self.decoder_output_layer = nn.Linear(self.head_input_embed_dim, self.vocab_size, device=self.device)    
-
-
-        ## Output layer to go from the final decoded sequence (of token embeddings) to output logits; we use num_classes as the EOS cannot be predicted, only the data tokens and special tokens
-        self.final_output_layer = nn.Linear(self.head_input_embed_dim, self.num_classes, device=self.device)    
 
 
     def check_device_placement(self):
@@ -610,103 +713,6 @@ class REARCModel(VisReasModel):
             logger.error(log_message)
         logger.warning(log_message)
 
-    # @timer_decorator
-    def training_decode(self, x_encoded, y):
-        B, S_mem, D_mem = x_encoded.shape
-        B, S = y.shape
-
-        # Prepare the decoder input: [BOS, y1, y2, ..., y_{S-1}]; the last token y_S is not used as part of the input to the decoder
-        start_token = torch.full((B, 1), self.BOS_TOKEN, dtype=torch.long, device=self.device)  # [B, 1]; we use a start token as the first token
-        y_shifted_right = y[:, :-1] # [B, S-1]
-        decoder_input_tokens = torch.cat([start_token, y_shifted_right], dim=1) # [B, S]
-
-        # Embed the decoder input tokens
-        tgt = self.tgt_projection(decoder_input_tokens) # [B, S, E]
-
-        # AR decoding with full teacher forcing. All positions are predicted at the same time.
-        # The outputs at positions 0 to S-1 correspond to predictions for y_1 to y_S
-        output_target_seq = self.decoder(tgt=tgt,   # [B, S, E]
-                                         memory=x_encoded,  # [B, S_mem, E]
-                                         tgt_mask=self.tgt_mask # [S, S]
-                                         ) # [B, S, E]
-
-        return output_target_seq
-
-    # @timer_decorator
-    def inference_decode(self, x_encoded):
-        B, S_mem, D_mem = x_encoded.shape
-        
-        # Make sure the decoder network is in evaluation mode
-        self.decoder.eval()
-        with torch.no_grad():
-
-            # Output embeddings from each step
-            output_embeddings = []
-
-            # Initialize the decoded sequence with the start token BOS
-            decoded_sequence = torch.full((B, 1), self.BOS_TOKEN, dtype=torch.long, device=self.device) # [B, 1]
-
-            # Keep track of the finished sequences (i.e., those that have already generated the EOS token)
-            finished_sequences_flag = torch.zeros(B, dtype=torch.bool, device=self.device)  # [B]
-
-            # AR decoding loop (no teacher forcing, one token at a time)
-            for t in range(self.seq_len):   # we have seq_len tokens to get
-
-                # Get the current length of the decoded sequence
-                current_len = decoded_sequence.shape[1] # t+1
-
-                # Embed the tokens part of the current decoded sequence
-                decoder_input_embedded = self.tgt_projection(decoded_sequence) # [B, current_len, E]
-
-                # Get the relevant tgt/causal mask by slicing the general tgt mask ([seq_len, seq_len]) created during initialization
-                tgt_mask = self.tgt_mask[:current_len, :current_len] # [current_len, current_len]
-
-                # Compute decoder output embeddings for positions up to t+1
-                # The outputs at positions 0 to S-1 correspond to predicted embeddings for tokens y_1 to y_S
-                outputs = self.decoder(tgt=decoder_input_embedded,  # [B, current_len, E]
-                                       memory=x_encoded,    # [B, S_mem, E]
-                                       tgt_mask=tgt_mask    # [current_len, current_len]
-                                       )    # [B, current_len, E]
-                
-                # Get the embedding for the current prediction step (i.e., the last output embedding of the decoder)
-                output_embeddings_t = outputs[:, -1, :]   # [B, E]; embedding that allows to predict the next token
-
-                # Store the output embedding for the current step
-                output_embeddings.append(output_embeddings_t)
-
-                # Predict the next token
-                predicted_token_logits = self.decoder_output_layer(output_embeddings_t) # [B, vocab_size] 
-                predicted_token = torch.argmax(predicted_token_logits, dim=-1)   # [B]; TODO: Implement better sampling than argmax (greedy) ?
-
-                # Modify the predicted token if needed. This is to handle appending a PAD_TOKEN if a sequence had already finished (i.e., it had predicted the EOS token)
-                newly_finished = (~finished_sequences_flag) & (predicted_token == self.EOS_TOKEN)   # [B]; identify the sequences that have finished generating tokens at this step, so it's True only if the sequence was not already finished (~finished_sequences_flag) AND its current predicted_token is the EOS_TOKEN
-                finished_sequences_flag |= newly_finished   # [B]; use element-wise OR where 1/True means finished and 0/False means not finished
-                finished_previously = finished_sequences_flag & (~newly_finished)   # [B]; identify the sequences that were already finished before the current step, as they will need to be appended a PAD_TOKEN instead of the predicted token
-                token_to_append = predicted_token.masked_fill(finished_previously, self.PAD_TOKEN)   # [B]; for previously finished sequences, masked_fill replaces their predicted_token with self.PAD_TOKEN, otherwise sequences still running or finishing now keep their predicted_token (which could be a regular token or the self.EOS_TOKEN)
-
-                # Append the correct newly predicted token. The current decoded sequence is then used for the next iteration's decoder input
-                decoded_sequence = torch.cat([decoded_sequence, token_to_append.unsqueeze(1)], dim=1)  # [B, current_len+1]
-
-                # Check if all sequences in the batch have finished generating (i.e., an EOS token has been generated for all sequences)
-                if finished_sequences_flag.all():
-                    break
-            
-            # Prepare the sequence of output embeddings corresponding to the tokens generated during AR decoding. We stack embeddings along the sequence dimension
-            output_target_seq = torch.stack(output_embeddings, dim=1) # [B, seq_len, E]
-
-        return output_target_seq
-    
-
-    # @timer_decorator
-    def decode_sequence(self, x_encoded, y):
-        if self.training:   # use PTL LightningModule's self.training attribute to check if the model is in training mode; could also use self.trainer.training, self.trainer.validating, self.trainer.testing
-            # AR decoding with full teacher forcing. All positions are predicted at the same time.
-            output_target_seq = self.training_decode(x_encoded, y)
-        else:
-            # AR decoding. The model predicts one token at a time in an auto-regressive manner.
-            output_target_seq = self.inference_decode(x_encoded)
-
-        return output_target_seq
 
     def forward(self, x, y, samples_task_id=None):
         B, H, W = x.shape
@@ -722,18 +728,14 @@ class REARCModel(VisReasModel):
             x_encoded = torch.cat([x_encoded, task_embedding], 2)  # [B, seq_len, backbone_input_embed_dim + task_embedding_dim]
 
         # Decode the encoded input sequence
-        if self.model_config.head in ["transformer", "vit"]:
+        if self.model_config.head in ["transformer"]:
             # Transformer Decoder
 
             if self.head_input_dim != self.head_input_embed_dim:
-                # Map the encoded input sequence to the same embedding dimension as the decoder
+                # Map the encoded input sequence to the same embedding dimension as the decoder's
                 x_encoded = self.enc_to_dec_proj(x_encoded)  # [B, seq_len, head_input_embed_dim]
 
-            # Auto-regressive decoding (with full teacher forcing and causal masking for training)
-            output_target_seq = self.decode_sequence(x_encoded, y)   # [B, seq_len, head_input_embed_dim]
-
-            # Apply the linear output layer to get the logits from the predicted target sequence embeddings
-            logits = self.final_output_layer(output_target_seq)  # [B, seq_len, num_classes]
+            logits = self.decoder(y, x_encoded)
 
         elif self.model_config.head in ["mlp"]:
             # MLP Decoder/Head
