@@ -24,6 +24,94 @@ def one_hot_encode(x: torch.Tensor, num_token_categories: int) -> torch.Tensor:
 
     return x_ohe
 
+
+def plot_attention_scores(split, train_inputs, attn_scores, layer_index, num_heads, image_size, num_extra_tokens, seq_len, n_samples, epoch, batch_index):
+    """
+    Plot attention scores for each attention head.
+    It handles extra tokens and reshapes the sequence to a 2D grid for better visualization.
+
+    TODO: 
+    For each head on a separate row, plot the input grid and the attention map next to each other.
+    Create a figure for each sample selected from the batch.
+    Use Seaborn for better visualization --> see my function observe_image_predictions for better grid
+    Write the symbols in the grid cells.
+
+    Args:
+        split (str): Split of the dataset (train, val, test).
+        train_inputs (torch.Tensor): Input images of shape [B, C, H, W].
+        attn_scores (List): List of attention scores (of shape [B, num_heads, seq_len, seq_len]).
+        layer_index (int): Index of the layer from which the attention scores were obtained.
+        num_heads (int): Number of attention heads.
+        image_size (int): Size of the image (assuming square grid).
+        num_extra_tokens (int): Number of extra tokens added before the data sequence.
+        seq_len (int): Total sequence length (extra tokens + data tokens).
+        n_samples (int): Number of samples to plot.
+        epoch (int): Current epoch number.
+        batch_index (int): Index of the batch in the dataset.
+    """
+
+    # Get batch_index batch
+    attn_scores = attn_scores[batch_index]  # list of length num_layers of tensors [B, num_heads, seq_len, seq_len]
+
+    # Get the layer layer_index from the list of layers
+    attn_scores = attn_scores[layer_index]  # [B, num_heads, seq_len, seq_len]
+
+    # Get the first n_samples from the batch
+    attn_scores = attn_scores.cpu()
+    attn_scores = attn_scores[:n_samples]  # [n_samples, num_heads, seq_len, seq_len]
+
+    assert attn_scores.shape == (n_samples, num_heads, seq_len, seq_len), f"Unexpected shape {attn_scores.shape} for attn_scores"
+
+
+    for sample_index in range(n_samples):
+        sample_attn_scores = attn_scores[sample_index]  # [num_heads, seq_len, seq_len]
+
+        # Create figure with subplots for each attention head
+        fig, axes = plt.subplots(nrows=num_heads, figsize=(10, num_heads * 5))
+
+        if num_heads == 1:
+            axes = [axes]  # Ensure consistent indexing for single head case
+
+        for head in range(num_heads):
+            attn = sample_attn_scores[head]  # [seq_len, seq_len]
+
+            if num_extra_tokens > 0:
+                # Split extra tokens and image tokens
+                extra_attn = attn[:num_extra_tokens, :]  # [num_extra_tokens, seq_len]
+                image_attn = attn[num_extra_tokens:, :]  # [image_tokens, seq_len]
+
+                # Reshape the image attention to a 2D grid
+                image_attn = image_attn.reshape(image_size, image_size, seq_len)
+
+                # Average attention across tokens to get a [H, W] heatmap. 
+                # That is how we choose to consider the attention given to each patch in the image.
+                # If we are interested in the attention given by some specific token, we can use its index to get the attention map for that token.
+                image_attn = image_attn.mean(dim=2)  # [H, W]
+
+                # Concatenate extra token attention before the image grid
+                extra_attn = extra_attn.mean(dim=1, keepdim=True)  # [num_extra_tokens, 1]
+                combined_attn = torch.cat([extra_attn.expand(-1, image_size), image_attn], dim=0)  # [num_extra_tokens + H, W]
+            else:
+                # No extra tokens, just reshape attention into a grid
+                combined_attn = attn.reshape(image_size, image_size, seq_len).mean(dim=2)  # [H, W]
+
+            # Convert to numpy for plotting
+            combined_attn = combined_attn.detach().numpy()
+
+            # Plot attention map
+            im = axes[head].imshow(combined_attn, cmap='hot', interpolation='nearest')
+            axes[head].set_title(f'Attention Head {head}')
+            axes[head].set_xlabel("Token Index")
+            axes[head].set_ylabel("Tokens (Extra + Grid)" if num_extra_tokens > 0 else "Tokens (Grid Only)")
+            plt.colorbar(im, ax=axes[head])
+
+        plt.tight_layout()
+
+        # Save the figure instead of displaying it
+        os.makedirs("./figs", exist_ok=True)   # create the /figs folder if it does not exist
+        plt.savefig(f"./figs/{split}_attention_plot_layer{layer_index}_sample{sample_index}_epoch{epoch}_batch{batch_index}.png")
+        plt.close(fig)
+
 def plot_metrics_locally(training_folder, metrics):
     """
     Generate and save plots for training and validation epoch metrics.
