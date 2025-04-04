@@ -299,11 +299,6 @@ class VisReasModel(pl.LightningModule):
 
         self.lr_values.append(optimizer.param_groups[0]["lr"])
 
-        # if epoch == 0 and batch_idx == 0:
-        #     logger.debug(f"Learning rate at epoch 0 and batch 0: {optimizer.param_groups[0]['lr']}")
-        # if epoch == 1 and batch_idx == 0:
-        #     logger.debug(f"Learning rate at epoch 1 and batch 0: {optimizer.param_groups[0]['lr']}")
-        
         # This is the content of the original optimizer_step method from PyTorch Lightning
         optimizer.step(closure=optimizer_closure)   # update params
 
@@ -357,10 +352,10 @@ class VisReasModel(pl.LightningModule):
 # Vision approach
 class CVRModel(VisReasModel):
 
-    def __init__(self, base_config, model_config, backbone_network_config, head_network_config, image_size, **kwargs):
+    def __init__(self, base_config, model_config, backbone_network_config, head_network_config, image_size):
 
-        # Save the hyperparameters so that they can be stored in the model checkpoint when using torch.save()
-        self.save_hyperparameters() # saves all the arguments (kwargs too) of __init__() to the variable hparams
+        # Save the hyperparameters to self.hparams so that they can be stored in the model checkpoint when using torch.save()
+        self.save_hyperparameters()
 
         super().__init__(base_config=base_config, model_config=model_config, image_size=image_size)
 
@@ -380,7 +375,6 @@ class CVRModel(VisReasModel):
                                                            network_config=backbone_network_config,
                                                            image_size=self.image_size,
                                                            num_classes=self.num_classes,
-                                                           device=self.device
                                                            )
             self.head_input_dim = bb_num_out_features
 
@@ -401,7 +395,6 @@ class CVRModel(VisReasModel):
                                    image_size=self.image_size,
                                    num_channels=self.num_channels,
                                    num_classes=self.num_classes,
-                                   device=self.device
                                    )
             self.head_input_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
 
@@ -412,7 +405,6 @@ class CVRModel(VisReasModel):
                                                    image_size=self.image_size,
                                                    num_channels=self.num_channels,
                                                    num_classes=self.num_classes,
-                                                   device=self.device
                                                    )
             self.head_input_dim = backbone_network_config.embed_dim   # embedding dimension backbone model 
 
@@ -443,7 +435,12 @@ class CVRModel(VisReasModel):
             else:
                 self.head_output_layer_dim = self.num_classes
         
-            self.head = get_mlp_head(head_network_config, embed_dim=self.head_input_dim, output_dim=self.head_output_layer_dim, activation='relu', num_layers=2)
+            self.head = get_mlp_head(head_network_config, 
+                                     embed_dim=self.head_input_dim, 
+                                     output_dim=self.head_output_layer_dim, 
+                                     activation='relu', 
+                                     num_layers=2
+                                     )
         
         else:
             raise ValueError(f"Unknown model head given: {model_config.head}")
