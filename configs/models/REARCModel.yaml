@@ -8,7 +8,7 @@ model:
     enabled: true
     ape_type: '2dsincos'  # choices: 'learn', '2dsincos'; absolute positional encoding
   rpe:
-    enabled: true
+    enabled: false
     rpe_type: 'rope'  # choices: 'rope'; relative positional encoding
   use_cls_token: false # whether to use a cls token or not
   num_reg_tokens: 0
@@ -27,6 +27,10 @@ model:
       num_steps: 100.0
     lr: 0.001
     wd: 0.001
+  attention_map:
+    enabled: false
+    layer: -1  # layer to use for the attention map (-1 for the last, 0 for the first layer, 1 for the second layer, etc.)
+    n_samples: 4  # number of samples to use for the attention map
   observe_preds:
-    enabled: True
+    enabled: true
     n_samples: 4
