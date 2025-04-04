@@ -35,7 +35,7 @@ class REARCDataset(Dataset):
         
         log_message = ""
         log_message += f"Input grid size (with border and padding tokens): {self.max_img_size}x{self.max_img_size}"
-        log_message += f"\nToken IDs: PAD={self.PAD_TOKEN}, X_END={self.X_ENDGRID_TOKEN}, Y_END={self.Y_ENDGRID_TOKEN}, XY_END={self.XY_ENDGRID_TOKEN}"
+        log_message += f"\nSpecial data token IDs: PAD={self.PAD_TOKEN}, X_END={self.X_ENDGRID_TOKEN}, Y_END={self.Y_ENDGRID_TOKEN}, XY_END={self.XY_ENDGRID_TOKEN}"
         logger.info(log_message)
 
 
