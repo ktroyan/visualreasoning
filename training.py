@@ -226,6 +226,7 @@ def train(config, model, datamodule, callbacks, exp_logger=None, checkpoint_path
     # Handle callbacks. Note that the callbacks objects are updated by the pl.Trainer() during the training process
     callbacks_list = list(callbacks.values())    # convert the dict of callbacks to a list of callbacks so that it can be passed to the Trainer()
 
+
     # Training
     trainer = pl.Trainer(default_root_dir=exp_logger.save_dir if exp_logger else None,
                          num_nodes=1,
@@ -237,15 +238,18 @@ def train(config, model, datamodule, callbacks, exp_logger=None, checkpoint_path
                          precision=config.training.trainer_precision,
                          gradient_clip_val=None,
                          num_sanity_val_steps=0, 
-                         enable_progress_bar=True,
+                         enable_progress_bar=config.training.progress_bar.enabled,
                          enable_checkpointing=True,
                          log_every_n_steps=config.training.log_every_n_steps,
-                         fast_dev_run=False,
-                        #  profiler='simple'
+                        #  accumulate_grad_batches=False,
+                        #  gradient_clip_algorithm='norm',
+                        #  detect_anomaly=True,
+                        #  fast_dev_run=True,
+                        # barebones=True,
                         )
 
     # Compile the model for improved performance
-    # NOTE: without specifying the backend as 'eager', it seems to fail on my NVIDIA RTX 3070 (Laptop) GPU
+    # NOTE: Without specifying the backend as 'eager', it seems to fail on my NVIDIA RTX 3070 (Laptop) GPU on Windows
     # model = torch.compile(model, backend='eager')
 
     trainer.fit(model, datamodule, ckpt_path=checkpoint_path)
