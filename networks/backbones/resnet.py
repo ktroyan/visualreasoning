@@ -135,7 +135,7 @@ class ResNet(nn.Module):
 
         return x
 
-def get_resnet(base_config, model_config, network_config, image_size, num_classes, device):
+def get_resnet(base_config, model_config, network_config, image_size, num_classes):
     if network_config.network_size == 18:
         model = models.resnet18(progress=False, weights=model_config.pretrained) # get the model from torchvision
     
@@ -143,7 +143,7 @@ def get_resnet(base_config, model_config, network_config, image_size, num_classe
         model = models.resnet50(progress=False, weights=model_config.pretrained) # get the model from torchvision
 
     # Modify the model architecture to obtain suitable backbone output dimensions
-    model = ResNet(base_config, model_config, network_config, model, image_size, num_classes).to(device)
+    model = ResNet(base_config, model_config, network_config, model, image_size, num_classes)
 
     bb_num_out_features = network_config.embed_dim
 

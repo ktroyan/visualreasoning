@@ -117,7 +117,6 @@ class TransformerEncoder(nn.TransformerEncoder):
                  image_size, 
                  num_channels, 
                  num_classes,
-                 device
                  ):
 
         super().__init__(encoder_layer, network_config.num_layers)
@@ -296,7 +295,7 @@ class TransformerEncoder(nn.TransformerEncoder):
         return x
 
 
-def get_transformer_encoder(base_config, model_config, network_config, image_size, num_channels, num_classes, device):
+def get_transformer_encoder(base_config, model_config, network_config, image_size, num_channels, num_classes):
     """Returns a Transformer encoder instance"""
 
     encoder_layer = nn.TransformerEncoderLayer(
@@ -304,8 +303,7 @@ def get_transformer_encoder(base_config, model_config, network_config, image_siz
         nhead=network_config.num_heads,     # the dimension of the embeddings for each head is: d_model // num_heads
         dim_feedforward=network_config.embed_dim * network_config.mlp_ratio,  # ff_dim; the hidden dimension of the feedforward network model
         batch_first=True, 
-        device=device   # 'cuda'
         )
 
-    encoder = TransformerEncoder(base_config, model_config, network_config, encoder_layer, image_size, num_channels, num_classes, device)
+    encoder = TransformerEncoder(base_config, model_config, network_config, encoder_layer, image_size, num_channels, num_classes)
     return encoder
