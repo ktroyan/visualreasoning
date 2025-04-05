@@ -129,6 +129,10 @@ class VisReasModel(pl.LightningModule):
 
         # probabilities = F.softmax(y_hat, dim=1)  # compute the probabilities (normalized logits) of the model for each sample of the batch
 
+        # TODO: 
+        # See exactly how we want to compute the loss and metrics. What types of tokens we want to consider.
+        # Also, convert the non-data tokens to background tokens (i.e., 0) when computing the loss and metrics, no?
+
         # Loss per symbol (with all sorts of padding considered): compute the loss per token/symbol
         per_sample_loss = F.cross_entropy(y_hat, y.long(), reduction='none').float()  # [B, seq_len]
         loss_symbol_with_pad = (per_sample_loss.mean()).unsqueeze(0)
@@ -255,7 +259,8 @@ class VisReasModel(pl.LightningModule):
         if self.model_config.attention_map.enabled and hasattr(self.encoder, 'get_attention_scores'):
             # Plot attention maps of some training samples of the first and last batch seen during the epoch
             plot_attention_scores("train", 
-                                  self.train_inputs, 
+                                  self.train_inputs,
+                                  self.train_targets, 
                                   self.train_attention_scores, 
                                   self.model_config.attention_map.layer, 
                                   self.backbone_network_config.num_heads, 
@@ -269,6 +274,7 @@ class VisReasModel(pl.LightningModule):
             
             plot_attention_scores("train",
                                   self.train_inputs,
+                                  self.train_targets,
                                   self.train_attention_scores,
                                   self.model_config.attention_map.layer,
                                   self.backbone_network_config.num_heads,
@@ -282,7 +288,8 @@ class VisReasModel(pl.LightningModule):
             
             # Plot attention maps of some validation samples of the first and last batch seen during the epoch
             plot_attention_scores("val", 
-                                  self.val_inputs, 
+                                  self.val_inputs,
+                                  self.val_targets,
                                   self.val_attention_scores, 
                                   self.model_config.attention_map.layer,
                                   self.backbone_network_config.num_heads,
@@ -295,7 +302,8 @@ class VisReasModel(pl.LightningModule):
                                   )
             
             plot_attention_scores("val", 
-                                  self.val_inputs, 
+                                  self.val_inputs,
+                                  self.val_targets,
                                   self.val_attention_scores, 
                                   self.model_config.attention_map.layer, 
                                   self.backbone_network_config.num_heads,
@@ -374,6 +382,9 @@ class VisReasModel(pl.LightningModule):
 
         B, H, W = x.shape
         B, seq_len = y.shape
+
+        # TODO: See exactly how we want to compute the loss and metrics. What types of tokens we want to consider.
+        # Also, convert the non-data tokens to background tokens (i.e., 0) when computing the loss and metrics, no?
 
         # Loss per symbol (with all sort of padding considered): compute the loss per token/symbol
         per_sample_loss = F.cross_entropy(y_hat, y.long(), reduction='none').float()  # [B, seq_len]
@@ -496,7 +507,6 @@ class VisReasModel(pl.LightningModule):
         Override the PyTorch Lightning optimizer_step method to add custom logic before the optimizer.step() call.
         
         NOTE: We overwrite it for learning rate warm-up.
-        TODO: See if ok to define the LR warm-up like this.
         """
 
         if self.model_config.training_hparams.lr_warmup.enabled:
@@ -508,11 +518,6 @@ class VisReasModel(pl.LightningModule):
                     pg["lr"] = lr_scale * self.model_config.training_hparams.lr
 
         self.lr_values.append(optimizer.param_groups[0]["lr"])
-
-        # if epoch == 0 and batch_idx == 0:
-        #     logger.debug(f"Learning rate at epoch 0 and batch 0: {optimizer.param_groups[0]['lr']}")
-        # if epoch == 1 and batch_idx == 0:
-        #     logger.debug(f"Learning rate at epoch 1 and batch 0: {optimizer.param_groups[0]['lr']}")
         
         # This is the content of the original optimizer_step method from PyTorch Lightning
         optimizer.step(closure=optimizer_closure)   # update params
@@ -571,16 +576,16 @@ class REARCModel(VisReasModel):
         # Save the hyperparameters to self.hparams so that they can be stored in the model checkpoint when using torch.save()
         self.save_hyperparameters()
 
-        # Update the max image size to take into account the border tokens
-        # self.image_size = image_size + 2  # add 2 for the border tokens (top-bottom and left-right)
-        self.image_size = image_size + 1  # add 1 for the border tokens (bottom and right)
+        # Update the max image size to take into account the border and newline tokens
+        self.image_size = image_size + 1 + 1 # +1 for the border tokens (bottom and right) and +1 for the newline token (last column of the grid)
 
-        logger.info(f"Image grid size with borders and padding: {self.image_size}x{self.image_size}")
+        logger.info(f"Image grid size with all the special visual tokens considered: {self.image_size}x{self.image_size}")
 
         super().__init__(base_config=base_config, 
                          model_config=model_config, 
                          backbone_network_config=backbone_network_config, 
-                         image_size=self.image_size)
+                         image_size=self.image_size
+                         )
 
         self.model_config = model_config
 
@@ -588,13 +593,9 @@ class REARCModel(VisReasModel):
         self.num_channels = 1
 
         self.num_data_tokens = 10   # symbols in the grid (0-9)
-        self.num_special_tokens = 4  # PAD_TOKEN (10), X_ENDGRID_TOKEN (11), Y_ENDGRID_TOKEN (12), XY_ENDGRID_TOKEN (13)
+        self.num_special_tokens = 5  # PAD_TOKEN (10), X_ENDGRID_TOKEN (11), Y_ENDGRID_TOKEN (12), XY_ENDGRID_TOKEN (13), NL_GRID_TOKEN (14)
 
         self.num_classes = self.num_data_tokens + self.num_special_tokens   # number of token categories that can be predicted by the _whole_ model; 10 for symbols + 1 for each special token that could be predicted
-        self.vocab_size = self.num_classes + 2  # number of different tokens that we consider; +2 for the BOS and EOS tokens
-        # TODO: Is it ok to use vocab_size = num_classes + 2 instead of num_classes + 1 even though BOS never has to be predicted?
-        #       The main reason to do +2 instead of +1 is to have a correct mapping for the layer that embeds tokens.
-        #       What I had done initially was using self.vocab_size (16) and self.decoder_vocab_size (15), but then it would mean that the logits converted to a class index would not represent the same thing for the decoder and the final output layer.
 
         ## Model backbone/encoder
         if model_config.backbone == "resnet":
@@ -649,7 +650,7 @@ class REARCModel(VisReasModel):
 
 
         ## Encoder to Decoder projection layer; useful to handle the task embedding that is concatenated
-        # TODO: Should we handle the task embedding differently from using a concatenation? For example using FiLM or other methods?
+        # TODO: We could handle the task embedding differently than by a simple concatenation. For example using FiLM. See later.
         if self.head_input_dim != self.head_input_embed_dim:
             self.enc_to_dec_proj = nn.Linear(self.head_input_dim, self.head_input_embed_dim, device=self.device)  # project the encoder output (of dimension backbone_network_config.embed_dim + task_embedding_dim) to the decoder embedding dimension
 
@@ -659,7 +660,6 @@ class REARCModel(VisReasModel):
             self.decoder = get_transformer_decoder(model_config=self.model_config,
                                                    network_config=head_network_config,
                                                    num_classes=self.num_classes,
-                                                   vocab_size=self.vocab_size,
                                                    seq_len=self.seq_len,
                                                    )
 

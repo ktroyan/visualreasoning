@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 import seaborn as sns
-from typing import Dict
+from typing import Dict, List
 
 # Personal codebase dependencies
 from utility.logging import logger
@@ -13,8 +13,11 @@ from utility.logging import logger
 def one_hot_encode(x: torch.Tensor, num_token_categories: int) -> torch.Tensor:
     """
     Performs One-Hot Encoding (OHE) of the values of a 3D tensor (batch dimensions and 2D tensor with possible values/tokens: 0, ..., 9, <pad_token>, ..?)
+    
+    TODO: 
+    How to handle special tokens w.r.t. OHE? What about extra tokens such as cls and register tokens?
+    Currently, the choice is to consider all of these tokens as well when doing OHE.
     """
-    # TODO: How to OHE special tokens such as padding token? What about extra tokens such as cls and register tokens? Is my approach correct?
 
     # Convert to one-hot representation
     x_ohe = torch.nn.functional.one_hot(x.long(), num_classes=num_token_categories)  # [B, H, W, C=num_token_categories]
@@ -24,21 +27,27 @@ def one_hot_encode(x: torch.Tensor, num_token_categories: int) -> torch.Tensor:
 
     return x_ohe
 
-
-def plot_attention_scores(split, train_inputs, attn_scores, layer_index, num_heads, image_size, num_extra_tokens, seq_len, n_samples, epoch, batch_index):
+def plot_attention_scores(split: str, 
+                          inputs: List, 
+                          targets: List,
+                          attn_scores: List,
+                          layer_index: int,
+                          num_heads: int,
+                          image_size: int,
+                          num_extra_tokens: int, 
+                          seq_len: int,
+                          n_samples: int,
+                          epoch: int,
+                          batch_index: int
+                          ) -> None:
     """
     Plot attention scores for each attention head.
-    It handles extra tokens and reshapes the sequence to a 2D grid for better visualization.
-
-    TODO: 
-    For each head on a separate row, plot the input grid and the attention map next to each other.
-    Create a figure for each sample selected from the batch.
-    Use Seaborn for better visualization --> see my function observe_image_predictions for better grid
-    Write the symbols in the grid cells.
+    It handles extra tokens and reshapes the sequence to a 2D grid for better visualization of attentions w.r.t. input and target grids.
 
     Args:
         split (str): Split of the dataset (train, val, test).
-        train_inputs (torch.Tensor): Input images of shape [B, C, H, W].
+        inputs (List): List of input grid images of shape [B, H, W].
+        targets (List): List of target grid images of shape [B, H, W].
         attn_scores (List): List of attention scores (of shape [B, num_heads, seq_len, seq_len]).
         layer_index (int): Index of the layer from which the attention scores were obtained.
         num_heads (int): Number of attention heads.
@@ -50,69 +59,146 @@ def plot_attention_scores(split, train_inputs, attn_scores, layer_index, num_hea
         batch_index (int): Index of the batch in the dataset.
     """
 
-    # Get batch_index batch
-    attn_scores = attn_scores[batch_index]  # list of length num_layers of tensors [B, num_heads, seq_len, seq_len]
+    # Extract batch
+    attn_scores = attn_scores[batch_index][layer_index]  # [B, num_heads, seq_len, seq_len]
+    attn_scores = attn_scores[:n_samples].cpu()  # [n_samples, num_heads, seq_len, seq_len]
+    
+    inputs = inputs[batch_index]    # [B, H, W]
+    inputs = inputs[:n_samples].cpu()  # [n_samples, H, W]
 
-    # Get the layer layer_index from the list of layers
-    attn_scores = attn_scores[layer_index]  # [B, num_heads, seq_len, seq_len]
+    targets = targets[batch_index]  # [B, seq_len]
+    targets = targets.view(-1, image_size, image_size)  # [B, H, W]
+    targets = targets[:n_samples].cpu()   # [n_samples, H, W]
 
-    # Get the first n_samples from the batch
-    attn_scores = attn_scores.cpu()
-    attn_scores = attn_scores[:n_samples]  # [n_samples, num_heads, seq_len, seq_len]
+    assert len(attn_scores) == len(inputs) == len(targets), f"Issue in number of samples for: attn_scores ({len(attn_scores)}), inputs ({len(inputs)}), targets ({len(targets)})"
+    
+    # Get the number of samples to observe
+    n_samples = min(n_samples, len(inputs))
 
-    assert attn_scores.shape == (n_samples, num_heads, seq_len, seq_len), f"Unexpected shape {attn_scores.shape} for attn_scores"
+    ## Replace padding tokens with background token
+    PAD_TOKEN = 10
+    X_ENDGRID_TOKEN = 11 
+    Y_ENDGRID_TOKEN = 12
+    XY_ENDGRID_TOKEN = 13
+    NL_GRID_TOKEN = 14
+    background_token = 0
 
+    inputs[inputs == PAD_TOKEN] = background_token
+    targets[targets == PAD_TOKEN] = background_token
+    min_special_token = min(X_ENDGRID_TOKEN, Y_ENDGRID_TOKEN, XY_ENDGRID_TOKEN, NL_GRID_TOKEN)
+    inputs[inputs >= min_special_token] -= 1
+    targets[targets >= min_special_token] -= 1
 
+    X_ENDGRID_TOKEN -= 1
+    Y_ENDGRID_TOKEN -= 1
+    XY_ENDGRID_TOKEN -= 1
+    NL_GRID_TOKEN -= 1
+
+    ## Setup colormap
+    # The pad tokens have been merged to the background tokens and the other special visual tokens are represented by the same color
+    cmap = ListedColormap([
+        '#000000',  # black (background)
+        '#0074D9',  # blue
+        '#FF4136',  # red
+        '#2ECC40',  # green
+        '#FFDC00',  # yellow
+        '#AAAAAA',  # gray (border tokens)
+        '#F012BE',  # pink
+        '#FF851B',  # orange
+        '#7FDBFF',  # light blue
+        '#870C25',  # burgundy
+        '#555555',  # dark gray
+    ])
+    vmin = 0
+    vmax = 9 + 1
+
+    ## Plot for each sample
     for sample_index in range(n_samples):
         sample_attn_scores = attn_scores[sample_index]  # [num_heads, seq_len, seq_len]
+        input_img = inputs[sample_index].numpy()  # [H, W]
+        target_img = targets[sample_index].numpy()  # [H, W]
 
-        # Create figure with subplots for each attention head
-        fig, axes = plt.subplots(nrows=num_heads, figsize=(10, num_heads * 5))
+        fig, axes = plt.subplots(nrows=num_heads,
+                                 ncols=3,
+                                 figsize=(16, 5 * num_heads),
+                                 gridspec_kw={'width_ratios': [1, 1.2, 1]},  # make second column (attention map) 1.2 times wider
+                                 dpi=150
+                                 )
 
         if num_heads == 1:
-            axes = [axes]  # Ensure consistent indexing for single head case
+            axes = np.expand_dims(axes, axis=0)  # ensure consistent indexing
 
         for head in range(num_heads):
             attn = sample_attn_scores[head]  # [seq_len, seq_len]
 
+            ## Column 1: Input Grid
+            ax_input = axes[head, 0]
+            sns.heatmap(input_img, 
+                        ax=ax_input, 
+                        cbar=False, 
+                        square=True,
+                        cmap=cmap, 
+                        linewidths=0.01, 
+                        linecolor='gray',
+                        xticklabels=False, 
+                        yticklabels=False,
+                        vmin=vmin,
+                        vmax=vmax
+                        )
+            ax_input.set_title("Input Grid", fontdict={'fontsize': 12, 'fontweight': 'bold', 'family': 'serif'})
+
+            ## Column 2: Attention Map
+            ax_attn = axes[head, 1]
+
             if num_extra_tokens > 0:
-                # Split extra tokens and image tokens
-                extra_attn = attn[:num_extra_tokens, :]  # [num_extra_tokens, seq_len]
-                image_attn = attn[num_extra_tokens:, :]  # [image_tokens, seq_len]
-
-                # Reshape the image attention to a 2D grid
-                image_attn = image_attn.reshape(image_size, image_size, seq_len)
-
-                # Average attention across tokens to get a [H, W] heatmap. 
-                # That is how we choose to consider the attention given to each patch in the image.
-                # If we are interested in the attention given by some specific token, we can use its index to get the attention map for that token.
-                image_attn = image_attn.mean(dim=2)  # [H, W]
-
-                # Concatenate extra token attention before the image grid
-                extra_attn = extra_attn.mean(dim=1, keepdim=True)  # [num_extra_tokens, 1]
-                combined_attn = torch.cat([extra_attn.expand(-1, image_size), image_attn], dim=0)  # [num_extra_tokens + H, W]
+                attn_image_tokens = attn[num_extra_tokens:, num_extra_tokens:]
             else:
-                # No extra tokens, just reshape attention into a grid
-                combined_attn = attn.reshape(image_size, image_size, seq_len).mean(dim=2)  # [H, W]
+                attn_image_tokens = attn
 
-            # Convert to numpy for plotting
-            combined_attn = combined_attn.detach().numpy()
+            grid_attn = attn_image_tokens.reshape(image_size, image_size, -1).mean(dim=2).detach().numpy()
+            labels = input_img.reshape(image_size, image_size)
 
-            # Plot attention map
-            im = axes[head].imshow(combined_attn, cmap='hot', interpolation='nearest')
-            axes[head].set_title(f'Attention Head {head}')
-            axes[head].set_xlabel("Token Index")
-            axes[head].set_ylabel("Tokens (Extra + Grid)" if num_extra_tokens > 0 else "Tokens (Grid Only)")
-            plt.colorbar(im, ax=axes[head])
+            sns.heatmap(grid_attn,
+                        ax=ax_attn,
+                        cmap="YlOrRd", 
+                        square=True,
+                        annot=labels, 
+                        fmt='d', 
+                        annot_kws={"fontsize": 9},
+                        linewidths=0.01, 
+                        linecolor='gray'
+                        )
+            
+            colorbar = ax_attn.collections[0].colorbar
+            colorbar.ax.yaxis.offsetText.set_visible(False) # to hide the scientific notation at the top of the colorbar
+            
+            ax_attn.set_title(f"Attention Map (Head {head})", fontdict={'fontsize': 12, 'fontweight': 'bold', 'family': 'serif'})
+            ax_attn.set_xticks([])
+            ax_attn.set_yticks([])
+
+            ## Column 3: Target Grid
+            ax_target = axes[head, 2]
+            sns.heatmap(target_img, 
+                        ax=ax_target, 
+                        cbar=False, 
+                        square=True,
+                        cmap=cmap, 
+                        linewidths=0.01, 
+                        linecolor='gray',
+                        xticklabels=False, 
+                        yticklabels=False,
+                        vmin=vmin,
+                        vmax=vmax
+                        )
+            ax_target.set_title("Target Grid", fontdict={'fontsize': 12, 'fontweight': 'bold', 'family': 'serif'})
 
         plt.tight_layout()
-
-        # Save the figure instead of displaying it
-        os.makedirs("./figs", exist_ok=True)   # create the /figs folder if it does not exist
-        plt.savefig(f"./figs/{split}_attention_plot_layer{layer_index}_sample{sample_index}_epoch{epoch}_batch{batch_index}.png")
+        os.makedirs("./figs", exist_ok=True)
+        plt.savefig(f"./figs/{split}_attention_layer{layer_index}_sample{sample_index}_epoch{epoch}_batch{batch_index}.png")
         plt.close(fig)
 
-def plot_metrics_locally(training_folder, metrics):
+
+def plot_metrics_locally(training_folder: str, metrics: Dict) -> None:
     """
     Generate and save plots for training and validation epoch metrics.
 
@@ -154,34 +240,33 @@ def plot_metrics_locally(training_folder, metrics):
         logger.warning("The plots cannot be created as there are no metrics saved in the list. The epochs list for the x-axis of the plot is empty.")
 
     # Plot the training and validation loss per epoch
-    plot_and_save(
-        x=epochs,
-        y1=metrics['train_loss_epoch'],
-        y2=metrics['val_loss_epoch'],
-        xlabel="Epoch", ylabel="Loss",
-        title="Training & Validation Loss (Epoch-wise)",
-        filename="loss_epoch.png"
-    )
+    plot_and_save(x=epochs,
+                  y1=metrics['train_loss_epoch'],
+                  y2=metrics['val_loss_epoch'],
+                  xlabel="Epoch", ylabel="Loss",
+                  title="Training & Validation Loss (Epoch-wise)",
+                  filename="loss_epoch.png"
+                  )
 
     # Plot the training and validation accuracy per epoch
-    plot_and_save(
-        x=epochs,
-        y1=metrics['train_acc_epoch'],
-        y2=metrics['val_acc_epoch'],
-        xlabel="Epoch", ylabel="Accuracy",
-        title="Training & Validation Accuracy (Epoch-wise)",
-        filename="acc_epoch.png"
-    )
+    plot_and_save(x=epochs,
+                  y1=metrics['train_acc_epoch'],
+                  y2=metrics['val_acc_epoch'],
+                  xlabel="Epoch", 
+                  ylabel="Accuracy",
+                  title="Training & Validation Accuracy (Epoch-wise)",
+                  filename="acc_epoch.png"
+                  )
 
     # Plot the training and validation grid accuracy per epoch
-    plot_and_save(
-        x=epochs,
-        y1=metrics['train_grid_acc_epoch'],
-        y2=metrics['val_grid_acc_epoch'],
-        xlabel="Epoch", ylabel="Grid Accuracy",
-        title="Training & Validation Grid Accuracy (Epoch-wise)",
-        filename="grid_acc_epoch.png"
-    )
+    plot_and_save(x=epochs,
+                  y1=metrics['train_grid_acc_epoch'],
+                  y2=metrics['val_grid_acc_epoch'],
+                  xlabel="Epoch", 
+                  ylabel="Grid Accuracy",
+                  title="Training & Validation Grid Accuracy (Epoch-wise)",
+                  filename="grid_acc_epoch.png"
+                  )
 
     logger.info(f"Local plots of relevant training metrics saved in: {figs_folder_path}")
 
@@ -192,7 +277,8 @@ def observe_image_predictions(split: str,
                               image_size: int, 
                               n_samples: int = 4, 
                               batch_index: int = 0,
-                              epoch: int = None) -> None:
+                              epoch: int = None
+                              ) -> None:
     """ 
     Observe the inputs, predictions and labels of a subset of a batch.
 
@@ -212,8 +298,8 @@ def observe_image_predictions(split: str,
     # Get a batch of inputs, predictions and targets
     if isinstance(inputs, list) and isinstance(preds, list) and isinstance(targets, list):
         inputs = inputs[batch_index].cpu()
-        preds = preds[batch_index]
-        targets = targets[batch_index]
+        preds = preds[batch_index].cpu()
+        targets = targets[batch_index].cpu()
     else:
         batch_index = None
 
@@ -233,90 +319,208 @@ def observe_image_predictions(split: str,
     else:
         logger.debug(f"Observing {n_samples} samples from a batch at {split} time. See /figs folder.")
 
-    # Handle padding tokens. Replace the symbols for pad tokens with the background color
-    pad_token = 10
+    # Explicit the symbols chosen for the tokens
+    PAD_TOKEN = 10
+    X_ENDGRID_TOKEN = 11 
+    Y_ENDGRID_TOKEN = 12
+    XY_ENDGRID_TOKEN = 13
+    NL_GRID_TOKEN = 14
     background_token = 0  # background (typically black color, as in REARC)
 
-    # Count pad tokens tokens BEFORE replacement
-    input_pad_count = torch.sum(inputs[0] == pad_token).item()
-    pred_pad_count = torch.sum(preds[0] == pad_token).item()
-    target_pad_count = torch.sum(targets[0] == pad_token).item()
-
-    input_background_count = torch.sum(inputs[0] == background_token).item()
-    pred_background_count = torch.sum(preds[0] == background_token).item()
-    target_background_count = torch.sum(targets[0] == background_token).item()
-
-    log_message = ""
-    log_message += f"Before pad tokens replacement - Pad Tokens: Input={input_pad_count}, Pred={pred_pad_count}, Target={target_pad_count}\n"
-    log_message += f"Before pad tokens replacement - Background Tokens: Input={input_background_count}, Pred={pred_background_count}, Target={target_background_count}\n"
+    # Log grid tokens info before any token is replaced for plotting
+    log_message = "Grid tokens info BEFORE any token replacement:\n"
+    log_message += f"inputs dtype: {inputs.dtype}, preds dtype: {preds.dtype}, targets dtype: {targets.dtype}\n"
+    log_message += f"inputs shape: {inputs.shape}, preds shape: {preds.shape}, targets shape: {targets.shape}\n"
+    log_message += f"inputs min: {inputs.min()}, preds min: {preds.min()}, targets min: {targets.min()}\n"
+    log_message += f"inputs max: {inputs.max()}, preds max: {preds.max()}, targets max: {targets.max()}\n"
     logger.debug(log_message)
 
-    # Replace border tokens and pad tokens with background token
-    inputs[inputs == pad_token] = background_token
-    preds[preds == pad_token] = background_token
-    targets[targets == pad_token] = background_token
+    replace_pad_tokens = True  # whether to replace pad tokens with background token (0)
+    if replace_pad_tokens:
+        # Count pad tokens tokens BEFORE replacement
+        input_pad_count = torch.sum(inputs[0] == PAD_TOKEN).item()
+        pred_pad_count = torch.sum(preds[0] == PAD_TOKEN).item()
+        target_pad_count = torch.sum(targets[0] == PAD_TOKEN).item()
 
-    # Count pad tokens and background tokens AFTER replacement
-    input_pad_count_after = torch.sum(inputs[0] == pad_token).item()
-    pred_pad_count_after = torch.sum(preds[0] == pad_token).item()
-    target_pad_count_after = torch.sum(targets[0] == pad_token).item()
+        input_background_count = torch.sum(inputs[0] == background_token).item()
+        pred_background_count = torch.sum(preds[0] == background_token).item()
+        target_background_count = torch.sum(targets[0] == background_token).item()
 
-    input_background_count_after = torch.sum(inputs[0] == background_token).item()
-    pred_background_count_after = torch.sum(preds[0] == background_token).item()
-    target_background_count_after = torch.sum(targets[0] == background_token).item()
+        log_message = ""
+        log_message += f"Before pad tokens replacement - Pad Tokens: Input={input_pad_count}, Pred={pred_pad_count}, Target={target_pad_count}\n"
+        log_message += f"Before pad tokens replacement - Background Tokens: Input={input_background_count}, Pred={pred_background_count}, Target={target_background_count}\n"
 
-    log_message = ""
-    log_message += f"After pad tokens replacement - Pad Tokens: Input={input_pad_count_after}, Pred={pred_pad_count_after}, Target={target_pad_count_after}\n"
-    log_message += f"After pad tokens replacement - Background Tokens: Input={input_background_count_after}, Pred={pred_background_count_after}, Target={target_background_count_after}\n"
+        # Replace pad tokens with background token
+        inputs[inputs == PAD_TOKEN] = background_token
+        preds[preds == PAD_TOKEN] = background_token
+        targets[targets == PAD_TOKEN] = background_token
+
+        # Count pad tokens and background tokens AFTER replacement
+        input_pad_count_after = torch.sum(inputs[0] == PAD_TOKEN).item()
+        pred_pad_count_after = torch.sum(preds[0] == PAD_TOKEN).item()
+        target_pad_count_after = torch.sum(targets[0] == PAD_TOKEN).item()
+
+        input_background_count_after = torch.sum(inputs[0] == background_token).item()
+        pred_background_count_after = torch.sum(preds[0] == background_token).item()
+        target_background_count_after = torch.sum(targets[0] == background_token).item()
+
+        log_message += f"After pad tokens replacement - Pad Tokens: Input={input_pad_count_after}, Pred={pred_pad_count_after}, Target={target_pad_count_after}\n"
+        log_message += f"After pad tokens replacement - Background Tokens: Input={input_background_count_after}, Pred={pred_background_count_after}, Target={target_background_count_after}\n"
+        logger.debug(log_message)
+
+        # Since pad tokens are replaced with background token, we need to adjust the symbols for the other special tokens
+        # Shift down by 1 the special tokens (X_ENDGRID_TOKEN, Y_ENDGRID_TOKEN, XY_ENDGRID_TOKEN, NL_GRID_TOKEN)
+        min_special_token = min(X_ENDGRID_TOKEN, Y_ENDGRID_TOKEN, XY_ENDGRID_TOKEN, NL_GRID_TOKEN)
+        inputs[inputs >= min_special_token] -= 1
+        preds[preds >= min_special_token] -= 1
+        targets[targets >= min_special_token] -= 1
+
+        X_ENDGRID_TOKEN = X_ENDGRID_TOKEN - 1
+        Y_ENDGRID_TOKEN = Y_ENDGRID_TOKEN - 1
+        XY_ENDGRID_TOKEN = XY_ENDGRID_TOKEN - 1
+        NL_GRID_TOKEN = NL_GRID_TOKEN - 1
+
+
+    replace_border_tokens = False  # whether to replace border tokens with background token (0)
+    if replace_border_tokens:
+        # Replace border tokens with background token
+        inputs[inputs == X_ENDGRID_TOKEN] = background_token
+        preds[preds == X_ENDGRID_TOKEN] = background_token
+        targets[targets == X_ENDGRID_TOKEN] = background_token
+        inputs[inputs == Y_ENDGRID_TOKEN] = background_token
+        preds[preds == Y_ENDGRID_TOKEN] = background_token
+        targets[targets == Y_ENDGRID_TOKEN] = background_token
+        inputs[inputs == XY_ENDGRID_TOKEN] = background_token
+        preds[preds == XY_ENDGRID_TOKEN] = background_token
+        targets[targets == XY_ENDGRID_TOKEN] = background_token
+
+    replace_newline_tokens = False  # whether to replace newline tokens with background token (0)
+    if replace_newline_tokens:
+        # Replace newline tokens with background token
+        inputs[inputs == NL_GRID_TOKEN] = background_token
+        preds[preds == NL_GRID_TOKEN] = background_token
+        targets[targets == NL_GRID_TOKEN] = background_token
+
+    # Log grid tokens info after some tokens may have been replaced for plotting
+    log_message = "Grid tokens info AFTER any token replacement:\n"
+    log_message += f"inputs dtype: {inputs.dtype}, preds dtype: {preds.dtype}, targets dtype: {targets.dtype}\n"
+    log_message += f"inputs shape: {inputs.shape}, preds shape: {preds.shape}, targets shape: {targets.shape}\n"
+    log_message += f"inputs min: {inputs.min()}, preds min: {preds.min()}, targets min: {targets.min()}\n"
+    log_message += f"inputs max: {inputs.max()}, preds max: {preds.max()}, targets max: {targets.max()}\n"
     logger.debug(log_message)
+
+    # Decide on the colors for the different tokens
+    # Choose one:
+    no_merge_of_special_tokens = False
+    merge_border_tokens = False
+    merge_all_special_tokens = True
+
+    if merge_all_special_tokens:
+        # Merge all special tokens (border, newline) into one color (gray)
+        cmap = ListedColormap([
+            '#000',     # black (background)
+            '#0074D9',  # blue
+            '#FF4136',  # red
+            '#2ECC40',  # green
+            '#FFDC00',  # yellow
+            '#AAAAAA',  # gray
+            '#F012BE',  # pink
+            '#FF851B',  # orange
+            '#7FDBFF',  # light blue
+            '#870C25',  # burgundy
+            '#555555',  # dark gray (all the special visual tokens, so border (3) + newline (1) tokens)
+        ])
+
+        vmin = 0
+        vmax = 9 + 1
     
-    logger.debug(f"inputs shape: {inputs.shape}, preds shape: {preds.shape}, targets shape: {targets.shape}")
-    logger.debug(f"inputs dtype: {inputs.dtype}, preds dtype: {preds.dtype}, targets dtype: {targets.dtype}")
-    logger.debug(f"inputs min: {inputs.min()}, preds min: {preds.min()}, targets min: {targets.min()}")
-    logger.debug(f"inputs max: {inputs.max()}, preds max: {preds.max()}, targets max: {targets.max()}")
+    if merge_border_tokens:
+        # Replace tokens Y_ENDGRID_TOKEN, XY_ENDGRID_TOKEN with X_ENDGRID_TOKEN
+        # Newline token has to take the next lowest index, so NL_GRID_TOKEN
+        inputs[inputs == Y_ENDGRID_TOKEN] = X_ENDGRID_TOKEN
+        preds[preds == Y_ENDGRID_TOKEN] = X_ENDGRID_TOKEN
+        targets[targets == Y_ENDGRID_TOKEN] = X_ENDGRID_TOKEN
+        inputs[inputs == XY_ENDGRID_TOKEN] = X_ENDGRID_TOKEN
+        preds[preds == XY_ENDGRID_TOKEN] = X_ENDGRID_TOKEN
+        targets[targets == XY_ENDGRID_TOKEN] = X_ENDGRID_TOKEN
+        inputs[inputs == NL_GRID_TOKEN] = X_ENDGRID_TOKEN + 1
+        preds[preds == NL_GRID_TOKEN] = X_ENDGRID_TOKEN + 1
+        targets[targets == NL_GRID_TOKEN] = X_ENDGRID_TOKEN + 1
 
-    # Use the same color map as REARC
-    cmap = ListedColormap([
-        '#000',     # black (background)
-        '#0074D9',  # blue
-        '#FF4136',  # red
-        '#2ECC40',  # green
-        '#FFDC00',  # yellow
-        '#AAAAAA',  # gray
-        '#F012BE',  # pink
-        '#FF851B',  # orange
-        '#7FDBFF',  # light blue
-        '#870C25',   # burgundy
-        '#555555',  # dark gray (border tokens)
-    ])
+        cmap = ListedColormap([
+            '#000',     # black (background)
+            '#0074D9',  # blue
+            '#FF4136',  # red
+            '#2ECC40',  # green
+            '#FFDC00',  # yellow
+            '#AAAAAA',  # gray
+            '#F012BE',  # pink
+            '#FF851B',  # orange
+            '#7FDBFF',  # light blue
+            '#870C25',  # burgundy
+            '#555555',  # dark gray (border (3) + newline (1) tokens)
+            '#9D00FF',  # purple (newline tokens)
+        ])
 
-    vmin = 0
-    vmax = 9 + 1  # 10 possible symbols (0-9) to predict in the grid image + 1 for the borders' color
+        vmin = 0
+        vmax = 9 + 1 + 1    # 10 possible symbols (0-9) to predict in the grid image + 1 for the borders' color + 1 for the newline tokens' colors
+
+    if no_merge_of_special_tokens:
+        # No merging of special tokens, each token has its own color
+        cmap = ListedColormap([
+            '#000',     # black (background)
+            '#0074D9',  # blue
+            '#FF4136',  # red
+            '#2ECC40',  # green
+            '#FFDC00',  # yellow
+            '#AAAAAA',  # gray
+            '#F012BE',  # pink
+            '#FF851B',  # orange
+            '#7FDBFF',  # light blue
+            '#870C25',  # burgundy
+            '#FF00AA',  # fuchsia (border token X)
+            '#9D00FF',  # purple (border token Y)
+            '#FF00FF',  # magenta (border token XY)
+            '#555555',  # dark gray (newline tokens)
+        ])
+
+        vmin = 0
+        vmax = 9 + 3 + 1
+
+
+    # Log how many different symbols are in the grid images
+    log_message = "Grid images info:\n"
+    log_message += f"inputs dtype: {inputs.dtype}, preds dtype: {preds.dtype}, targets dtype: {targets.dtype}\n"
+    log_message += f"inputs shape: {inputs.shape}, preds shape: {preds.shape}, targets shape: {targets.shape}\n"
+    log_message += f"inputs min: {inputs.min()}, preds min: {preds.min()}, targets min: {targets.min()}\n"
+    log_message += f"inputs max: {inputs.max()}, preds max: {preds.max()}, targets max: {targets.max()}\n"
+    log_message += f"inputs unique values: {torch.unique(inputs)}, preds unique values: {torch.unique(preds)}, targets unique values: {torch.unique(targets)}\n"
+    logger.debug(log_message)
 
     # Create a figure to plot the samples (input, prediction, target) of the batch
-    fig, axs = plt.subplots(3, n_samples, figsize=(n_samples*5, 12), dpi=150)
+    fig, axs = plt.subplots(nrows=3, ncols=n_samples, figsize=(n_samples*5, 12), dpi=150)
 
     for i in range(n_samples):
         input_img = inputs[i, :, :].numpy()
-        pred_img = preds[i, :, :].cpu().numpy()
-        target_img = targets[i, :, :].cpu().numpy()
+        pred_img = preds[i, :, :].numpy()
+        target_img = targets[i, :, :].numpy()
 
         for ax, img, title in zip([axs[0, i], axs[1, i], axs[2, i]], 
                                   [input_img, pred_img, target_img], 
                                   [f"Input {i} of batch {batch_index}", f"Prediction {i} of batch {batch_index}", f"Target {i} of batch {batch_index}"]
                                   ):
             sns.heatmap(img, ax=ax, cbar=False, linewidths=0.01, linecolor='gray', square=True, cmap=cmap, vmin=vmin, vmax=vmax)
-            ax.set_title(title, fontsize=8)
+            ax.set_title(title, fontdict={'fontsize': 10, 'fontweight': 'bold', 'family': 'serif'})
             ax.set_xticks([])
             ax.set_yticks([])
 
     if batch_index is not None:
         if epoch is not None:
-            fig.suptitle(f"{split} batch {batch_index} at epoch {epoch}", fontsize=16)
+            fig.suptitle(f"{split} batch {batch_index} at epoch {epoch}", fontdict={'fontsize': 18, 'fontweight': 'bold', 'family': 'serif'})
         else:
-            fig.suptitle(f"{split} batch {batch_index}", fontsize=16)
+            fig.suptitle(f"{split} batch {batch_index}", fontdict={'fontsize': 18, 'fontweight': 'bold', 'family': 'serif'})
     else:
-        fig.suptitle(f"{split} batch", fontsize=16)
+        fig.suptitle(f"{split} batch", fontdict={'fontsize': 18, 'fontweight': 'bold', 'family': 'serif'})
     
     plt.tight_layout()
     # plt.show()

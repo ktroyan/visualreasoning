@@ -43,7 +43,7 @@ def create_absolute_positional_encoding(ape_type: str, ape_length: int, embed_di
 
 
 class TransformerDecoder(nn.TransformerDecoder):
-    def __init__(self, model_config, network_config, decoder_layer, num_classes, vocab_size, seq_len):
+    def __init__(self, model_config, network_config, decoder_layer, num_classes, seq_len):
         """ 
         Transformer Decoder class. Inherits from nn.TransformerDecoder.
 
@@ -64,13 +64,24 @@ class TransformerDecoder(nn.TransformerDecoder):
 
         self.seq_len = seq_len
 
+
         ## Recall data special tokens
         self.PAD_TOKEN = 10  # padding token
 
+
         ## Define decoder's special tokens
-        self.BOS_TOKEN = 14  # beginning of sequence token
-        self.EOS_TOKEN = 15  # end of sequence token
-        logger.info(f"Special decoding tokens for Transformer decoder: BOS={self.BOS_TOKEN}, EOS={self.EOS_TOKEN}")
+        log_message = "Special decoding tokens for Transformer decoder: "
+        self.BOS_TOKEN = 15  # beginning of sequence token
+        self.vocab_size = self.num_classes + 1  # number of different tokens that we consider; +1 for the BOS token
+        log_message += f"BOS={self.BOS_TOKEN}"
+        
+        self.use_EOS_for_decoding = False  # TODO: See why error when True; whether to use the EOS token for decoding or not
+        if self.use_EOS_for_decoding:
+            self.EOS_TOKEN = 16  # end of sequence token
+            log_message += f", EOS={self.EOS_TOKEN}"
+            self.vocab_size = self.vocab_size + 1  # number of different tokens that we consider; +1 for EOS token
+
+        logger.info(log_message)
 
 
         ## Causal mask
@@ -81,7 +92,7 @@ class TransformerDecoder(nn.TransformerDecoder):
 
         ## Embed tgt tokens
         # Create a target projection layer to map the ground truth target tokens/sequence (i.e., y) to the decoder embedding dimension as a Transformer Decoder needs to receive the target sequence in an embedding space
-        self.tgt_projection = nn.Embedding(num_embeddings=vocab_size, embedding_dim=network_config.embed_dim)
+        self.tgt_projection = nn.Embedding(num_embeddings=self.vocab_size, embedding_dim=network_config.embed_dim)
 
 
         ## Absolute positional encoding
@@ -89,8 +100,8 @@ class TransformerDecoder(nn.TransformerDecoder):
             self.ape = create_absolute_positional_encoding(model_config.ape.ape_type, seq_len, network_config.embed_dim)
 
 
-        ## Output layer to go from a decoder output embedding to logits; we use vocab_size as the EOS token could be predicted
-        self.decoder_output_layer = nn.Linear(network_config.embed_dim, vocab_size)    
+        ## Output layer to go from a decoder output embedding to logits; we use self.vocab_size as the EOS token could be predicted
+        self.decoder_output_layer = nn.Linear(network_config.embed_dim, self.vocab_size)    
 
 
         ## Output layer to go from the final decoded sequence (of token embeddings) to output logits; we use num_classes as the EOS cannot be predicted, only the data tokens and special tokens
@@ -162,7 +173,7 @@ class TransformerDecoder(nn.TransformerDecoder):
         
         B, S_mem, D_mem = x_encoded.shape
         B, S = y.shape
-        device = y.device   # TODO: See how to use self.device instead of y.device, as for some reason self.device is cpu
+        device = y.device   # TODO: See how to use self.device instead of y.device, self.device is cpu at __init__ time of Model module
 
         # Prepare the decoder input: [BOS, y1, y2, ..., y_{S-1}]; the last token y_S is not used as part of the input to the decoder (as there is no EOS token to predict)
         start_token = torch.full((B, 1), self.BOS_TOKEN, dtype=torch.long, device=device)  # [B, 1]; we use a start token as the first token
@@ -197,8 +208,8 @@ class TransformerDecoder(nn.TransformerDecoder):
         """
 
         B, S_mem, D_mem = x_encoded.shape
-        device = x_encoded.device   # TODO: See how to use self.device instead of x_encoded.device, as for some reason self.device is cpu
-        
+        device = x_encoded.device   # TODO: See how to use self.device instead of x_encoded.device, self.device is cpu at __init__ time of Model module
+
         # Make sure the decoder network is in evaluation mode
         self.eval()
         with torch.no_grad():
@@ -209,8 +220,9 @@ class TransformerDecoder(nn.TransformerDecoder):
             # Initialize the decoded sequence with the start token BOS
             decoded_sequence = torch.full((B, 1), self.BOS_TOKEN, dtype=torch.long, device=device) # [B, 1]
 
-            # Keep track of the finished sequences (i.e., those that have already generated the EOS token)
-            finished_sequences_flag = torch.zeros(B, dtype=torch.bool, device=device)  # [B]
+            if self.use_EOS_for_decoding:
+                # Keep track of the finished sequences (i.e., those that have already generated the EOS token)
+                finished_sequences_flag = torch.zeros(B, dtype=torch.bool, device=device)  # [B]
 
             # AR decoding loop (no teacher forcing, one token at a time)
             for t in range(self.seq_len):   # we have seq_len tokens to get
@@ -248,18 +260,30 @@ class TransformerDecoder(nn.TransformerDecoder):
                 predicted_token_logits = self.decoder_output_layer(output_embeddings_t) # [B, vocab_size] 
                 predicted_token = torch.argmax(predicted_token_logits, dim=-1)   # [B]; TODO: Implement better sampling than argmax (greedy) ?
 
-                # Modify the predicted token if needed. This is to handle appending a PAD_TOKEN if a sequence had already finished (i.e., it had predicted the EOS token)
-                newly_finished = (~finished_sequences_flag) & (predicted_token == self.EOS_TOKEN)   # [B]; identify the sequences that have finished generating tokens at this step, so it's True only if the sequence was not already finished (~finished_sequences_flag) AND its current predicted_token is the EOS_TOKEN
-                finished_sequences_flag |= newly_finished   # [B]; use element-wise OR where 1/True means finished and 0/False means not finished
-                finished_previously = finished_sequences_flag & (~newly_finished)   # [B]; identify the sequences that were already finished before the current step, as they will need to be appended a PAD_TOKEN instead of the predicted token
-                token_to_append = predicted_token.masked_fill(finished_previously, self.PAD_TOKEN)   # [B]; for previously finished sequences, masked_fill replaces their predicted_token with self.PAD_TOKEN, otherwise sequences still running or finishing now keep their predicted_token (which could be a regular token or the self.EOS_TOKEN)
+                if self.use_EOS_for_decoding:
+                    # TODO: 
+                    # See if/how to use the EOS token for inference decoding.
+                    # It seems that we never want to only predict PAD tokens since we introduced the newline tokens
+                    # that should figure at the end of each row of the grid.
+                    # Thus, if we don't use the EOS token, we need to add +1 to self.num_classes instead of +2.
+                    # The issue is that currently the program blocks after some epochs when using use_EOS_for_decoding=True.
+                    
+                    # Modify the predicted token if needed. This is to handle appending a PAD_TOKEN if a sequence had already finished (i.e., it had predicted the EOS token)
+                    newly_finished = (~finished_sequences_flag) & (predicted_token == self.EOS_TOKEN)   # [B]; identify the sequences that have finished generating tokens at this step, so it's True only if the sequence was not already finished (~finished_sequences_flag) AND its current predicted_token is the EOS_TOKEN
+                    finished_sequences_flag |= newly_finished   # [B]; use element-wise OR where 1/True means finished and 0/False means not finished
+                    finished_previously = finished_sequences_flag & (~newly_finished)   # [B]; identify the sequences that were already finished before the current step, as they will need to be appended a PAD_TOKEN instead of the predicted token
+                    token_to_append = predicted_token.masked_fill(finished_previously, self.PAD_TOKEN)   # [B]; for previously finished sequences, masked_fill replaces their predicted_token with self.PAD_TOKEN, otherwise sequences still running or finishing now keep their predicted_token (which could be a regular token or the self.EOS_TOKEN)
+
+                else:
+                    token_to_append = predicted_token   # [B]
 
                 # Append the correct newly predicted token. The current decoded sequence is then used for the next iteration's decoder input
                 decoded_sequence = torch.cat([decoded_sequence, token_to_append.unsqueeze(1)], dim=1)  # [B, current_len+1]
 
-                # Check if all sequences in the batch have finished generating (i.e., an EOS token has been generated for all sequences)
-                if finished_sequences_flag.all():
-                    break
+                if self.use_EOS_for_decoding:
+                    # Check if all sequences in the batch have finished generating (i.e., an EOS token has been generated for all sequences)
+                    if finished_sequences_flag.all():
+                        break
             
             # Prepare the sequence of output embeddings corresponding to the tokens generated during AR decoding. We stack embeddings along the sequence dimension
             output_target_seq = torch.stack(output_embeddings, dim=1)   # [B, seq_len, E]
@@ -297,7 +321,7 @@ class TransformerDecoder(nn.TransformerDecoder):
 
         return logits
 
-def get_transformer_decoder(model_config, network_config, num_classes, vocab_size, seq_len):
+def get_transformer_decoder(model_config, network_config, num_classes, seq_len):
     """Returns a Transformer decoder instance"""
 
     decoder_layer = nn.TransformerDecoderLayer(
@@ -307,5 +331,5 @@ def get_transformer_decoder(model_config, network_config, num_classes, vocab_siz
         batch_first=True, 
         )
 
-    decoder = TransformerDecoder(model_config, network_config, decoder_layer, num_classes, vocab_size, seq_len)
+    decoder = TransformerDecoder(model_config, network_config, decoder_layer, num_classes, seq_len)
     return decoder
