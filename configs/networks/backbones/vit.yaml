@@ -10,5 +10,5 @@ backbone_network:
   attn_proj_dropout_rate: 0.0
   ff_dropout_rate: 0.0
   init_weights_cfg:
-    type: 'xavier'
-    distribution: 'uniform'
+    type: 'trunc_normal'  # choices: 'xavier', 'kaiming', 'trunc_normal', 'normal'
+    distribution: 'uniform' # choices: 'uniform', 'normal'; applies if type is 'xavier' or 'kaiming'

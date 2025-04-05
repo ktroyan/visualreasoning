@@ -1,6 +1,6 @@
 model:
   backbone: 'vit'  # choices: 'vit', 'transformer', 'resnet'
-  head: 'transformer'  # choices: 'transformer', 'mlp'
+  head: 'mlp'  # choices: 'transformer', 'mlp'
   pretrained: null
   patch_size: 1
   use_ohe_repr: true # if True, use OHE for the possible tokens thus yielding as many artificial channels as there are different possible tokens; if False, use a simple sequence of tokens with an artificial channel only created to use convolution for linear projection of patches/pixels/tokens
@@ -17,7 +17,7 @@ model:
     method: '' # choices: '' (for no pooling and returning a sequence), 'mean', 'max', 'token' (for aggregating features and returning the cls token)
   n_tasks: 400    # used for the task embedding (i.e., to inform the model through an embedding of which tasks to consider)
   task_embedding:
-    enabled: true
+    enabled: false
     task_embedding_dim: ${resolve_if_then_else:${model.task_embedding.enabled},128}
   training_hparams:
     optimizer: 'AdamW' # choices: Adam, AdamW, SGD
@@ -30,7 +30,7 @@ model:
   attention_map:
     enabled: false
     layer: -1  # layer to use for the attention map (-1 for the last, 0 for the first layer, 1 for the second layer, etc.)
-    n_samples: 4  # number of samples to use for the attention map
+    n_samples: 2  # number of samples to consider for the attention map
   observe_preds:
     enabled: true
     n_samples: 4
