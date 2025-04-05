@@ -37,12 +37,12 @@ class ResNet(nn.Module):
             self.original_num_out_features = resnet.fc.in_features   # get the original number of output features of the backbone
             resnet.avgpool = nn.Identity()  # remove spatial pooling of the original resnet as we do not want the last downsampling (followed by flattening if downsampling occurs) since we want to get one embedding per position (H,W) in the grid image
         
-            # TODO: See if upsampling correctly? Maybe we have to use dynamic upsampling (see below in forard()) as we do not know the number of feature maps after the layer4?
+            # TODO: See if upsampling correctly? Maybe we have to use dynamic upsampling (see below in forward()) as we do not know the number of feature maps after the layer4?
             # Upsample the output to the original grid image size. 
             # The scale factor is the factor by how much we want to upsample the image.
             # Since for the original ResNet it is downsampled by a factor of at most 32 (at most because if a dimension cannot be smaller than 1), we want to upsample it by the same factor.
             # Hence the factor is image_size//H' and image_size//W' where H' and W' are the height and width of the downsampled image after layer4.
-            self.upsample = nn.Upsample(scale_factor=image_size, mode='bicubic', align_corners=False)   # bicubic interpolation is like in timm's VisionTransformer
+            # self.upsample = nn.Upsample(scale_factor=image_size, mode='bicubic', align_corners=False)   # bicubic interpolation is like in timm's VisionTransformer
             # self.upsample = nn.ConvTranspose2d(self.network_config.embed_dim, self.network_config.embed_dim, kernel_size=image_size, stride=image_size)   # "deconvolution" or "transposed convolution"
 
         # Modify the original Resnet network from torchvision in order to output the required dimensions
