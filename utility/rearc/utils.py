@@ -282,8 +282,6 @@ def observe_image_predictions(split: str,
     """ 
     Observe the inputs, predictions and labels of a subset of a batch.
 
-    TODO: Update the function so that it is more adaptable to the number of samples n_samples
-    
     Args:
     - split: str: the split of the data (train, val, test, gen_test)
     - inputs: torch.Tensor or list: the input grid images that were fed to the model
@@ -498,31 +496,38 @@ def observe_image_predictions(split: str,
     logger.debug(log_message)
 
     # Create a figure to plot the samples (input, prediction, target) of the batch
-    fig, axs = plt.subplots(nrows=3, ncols=n_samples, figsize=(n_samples*5, 12), dpi=150)
+    fig, axs = plt.subplots(nrows=n_samples,
+                            ncols=3, 
+                            figsize=(15, n_samples * 4),
+                            dpi=150,
+                            gridspec_kw={'width_ratios': [1, 1, 1]},
+                            )
 
     for i in range(n_samples):
         input_img = inputs[i, :, :].numpy()
         pred_img = preds[i, :, :].numpy()
         target_img = targets[i, :, :].numpy()
 
-        for ax, img, title in zip([axs[0, i], axs[1, i], axs[2, i]], 
+        for ax, img, title in zip([axs[i, 0], axs[i, 1], axs[i, 2]], 
                                   [input_img, pred_img, target_img], 
                                   [f"Input {i} of batch {batch_index}", f"Prediction {i} of batch {batch_index}", f"Target {i} of batch {batch_index}"]
                                   ):
             sns.heatmap(img, ax=ax, cbar=False, linewidths=0.01, linecolor='gray', square=True, cmap=cmap, vmin=vmin, vmax=vmax)
-            ax.set_title(title, fontdict={'fontsize': 10, 'fontweight': 'bold', 'family': 'serif'})
+            ax.set_title(title, fontdict={'fontsize': 16, 'fontweight': 'bold', 'family': 'serif'})
             ax.set_xticks([])
             ax.set_yticks([])
 
     if batch_index is not None:
         if epoch is not None:
-            fig.suptitle(f"{split} batch {batch_index} at epoch {epoch}", fontdict={'fontsize': 18, 'fontweight': 'bold', 'family': 'serif'})
+            title = f"{split} batch {batch_index} at epoch {epoch}"
         else:
-            fig.suptitle(f"{split} batch {batch_index}", fontdict={'fontsize': 18, 'fontweight': 'bold', 'family': 'serif'})
+            title = f"{split} batch {batch_index}"
     else:
-        fig.suptitle(f"{split} batch", fontdict={'fontsize': 18, 'fontweight': 'bold', 'family': 'serif'})
+        title = f"{split} batch"
+
+    fig.suptitle(title, family='serif', fontsize=22, fontweight='bold')
     
-    plt.tight_layout()
+    plt.tight_layout(rect=[0, 0, 1, 0.98])  # rect=[left, bottom, right, top]; adjust the layout to make room for the title
     # plt.show()
 
     # Save the figure
