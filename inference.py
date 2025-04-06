@@ -20,9 +20,14 @@ torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.deterministic = True
 
 
-# FIXME: for this code to work currently, the batch size should yield a number of elements in each key of results so that it is a multiple of the number of tasks, otherwise the reshape will fail. Fix it.
-# Also see how to handle the case where the results are for multiple test dataloaders
 def process_test_results(config, test_results, test_type="test", exp_logger=None):
+    """
+    Process the test results and log them.
+
+    FIXME: 
+    For this code to work currently, the batch size should yield a number of elements in each key of results so that it is a multiple of the number of tasks, otherwise the reshape will fail.
+    Also see how to handle the case where the results are for multiple test dataloaders
+    """
 
     # Just handle some naming consistency issue with the generated data splits that are named "test_gen" instead of "gen_test"
     if test_type == "gen_test":
@@ -41,7 +46,7 @@ def process_test_results(config, test_results, test_type="test", exp_logger=None
     # Processing of the results and wrap-up of the parameters used
     tasks_considered = test_set['task'].unique()
 
-    logger.info(f"Post-processing results for tasks: {tasks_considered}")
+    logger.debug(f"Post-processing results for tasks: {tasks_considered}")
 
     global_avg = {metric_key: r.mean() for metric_key, r in test_results.items()}
     per_task = {}
@@ -50,7 +55,7 @@ def process_test_results(config, test_results, test_type="test", exp_logger=None
     # nb_of_tasks = len(tasks_considered)
 
     for metric_key, r in test_results.items():
-        logger.info(f"Processing results for metric key: {metric_key}, and result with shape: {r.shape}")
+        logger.debug(f"Processing results for metric key: {metric_key}, and result with shape: {r.shape}")
         k_result = r.reshape([len(tasks_considered), -1])
         for i, task in enumerate(tasks_considered):
             if 'task' not in task:
@@ -101,7 +106,6 @@ def observe_input_output_images(dataloader, batch_id=0, n_samples=4, split="test
     logger.debug(f"Observing {n_samples} samples from {split} batch {batch_id}. See /figs folder.")
 
     # Handle padding tokens. Replace the symbols for pad tokens with the background color
-    # TODO: How to handle the pad token properly? For example if its decided value is not 10.0 anymore as it was changed in the other parts of the code?
     pad_token = 10
     inputs[inputs == pad_token] = 0
     outputs[outputs == pad_token] = 0
