@@ -4,8 +4,6 @@ import numpy as np
 import torch
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import Callback, TQDMProgressBar
-import matplotlib.pyplot as plt
-import seaborn as sns
 import numpy as np
 from typing import Any, Dict, List, Tuple
 
@@ -24,6 +22,11 @@ torch.set_float32_matmul_precision('medium')
 # os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 # os.environ['TORCH_USE_CUDA_DSA'] = 'true'
 
+# os.environ['TORCH_LOGS'] = "graph_breaks"
+os.environ['TORCH_LOGS'] = "recompiles"
+# os.environ['TORCH_LOGS'] = "recompiles,dynamic"
+
+
 class MetricsCallback(Callback):
     """A PyTorch Lightning callback to handle and store metrics during the training process.
 
@@ -31,12 +34,16 @@ class MetricsCallback(Callback):
     process, such as at the end of a training epoch or after validation. It inherits from the `Callback`
     class provided by PyTorch Lightning.
 
-
     Attributes:
-        metrics (dict): A dictionary to store metrics collected during training, validation, or testing.
-                        The keys are metric names, and the values are lists of metric values over time.
-        all_keys (list): A list to keep track of all the metric keys observed during the training process.
-        
+        verbose (bool): A flag to control the verbosity of the logging.
+        metrics (list): A list to store the (dict) metrics collected during training, validation, or testing epochs.
+        all_keys (list): A list to keep track of all the metric keys observed during the training process.        
+        train_loss_epoch (list): A list to store the training loss for each epoch.
+        val_loss_epoch (list): A list to store the validation loss for each epoch.
+        train_acc_epoch (list): A list to store the training accuracy for each epoch.
+        val_acc_epoch (list): A list to store the validation accuracy for each epoch.
+        train_grid_acc_epoch (list): A list to store the training grid accuracy for each epoch.
+        val_grid_acc_epoch (list): A list to store the validation grid accuracy for each epoch.
     """
 
     def __init__(self, verbose=True):
@@ -110,7 +117,8 @@ class MetricsCallback(Callback):
             pl_model_module (VisReasModel(pl.LightningModule)): The Visual Reasoning model class instance that inherits from pl.LightningModule.
         """
 
-        # TODO: What are the step metrics given when using .log_dict() from WandB? Because there are only as many of them as there are epochs.
+        # TODO: 
+        # What are the step metrics given when using .log_dict() from WandB? Because there are only as many of them as there are epochs.
         # It seems that we take the last step performed in the epoch as the step metric, while the epoch metric is the average of the steps (already performed by WandB when using .log_dict() ?)
 
         # Collect the epoch metrics
@@ -126,12 +134,12 @@ class MetricsCallback(Callback):
         if self.verbose >= 1:
             epoch_metrics = trainer.callback_metrics
 
-            # logger.info(f"Considering the metrics: {epoch_metrics.keys()}")
+            logger.debug(f"Considering the metrics: {epoch_metrics.keys()}")
             log_message = ""
 
-
-            # TODO: When would we need to use .mean() ? So far it is equivalent to not taking the mean.
-            # log_message = f"[Epoch {trainer.current_epoch}] Mean metrics: \n"
+            # TODO: 
+            # When would we need to use .mean() ? So far it is equivalent to not taking the mean.
+            # log_message += f"[Epoch {trainer.current_epoch}] Mean metrics: \n"
             # for k, v in epoch_metrics.items():
             #     log_message += f"{k}: {v.mean()} \n"
 
@@ -172,8 +180,8 @@ class MetricsCallback(Callback):
                 pl_model_module.train_grid_acc_step = []
                 pl_model_module.val_grid_acc_step = []
 
-        # logger.info(f"Class of the pl model module: {pl_model_module.__class__}")   # e.g.: CVRModel (which inherits from VisReasModel which inherits from pl.LightningModule)
-        # logger.info(f"Attributes of the instance of the pl model module: {pl_model_module.__dict__}")    
+        # logger.debug(f"Class of the pl model module: {pl_model_module.__class__}")   # e.g.: CVRModel (which inherits from VisReasModel which inherits from pl.LightningModule)
+        # logger.debug(f"Attributes of the instance of the pl model module: {pl_model_module.__dict__}")    
 
 
 def init_callbacks(config, training_folder):
@@ -181,19 +189,34 @@ def init_callbacks(config, training_folder):
     callbacks = {}
 
     # Model checkpoint callback
-    model_checkpoint = pl.callbacks.ModelCheckpoint(dirpath=training_folder, 
-                                                    save_top_k=1, 
-                                                    mode='max', 
-                                                    monitor='metrics/val_acc', # 'metrics/val_loss'
-                                                    every_n_epochs=config.training.ckpt_period, 
-                                                    save_last=True)
+    if config.training.checkpointing.enabled:
+        if config.training.checkpointing.monitored_metric == 'val_loss':
+            mode = 'min'
+        elif config.training.checkpointing.monitored_metric == 'val_acc':
+            mode = 'max'
+        else:
+            raise ValueError(f"Unknown monitored metric for model checkpoint: {config.training.checkpointing.monitored_metric}")
+        
+        model_checkpoint = pl.callbacks.ModelCheckpoint(dirpath=training_folder, 
+                                                        save_top_k=1, 
+                                                        mode=mode, 
+                                                        monitor=f'metrics/{config.training.checkpointing.monitored_metric}', # 'metrics/val_loss' or 'metrics/val_acc'
+                                                        every_n_epochs=config.training.checkpointing.ckpt_period, 
+                                                        save_last=True
+                                                        )
 
-    callbacks['model_checkpoint'] = model_checkpoint
+        callbacks['model_checkpoint'] = model_checkpoint
 
     # Early stopping callback
     if config.training.early_stopping.enabled:
-        early_stopping = pl.callbacks.EarlyStopping(monitor='metrics/val_acc', mode='max', patience=config.training.early_stopping.es_patience, strict=True, verbose=True)   # we can use stopping_threshold=0.99 to stop when the accuracy metric reaches 0.99
-        # early_stopping = pl.callbacks.EarlyStopping(monitor='metrics/val_loss', mode='min', patience=config.training.es_patience, strict=True, verbose=True)   # we can use stopping_threshold=0.99 to stop when the accuracy metric reaches 0.99
+        if config.training.early_stopping.monitored_metric == 'val_loss':
+            mode = 'min'
+        elif config.training.early_stopping.monitored_metric == 'val_acc':
+            mode = 'max'
+        else:
+            raise ValueError(f"Unknown monitored metric for early stopping: {config.training.early_stopping.monitored_metric}")
+        
+        early_stopping = pl.callbacks.EarlyStopping(monitor=f'metrics/{config.training.early_stopping.monitored_metric}', mode=mode, patience=config.training.early_stopping.es_patience, strict=True, verbose=True)   # we can use e.g. stopping_threshold=0.995 to stop when the accuracy metric reaches that value
         callbacks['early_stopping'] = early_stopping
 
     # Progress bar callback
@@ -226,6 +249,10 @@ def train(config, model, datamodule, callbacks, exp_logger=None, checkpoint_path
     # Handle callbacks. Note that the callbacks objects are updated by the pl.Trainer() during the training process
     callbacks_list = list(callbacks.values())    # convert the dict of callbacks to a list of callbacks so that it can be passed to the Trainer()
 
+    # Compile the model for improved performance
+    # TODO: See logs for issues
+    # if os.name == 'posix':  # posix for Linux, 'nt' for Windows
+    #     model = torch.compile(model)
 
     # Training
     trainer = pl.Trainer(default_root_dir=exp_logger.save_dir if exp_logger else None,
@@ -239,18 +266,14 @@ def train(config, model, datamodule, callbacks, exp_logger=None, checkpoint_path
                          gradient_clip_val=None,
                          num_sanity_val_steps=0, 
                          enable_progress_bar=config.training.progress_bar.enabled,
-                         enable_checkpointing=True,
+                         enable_checkpointing=config.training.checkpointing.enabled,
                          log_every_n_steps=config.training.log_every_n_steps,
                         #  accumulate_grad_batches=False,
                         #  gradient_clip_algorithm='norm',
                         #  detect_anomaly=True,
                         #  fast_dev_run=True,
-                        # barebones=True,
-                        )
-
-    # Compile the model for improved performance
-    # NOTE: Without specifying the backend as 'eager', it seems to fail on my NVIDIA RTX 3070 (Laptop) GPU on Windows
-    # model = torch.compile(model, backend='eager')
+                        #  barebones=True,
+                         )
 
     trainer.fit(model, datamodule, ckpt_path=checkpoint_path)
 
@@ -300,7 +323,7 @@ def main(config, training_folder, datamodule, model, exp_logger=None):
     metrics = callbacks['metrics_callback'].get_all_epoch_metrics()
 
     best_val_acc = np.nanmax(metrics['metrics/val_acc'] + [0])
-    best_val_epoch = (np.nanargmax(metrics['metrics/val_acc'] + [0]) + 1) * config.training.ckpt_period
+    best_val_epoch = (np.nanargmax(metrics['metrics/val_acc'] + [0]) + 1)
 
     log_message = "All epoch training metrics: \n"
     for k, v in metrics.items():
