@@ -38,6 +38,8 @@ class DataModuleBase(LightningDataModule):
             drop_last=False,
         )
 
+        logger.info("Done with training dataloader.")
+
         return train_loader
 
     def val_dataloader(self):
@@ -52,6 +54,8 @@ class DataModuleBase(LightningDataModule):
             persistent_workers=True,
             pin_memory=True,
         )
+
+        logger.info("Done with validation dataloader.")
 
         return val_loader
 
@@ -82,6 +86,8 @@ class DataModuleBase(LightningDataModule):
             else:
                 raise ValueError("The torch Dataset gen_test_set is None, so it cannot be used for testing.")
 
+            logger.info("Done with test dataloader and sys-gen test dataloader.")
+
             return [test_dataloader, gen_test_dataloader]
         
         else:
@@ -97,6 +103,8 @@ class DataModuleBase(LightningDataModule):
                     pin_memory=True,
                 )
 
+                logger.info("Done with sys-gen test dataloader.")
+
                 return gen_test_dataloader
 
             else:
@@ -110,6 +118,8 @@ class DataModuleBase(LightningDataModule):
                     persistent_workers=True,
                     pin_memory=True,
                 )
+
+                logger.info("Done with test dataloader.")
 
             return test_dataloader
 
