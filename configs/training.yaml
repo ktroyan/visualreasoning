@@ -7,6 +7,7 @@ training:
   metrics_callback_verbose: 1 # verbosity level: 0 for no verbose, 1 for more verbose, 2 for most verbose
   early_stopping:
     enabled: true
+    monitored_metric: 'val_loss' # choices: 'val_acc', 'val_loss'
     es_patience: ${resolve_if_then_else:${training.early_stopping.enabled},10} # number of epochs for patience of early stopping
   progress_bar:
     enabled: false
@@ -15,5 +16,8 @@ training:
   trainer_precision: "16-mixed" # "16-mixed" usually for NVIDIA GPUs, "bf16-mixed" for TPUs and newer NVIDIA GPUs?
   max_epochs: 3
   log_every_n_steps: 5
-  ckpt_period: 1  # every how many epochs are the checkpoints saved when running the Trainer()
+  checkpointing:
+    enabled: true
+    monitored_metric: 'val_loss' # choices: 'val_acc', 'val_loss'
+    ckpt_period: 1  # every how many epochs are the checkpoints saved when running the Trainer()
   # flush_logs_every_n_steps: 100
