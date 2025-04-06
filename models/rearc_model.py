@@ -1,3 +1,4 @@
+import os
 import torch
 from torch import nn as nn
 from torch.nn import functional as F
@@ -12,6 +13,8 @@ from networks.heads.transformer import get_transformer_decoder
 from utility.utils import plot_lr_schedule
 from utility.rearc.utils import observe_image_predictions, plot_attention_scores
 from utility.logging import logger
+
+# os.environ['TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS'] = '1'
 
 
 class VisReasModel(pl.LightningModule):
@@ -75,18 +78,30 @@ class VisReasModel(pl.LightningModule):
         for param in self.model_backbone.parameters():
             param.requires_grad = False
 
-    def create_predictions_mask(self, B: int, H: int, W: int, y_true_size: int) -> torch.Tensor:
-        """ Create a multiplicative mask to ignore all the non-symbol (e.g., padding) tokens when computing the loss and accuracy. """
+    def create_true_size_mask(self, B: int, H: int, W: int, y_true_size: torch.Tensor) -> torch.Tensor:
+        """ 
+        Create a multiplicative mask to ignore all the symbols outside of the true size of the grid image.
+        The non-symbol (e.g., padding) tokens would thus be ignored when computing the metrics (e.g., loss, accuracy). 
+        
+        Vectorized and avoid graph breaks by staying in tensor ops.
+        """
 
+        # Create a mask of shape [B, H, W] initialized to False (0)
         mask = torch.zeros((B, H, W), dtype=torch.bool, device=self.device)  # [B, H, W] ; initialize all as 0/False (padded)
 
-        # Create mask for each sample of the batch
-        for i in range(B):
-            true_h = int(y_true_size[i][0])  # get actual height of the target y
-            true_w = int(y_true_size[i][1])  # get actual width of the target y
-            mask[i, :true_h, :true_w] = 1  # mark non-padding cells as 1/True
+        # Get row and column indices for the true size grid
+        row_idx = torch.arange(H, device=self.device).view(1, H, 1)  # [1, H, 1]
+        col_idx = torch.arange(W, device=self.device).view(1, 1, W)  # [1, 1, W]
 
-        mask = mask.view(B, -1)  # flatten the 2D mask to match y's flattended shape: [B, seq_len]
+        # Broadcast true sizes to be compatible with the row and column indices of the full grid
+        true_h = y_true_size[:, 0].view(B, 1, 1)  # [B, 1, 1] <-- [B, 1] (height of the grid)
+        true_w = y_true_size[:, 1].view(B, 1, 1)  # [B, 1, 1] <-- [B, 1] (width of the grid)
+
+        # Get mask with True where (row < true_h) and (col < true_w)
+        mask = (row_idx < true_h) & (col_idx < true_w)  # [B, H, W] <-- [B, H, 1] boolean mask for the height and [B, 1, W] boolean mask for the width
+
+        # Flatten 2D mask
+        mask = mask.view(B, -1) # [B, seq_len=H*W] <-- [B, H, W] (where the rectangle [0:true_h, 0:true_w] is True)
 
         return mask
 
@@ -97,7 +112,7 @@ class VisReasModel(pl.LightningModule):
         However, we still do it, so the purpose of this shared_step() is lesser.
         """
 
-        x, y, samples_task_id, y_true_size = batch   # [B, H, W], [B, H, W], [B], [B]
+        x, y, samples_task_id, y_true_size = batch   # [B, H, W], [B, H, W], [B], [B, 2]
 
         B, H, W = x.shape
 
@@ -116,9 +131,9 @@ class VisReasModel(pl.LightningModule):
         y_hat = y_hat.permute(0, 2, 1)  # [B, num_classes, seq_len] <-- [B, seq_len, num_classes]
 
         # Create the multiplicative mask based on the true sizes of y to only compute the metrics w.r.t. the actual tokens to predict in the target
-        mask = self.create_predictions_mask(B, H, W, y_true_size)
+        true_size_mask = self.create_true_size_mask(B, H, W, y_true_size)
 
-        return x, y_hat, y, mask
+        return x, y_hat, y, true_size_mask
 
     def step(self, batch, batch_idx):
 
@@ -132,6 +147,7 @@ class VisReasModel(pl.LightningModule):
         # TODO: 
         # See exactly how we want to compute the loss and metrics. What types of tokens we want to consider.
         # Also, convert the non-data tokens to background tokens (i.e., 0) when computing the loss and metrics, no?
+        # Also, consider weighting the tokens (e.g., there are many more bakground tokens) differently when computing the loss for grid with padding.
 
         # Loss per symbol (with all sorts of padding considered): compute the loss per token/symbol
         per_sample_loss = F.cross_entropy(y_hat, y.long(), reduction='none').float()  # [B, seq_len]
