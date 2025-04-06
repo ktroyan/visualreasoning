@@ -55,6 +55,8 @@ def main() -> None:
         sweep_config = OmegaConf.create(dict(wandb.config))  # get the sweep config for the current run
         config, config_dict = get_complete_config(sweep_config) # use the sweep config to overwrite parameters (but before CLI arguments)
     
+    os.environ['CUDA_VISIBLE_DEVICES'] = str(config.base.gpu_id)
+
     wandb.config = config_dict  # set to wandb the config to use through the program; if sweep enabled, update the wandb.config with the merged config
 
     # Log the complete and actual config used for the experiment

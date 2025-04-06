@@ -150,7 +150,7 @@ def main(config, datamodule, model=None, model_ckpt_path=None, exp_logger=None):
 
     trainer = pl.Trainer(num_nodes=1,   # number of gpu nodes for distributed training
                          logger=exp_logger,
-                         devices=config.base.gpus,
+                         devices=config.base.n_gpus,
                          accelerator='auto',
                          enable_progress_bar=True,
                         )
