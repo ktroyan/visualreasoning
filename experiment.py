@@ -144,7 +144,9 @@ def main() -> None:
         'task_embedding': config.model.task_embedding,
         'lr': config.model.training_hparams.lr,
         'optimizer': config.model.training_hparams.optimizer,
-        'scheduler': config.model.training_hparams.scheduler,
+        'scheduler_type': config.model.training_hparams.scheduler.type,
+        'scheduler_interval': config.model.training_hparams.scheduler.interval,
+        'scheduler_frequency': config.model.training_hparams.scheduler.frequency,
         'seed': config.base.seed,
     }
     
@@ -174,6 +176,10 @@ if __name__ == '__main__':
 
     if config.wandb.sweep.enabled:
 
+        # Start sweep time
+        sweep_start_time = time.time()
+        logger.info(f"*** Sweep started ***")
+
         # Get the sweep yaml file for the data environment specified in the base config
         sweep_yaml_file = f"./configs/sweep_{(config.base.data_env).lower()}.yaml"
 
@@ -189,6 +195,10 @@ if __name__ == '__main__':
         wandb.agent(sweep_id, 
                     function=main,
                     count=config.wandb.sweep.num_sweeps)
+        
+        # End sweep time
+        sweep_elapsed_time = time.time() - sweep_start_time
+        logger.info(f"*** Sweep ended ***\nTotal sweep time: \n{sweep_elapsed_time} seconds ~=\n{sweep_elapsed_time/60} minutes ~=\n{sweep_elapsed_time/(60*60)} hours")
 
     else:
         main()
