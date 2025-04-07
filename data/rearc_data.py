@@ -5,7 +5,7 @@ from torch.utils.data import Dataset
 import torch.nn.functional as F
 
 # Personal codebase dependencies
-from data.data_base import DataModuleBase
+from .data_base import DataModuleBase
 from utility.logging import logger
 
 
