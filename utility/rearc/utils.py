@@ -39,7 +39,7 @@ def plot_attention_scores(split: str,
                           n_samples: int,
                           epoch: int,
                           batch_index: int
-                          ) -> None:
+                          ) -> List[str]:
     """
     Plot attention scores for each attention head.
     It handles extra tokens and reshapes the sequence to a 2D grid for better visualization of attentions w.r.t. input and target grids.
@@ -58,6 +58,8 @@ def plot_attention_scores(split: str,
         epoch (int): Current epoch number.
         batch_index (int): Index of the batch in the dataset.
     """
+
+    fig_paths = []
 
     # Extract batch
     attn_scores = attn_scores[batch_index][layer_index]  # [B, num_heads, seq_len, seq_len]
@@ -194,11 +196,15 @@ def plot_attention_scores(split: str,
 
         plt.tight_layout()
         os.makedirs("./figs", exist_ok=True)
-        plt.savefig(f"./figs/{split}_attention_layer{layer_index}_sample{sample_index}_epoch{epoch}_batch{batch_index}.png")
+        fig_path = f"./figs/{split}_attention_layer{layer_index}_sample{sample_index}_epoch{epoch}_batch{batch_index}.png"
+        plt.savefig(fig_path)
         plt.close(fig)
+        fig_paths.append(fig_path)
+        logger.debug(f"Attention scores for epoch {epoch}, batch {batch_index}, sample {sample_index}, saved in: {fig_path}")
 
+    return fig_paths
 
-def plot_metrics_locally(training_folder: str, metrics: Dict) -> None:
+def plot_metrics_locally(training_folder: str, metrics: Dict) -> List[str]:
     """
     Generate and save plots for training and validation epoch metrics.
 
@@ -206,6 +212,9 @@ def plot_metrics_locally(training_folder: str, metrics: Dict) -> None:
         training_folder (str): Path to save the plots.
         metrics (dict): Dictionary containing metric lists.
     """
+
+    # Store the paths of the figures created
+    fig_paths = []
 
     # Create the /figs folder in the folder for training if it does not exist
     figs_folder_path = os.path.join(training_folder, "figs")
@@ -227,8 +236,10 @@ def plot_metrics_locally(training_folder: str, metrics: Dict) -> None:
         plt.title(title)
         plt.legend()
         plt.tight_layout()
-        plt.savefig(os.path.join(training_folder, "figs", filename))
+        fig_path = os.path.join(training_folder, "figs", filename)
+        plt.savefig(fig_path)
         plt.close()
+        return fig_path
 
     
     ## Epoch-wise plots
@@ -240,16 +251,18 @@ def plot_metrics_locally(training_folder: str, metrics: Dict) -> None:
         logger.warning("The plots cannot be created as there are no metrics saved in the list. The epochs list for the x-axis of the plot is empty.")
 
     # Plot the training and validation loss per epoch
-    plot_and_save(x=epochs,
+    fig_path = plot_and_save(x=epochs,
                   y1=metrics['train_loss_epoch'],
                   y2=metrics['val_loss_epoch'],
                   xlabel="Epoch", ylabel="Loss",
                   title="Training & Validation Loss (Epoch-wise)",
                   filename="loss_epoch.png"
                   )
+    
+    fig_paths.append(fig_path)
 
     # Plot the training and validation accuracy per epoch
-    plot_and_save(x=epochs,
+    fig_path = plot_and_save(x=epochs,
                   y1=metrics['train_acc_epoch'],
                   y2=metrics['val_acc_epoch'],
                   xlabel="Epoch", 
@@ -257,9 +270,11 @@ def plot_metrics_locally(training_folder: str, metrics: Dict) -> None:
                   title="Training & Validation Accuracy (Epoch-wise)",
                   filename="acc_epoch.png"
                   )
+    
+    fig_paths.append(fig_path)
 
     # Plot the training and validation grid accuracy per epoch
-    plot_and_save(x=epochs,
+    fig_path = plot_and_save(x=epochs,
                   y1=metrics['train_grid_acc_epoch'],
                   y2=metrics['val_grid_acc_epoch'],
                   xlabel="Epoch", 
@@ -267,10 +282,14 @@ def plot_metrics_locally(training_folder: str, metrics: Dict) -> None:
                   title="Training & Validation Grid Accuracy (Epoch-wise)",
                   filename="grid_acc_epoch.png"
                   )
+    
+    fig_paths.append(fig_path)
 
     logger.info(f"Local plots of relevant training metrics saved in: {figs_folder_path}")
 
-def observe_image_predictions(split: str, 
+    return fig_paths
+
+def plot_image_predictions(split: str, 
                               inputs: torch.Tensor | list, 
                               preds: torch.Tensor | list, 
                               targets: torch.Tensor | list, 
@@ -278,7 +297,7 @@ def observe_image_predictions(split: str,
                               n_samples: int = 4, 
                               batch_index: int = 0,
                               epoch: int = None
-                              ) -> None:
+                              ) -> List[str]:
     """ 
     Observe the inputs, predictions and labels of a subset of a batch.
 
@@ -292,6 +311,9 @@ def observe_image_predictions(split: str,
     - n_samples: int: the number of samples to observe from the batch
 
     """
+
+    # Store the paths of the figures created
+    fig_paths = []
 
     # Get a batch of inputs, predictions and targets
     if isinstance(inputs, list) and isinstance(preds, list) and isinstance(targets, list):
@@ -538,9 +560,15 @@ def observe_image_predictions(split: str,
     # Most likely we only save the first and the last batch of the epoch.
     if epoch is not None:
         # Training or Validation
-        fig.savefig(f"./figs/{split}_image_predictions_epoch{epoch}_batch{batch_index}_of_saved_batches.png")
+        fig_path = f"./figs/{split}_image_predictions_epoch{epoch}_batch{batch_index}_of_saved_batches.png"
+        fig.savefig(fig_path)
+        fig_paths.append(fig_path)
     else:
         # Testing
-        fig.savefig(f"./figs/{split}_image_predictions_batch{batch_index}_of_saved_batches.png")
+        fig_path = f"./figs/{split}_image_predictions_batch{batch_index}_of_saved_batches.png"
+        fig.savefig(fig_path)
+        fig_paths.append(fig_path)
 
     plt.close(fig)
+
+    return fig_paths

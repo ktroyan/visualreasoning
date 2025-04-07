@@ -8,7 +8,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 import seaborn as sns
-from typing import Dict
+from typing import Dict, List
 
 # Personal codebase dependencies
 from utility.logging import logger
@@ -77,7 +77,7 @@ def compute_dataset_stats(dataset_path):
 
     return dataset_mean_global, dataset_std_global, dataset_mean_per_sample, dataset_std_per_sample
 
-def plot_metrics_locally(training_folder, metrics):
+def plot_metrics_locally(training_folder: str, metrics: Dict) -> List[str]:
     """
     Generate and save plots for training and validation epoch metrics.
 
@@ -85,6 +85,9 @@ def plot_metrics_locally(training_folder, metrics):
         training_folder (str): Path to save the plots.
         metrics (dict): Dictionary containing metric lists.
     """
+
+    # Store the paths of the figures created
+    fig_paths = []
 
     # Create the /figs folder in the folder for training if it does not exist
     figs_folder_path = os.path.join(training_folder, "figs")
@@ -106,8 +109,10 @@ def plot_metrics_locally(training_folder, metrics):
         plt.title(title)
         plt.legend()
         plt.tight_layout()
-        plt.savefig(os.path.join(training_folder, "figs", filename))
+        fig_path = os.path.join(training_folder, "figs", filename)
+        plt.savefig(fig_path)
         plt.close()
+        return fig_path
 
     ## Epoch-wise plots
     assert len(metrics['train_acc_epoch']) == len(metrics['val_acc_epoch']) == len(metrics['train_loss_epoch']) == len(metrics['val_loss_epoch'])
@@ -118,7 +123,7 @@ def plot_metrics_locally(training_folder, metrics):
         logger.warning("The plots cannot be created as there are no metrics saved in the list. The epochs list for the x-axis of the plot is empty.")
 
     # Plot the training and validation loss per epoch
-    plot_and_save(
+    fig_path = plot_and_save(
         x=epochs,
         y1=metrics['train_loss_epoch'],
         y2=metrics['val_loss_epoch'],
@@ -127,8 +132,10 @@ def plot_metrics_locally(training_folder, metrics):
         filename="loss_epoch.png"
     )
 
+    fig_paths.append(fig_path)
+
     # Plot the training and validation accuracy per epoch
-    plot_and_save(
+    fig_path = plot_and_save(
         x=epochs,
         y1=metrics['train_acc_epoch'],
         y2=metrics['val_acc_epoch'],
@@ -137,7 +144,11 @@ def plot_metrics_locally(training_folder, metrics):
         filename="acc_epoch.png"
     )
 
+    fig_paths.append(fig_path)
+
     logger.info(f"Local plots of relevant training metrics saved in: {figs_folder_path}")
+
+    return fig_paths
 
 def observe_image_predictions(split: str, 
                               inputs: torch.Tensor | list, 

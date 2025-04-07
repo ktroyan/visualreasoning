@@ -7,6 +7,7 @@ import torch
 from omegaconf import OmegaConf
 import matplotlib.pyplot as plt
 import shutil
+from typing import Any, Dict, List, Tuple
 
 # Personal codebase dependencies
 from utility.logging import logger
@@ -223,7 +224,7 @@ def get_model_from_ckpt(model_ckpt_path):
 
     return model
 
-def plot_lr_schedule(lr_values):
+def plot_lr_schedule(lr_values: List) -> str:
     plt.figure(figsize=(10, 5))
     plt.plot(lr_values, label="Learning Rate")
     plt.xlabel("Training Steps")
@@ -231,9 +232,11 @@ def plot_lr_schedule(lr_values):
     plt.title("Learning Rate Schedule")
     plt.legend()
     plt.grid()
-    plt.savefig("./figs/learning_rate_schedule.png")
+    fig_path = "./figs/learning_rate_schedule.png"
+    plt.savefig(fig_path)
     # plt.show()
     plt.close()
+    return fig_path
 
 def plot_absolute_positional_embeddings(pos_embed, num_prefix_tokens=None, viz_as_heatmap=False):
     """ 

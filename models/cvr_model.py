@@ -1,3 +1,4 @@
+import os
 import torch
 from torch import nn as nn
 from torch.nn import functional as F
@@ -278,24 +279,30 @@ class VisReasModel(pl.LightningModule):
         """
 
         # Plot learning rate values used during training
-        plot_lr_schedule(self.lr_values)
-        return
+        fig_path = plot_lr_schedule(self.lr_values)
+
+        # Log the learning rate schedule to wandb
+        self.logger.log_image(key="figures_lr_schedule/"+fig_path.replace("./", ""),
+                              images=[fig_path]
+                              )
 
     def optimizer_step(self, epoch, batch_idx, optimizer, optimizer_closure):
         """
         Override the PyTorch Lightning optimizer_step method to add custom logic before the optimizer.step() call.
         
         NOTE: We overwrite it for learning rate warm-up.
-        TODO: See if ok to define the LR warm-up like this.
         """
         
         if self.model_config.training_hparams.lr_warmup.enabled:
-            # Manual linear LR warm up
-            num_lr_warmup_steps = self.model_config.training_hparams.lr_warmup.num_steps
-            if self.trainer.global_step < num_lr_warmup_steps:
-                lr_scale = min(1.0, float(self.trainer.global_step + 1) / num_lr_warmup_steps)
-                for pg in optimizer.param_groups:
-                    pg["lr"] = lr_scale * self.model_config.training_hparams.lr
+            if self.model_config.training_hparams.lr_warmup.type == "linear":
+                # Linear LR warm up
+                num_lr_warmup_steps = self.model_config.training_hparams.lr_warmup.num_steps
+                if self.trainer.global_step < num_lr_warmup_steps:
+                    lr_scale = min(1.0, float(self.trainer.global_step + 1) / num_lr_warmup_steps)
+                    for pg in optimizer.param_groups:
+                        pg["lr"] = lr_scale * self.model_config.training_hparams.lr
+            else:
+                raise ValueError(f"Unknown LR warmup type given: {self.model_config.training_hparams.lr_warmup.type}")
 
         self.lr_values.append(optimizer.param_groups[0]["lr"])
 
@@ -303,11 +310,11 @@ class VisReasModel(pl.LightningModule):
         optimizer.step(closure=optimizer_closure)   # update params
 
     def configure_optimizers(self):
-        """ Initializes the optimizer and the learning rate scheduler. 
+        """ 
+        Initializes the optimizer and the learning rate scheduler. 
         The optimizer is initialized with the parameters of the model and the learning rate scheduler is initialized with the optimizer.
         
         See: https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.core.LightningModule.html#lightning.pytorch.core.LightningModule.configure_optimizers
-
 
         Returns:
             optimizer_config (dict): A dictionary containing the optimizer and the learning rate scheduler to be used during training.
@@ -327,23 +334,25 @@ class VisReasModel(pl.LightningModule):
             raise ValueError(f"Unknown optimizer given: {self.model_config.training_hparams.optimizer}")
 
         # Define the learning rate scheduler
-        if self.model_config.training_hparams.scheduler == 'ReduceLROnPlateau':
+        if self.model_config.training_hparams.scheduler.type == 'ReduceLROnPlateau':
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10)
         
-        elif self.model_config.training_hparams.scheduler == 'CosineAnnealingLR':
+        elif self.model_config.training_hparams.scheduler.type == 'CosineAnnealingLR':
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
 
-        elif self.model_config.training_hparams.scheduler == 'StepLR':
+        elif self.model_config.training_hparams.scheduler.type == 'StepLR':
             scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
 
         else:
-            raise ValueError(f"Unknown scheduler given: {self.model_config.training_hparams.scheduler}")
+            raise ValueError(f"Unknown scheduler given: {self.model_config.training_hparams.scheduler.type}")
 
         optimizer_config = {
             "optimizer": optimizer,
             "lr_scheduler": {
                 "scheduler": scheduler,
-                "monitor": "metrics/val_loss",  # here write the metric to track for lr scheduling. E.g., metrics/val_loss or metrics/val_acc
+                "interval": self.model_config.training_hparams.scheduler.interval,  # 'epoch' or 'step'
+                "frequency": self.model_config.training_hparams.scheduler.frequency,  # 'epoch' or 'step'; how often to call the scheduler w.r.t. the interval
+                "monitor": f"metrics/{self.model_config.training_hparams.scheduler.monitored_metric}",  # metric to track for lr scheduling. E.g., metrics/val_loss or metrics/val_acc
             },
         }
 

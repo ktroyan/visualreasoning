@@ -145,7 +145,8 @@ class MetricsCallback(Callback):
 
             log_message += f"[Epoch {trainer.current_epoch}] Current epoch metrics: \n"
             for k, v in epoch_metrics.items():
-                log_message += f"{k}: {v} \n"
+                if "epoch" in k:    # only log the metrics that are for an epoch
+                    log_message += f"{k}: {v} \n"
             
             log_message += f"\nLearning rate at the end of epoch {trainer.current_epoch}: {pl_model_module.lr_schedulers().get_last_lr()}"    # this yields learning_rate_epoch in the logs
             logger.info(log_message)
@@ -327,19 +328,27 @@ def main(config, training_folder, datamodule, model, exp_logger=None):
 
     log_message = "All epoch training metrics: \n"
     for k, v in metrics.items():
-        log_message += f"{k}: {v}" + "\n"
+        if "epoch" in k:    # only log the metrics that are for an epoch
+            log_message += f"{k}: {v}" + "\n"
     logger.info(log_message)
 
     # Plot locally some training and validation metrics
     all_local_plotting_metrics = callbacks['metrics_callback'].get_all_local_plotting_metrics()
     if config.base.data_env == "REARC":
-        plot_rearc_metrics_locally(training_folder, all_local_plotting_metrics)
+        fig_paths = plot_rearc_metrics_locally(training_folder, all_local_plotting_metrics)
+        if exp_logger:
+            for fig_path in fig_paths:
+                exp_logger.log_image(key="figures_learning_curves/"+fig_path.replace("./", ""), images=[fig_path])
+    
     elif config.base.data_env == "CVR":
-        plot_cvr_metrics_locally(training_folder, all_local_plotting_metrics)
+        fig_paths = plot_cvr_metrics_locally(training_folder, all_local_plotting_metrics)
+        if exp_logger:
+            for fig_path in fig_paths:
+                exp_logger.log_image(key="figures_learning_curves/"+fig_path.replace("./", ""), images=[fig_path])
 
     # Access the wandb experiment and save the logs for the model hyperparameters and additional results (than those already logged with log_dict() in the model file)
     if exp_logger:
-        exp_logger.log_hyperparams(model.hparams)
+        exp_logger.log_hyperparams(model.hparams)   # TODO: See if need to rewrite the dict?
         exp_logger.experiment.log({'best_val_epoch': best_val_epoch, 'best_val_acc': best_val_acc})
 
     train_results = {

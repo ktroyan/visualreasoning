@@ -11,7 +11,7 @@ from networks.backbones.vit import get_vit
 from networks.heads.mlp import get_mlp_head
 from networks.heads.transformer import get_transformer_decoder
 from utility.utils import plot_lr_schedule
-from utility.rearc.utils import observe_image_predictions, plot_attention_scores
+from utility.rearc.utils import plot_image_predictions, plot_attention_scores
 from utility.logging import logger
 
 # os.environ['TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS'] = '1'
@@ -271,10 +271,12 @@ class VisReasModel(pl.LightningModule):
         NOTE: It is called after the on_train_epoch_end() method of the Callback class.
         """
 
+        figs_to_log = []
+
         # Plot attention maps if attention maps are enabled and exist
         if self.model_config.attention_map.enabled and hasattr(self.encoder, 'get_attention_scores'):
             # Plot attention maps of some training samples of the first and last batch seen during the epoch
-            plot_attention_scores("train", 
+            fig_paths = plot_attention_scores("train", 
                                   self.train_inputs,
                                   self.train_targets, 
                                   self.train_attention_scores, 
@@ -288,7 +290,9 @@ class VisReasModel(pl.LightningModule):
                                   batch_index=0
                                   )
             
-            plot_attention_scores("train",
+            figs_to_log.append(fig_paths)
+            
+            fig_paths = plot_attention_scores("train",
                                   self.train_inputs,
                                   self.train_targets,
                                   self.train_attention_scores,
@@ -302,8 +306,10 @@ class VisReasModel(pl.LightningModule):
                                   batch_index=-1
                                   )
             
+            figs_to_log.append(fig_paths)
+            
             # Plot attention maps of some validation samples of the first and last batch seen during the epoch
-            plot_attention_scores("val", 
+            fig_paths = plot_attention_scores("val", 
                                   self.val_inputs,
                                   self.val_targets,
                                   self.val_attention_scores, 
@@ -317,7 +323,9 @@ class VisReasModel(pl.LightningModule):
                                   batch_index=0
                                   )
             
-            plot_attention_scores("val", 
+            figs_to_log.append(fig_paths)
+            
+            fig_paths = plot_attention_scores("val", 
                                   self.val_inputs,
                                   self.val_targets,
                                   self.val_attention_scores, 
@@ -330,11 +338,20 @@ class VisReasModel(pl.LightningModule):
                                   epoch=self.current_epoch,
                                   batch_index=-1
                                   )
+            
+            figs_to_log.append(fig_paths)
+
+            # Log the figures to wandb
+            for fig_paths in figs_to_log:
+                for fig_path in fig_paths:
+                    self.logger.log_image(key="figures_attention_maps/"+fig_path.replace("./", ""),
+                                          images=[fig_path]
+                                          )
 
         # Plot model predictions
         if self.model_config.observe_preds.enabled:
             # Plot a few training samples (inputs, predictions, targets) of the first and last batch seen during the epoch
-            observe_image_predictions("train", 
+            fig_paths = plot_image_predictions("train",
                                       self.train_inputs, 
                                       self.train_preds, 
                                       self.train_targets, 
@@ -344,7 +361,9 @@ class VisReasModel(pl.LightningModule):
                                       epoch=self.current_epoch
                                       )
             
-            observe_image_predictions("train", 
+            figs_to_log.append(fig_paths)
+            
+            fig_paths = plot_image_predictions("train",
                                       self.train_inputs, 
                                       self.train_preds, 
                                       self.train_targets, 
@@ -354,8 +373,10 @@ class VisReasModel(pl.LightningModule):
                                       epoch=self.current_epoch
                                       )
             
+            figs_to_log.append(fig_paths)
+            
             # Plot a few validation samples (inputs, predictions, targets) of the first and last batch seen during the epoch
-            observe_image_predictions("val", 
+            fig_paths = plot_image_predictions("val", 
                                       self.val_inputs, 
                                       self.val_preds, 
                                       self.val_targets, 
@@ -365,7 +386,9 @@ class VisReasModel(pl.LightningModule):
                                       epoch=self.current_epoch
                                       )
             
-            observe_image_predictions("val", 
+            figs_to_log.append(fig_paths)
+            
+            fig_paths = plot_image_predictions("val", 
                                       self.val_inputs, 
                                       self.val_preds, 
                                       self.val_targets, 
@@ -374,6 +397,15 @@ class VisReasModel(pl.LightningModule):
                                       batch_index=-1, 
                                       epoch=self.current_epoch
                                       )
+            
+            figs_to_log.append(fig_paths)
+
+            # Log the figures to wandb
+            for fig_paths in figs_to_log:
+                for fig_path in fig_paths:
+                    self.logger.log_image(key="figures_image_predictions/"+fig_path.replace("./", ""),
+                                          images=[fig_path]
+                                          )
 
         # Reset the lists for the next epoch
         self.train_inputs = []
@@ -466,6 +498,8 @@ class VisReasModel(pl.LightningModule):
         This is a default PyTorch Lightning method that we override to define the logic at the end of the testing phase.
         """
 
+        figs_to_log = []
+
         if len(self.test_step_results) != 0:
             test_step_results = self.test_step_results
 
@@ -484,9 +518,11 @@ class VisReasModel(pl.LightningModule):
 
             # Plot a few test samples (inputs, predictions, targets) of the first and last batch of testing (single epoch)
             if self.model_config.observe_preds.enabled:
-                observe_image_predictions("test", self.test_inputs, self.test_preds, self.test_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=0)
-                observe_image_predictions("test", self.test_inputs, self.test_preds, self.test_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=self.trainer.num_test_batches[0]-1)
-
+                fig_paths = plot_image_predictions("test", self.test_inputs, self.test_preds, self.test_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=0)
+                figs_to_log.append(fig_paths)
+                fig_paths = plot_image_predictions("test", self.test_inputs, self.test_preds, self.test_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=self.trainer.num_test_batches[0]-1)
+                figs_to_log.append(fig_paths)
+                
         if len(self.gen_test_step_results) != 0:
             gen_test_step_results = self.gen_test_step_results
 
@@ -505,8 +541,19 @@ class VisReasModel(pl.LightningModule):
 
             # Plot a few test samples (inputs, predictions, targets) of the first and last batch of testing (single epoch)
             if self.model_config.observe_preds.enabled:
-                observe_image_predictions("test_gen", self.gen_test_inputs, self.gen_test_preds, self.gen_test_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=0)
-                observe_image_predictions("test_gen", self.gen_test_inputs, self.gen_test_preds, self.gen_test_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=self.trainer.num_test_batches[1]-1)
+                fig_paths = plot_image_predictions("test_gen", self.gen_test_inputs, self.gen_test_preds, self.gen_test_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=0)
+                figs_to_log.append(fig_paths)
+                fig_paths = plot_image_predictions("test_gen", self.gen_test_inputs, self.gen_test_preds, self.gen_test_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=self.trainer.num_test_batches[1]-1)
+                figs_to_log.append(fig_paths)
+
+        if len(figs_to_log) != 0:
+            # Log the figures to wandb
+            for fig_paths in figs_to_log:
+                for fig_path in fig_paths:
+                    self.logger.log_image(key="figures_image_predictions/"+fig_path.replace("./", ""),
+                                          images=[fig_path]
+                                          )
+
 
     def on_train_end(self):
         """
@@ -515,8 +562,12 @@ class VisReasModel(pl.LightningModule):
         """
 
         # Plot learning rate values used during training
-        plot_lr_schedule(self.lr_values)
-        return
+        fig_path = plot_lr_schedule(self.lr_values)
+
+        # Log the learning rate schedule to wandb
+        self.logger.log_image(key="figures_lr_schedule/"+fig_path.replace("./", ""),
+                              images=[fig_path]
+                              )
 
     def optimizer_step(self, epoch, batch_idx, optimizer, optimizer_closure):
         """
@@ -526,12 +577,15 @@ class VisReasModel(pl.LightningModule):
         """
 
         if self.model_config.training_hparams.lr_warmup.enabled:
-            # Manual linear LR warm up
-            num_lr_warmup_steps = self.model_config.training_hparams.lr_warmup.num_steps
-            if self.trainer.global_step < num_lr_warmup_steps:
-                lr_scale = min(1.0, float(self.trainer.global_step + 1) / num_lr_warmup_steps)
-                for pg in optimizer.param_groups:
-                    pg["lr"] = lr_scale * self.model_config.training_hparams.lr
+            if self.model_config.training_hparams.lr_warmup.type == "linear":
+                # Linear LR warm up
+                num_lr_warmup_steps = self.model_config.training_hparams.lr_warmup.num_steps
+                if self.trainer.global_step < num_lr_warmup_steps:
+                    lr_scale = min(1.0, float(self.trainer.global_step + 1) / num_lr_warmup_steps)
+                    for pg in optimizer.param_groups:
+                        pg["lr"] = lr_scale * self.model_config.training_hparams.lr
+            else:
+                raise ValueError(f"Unknown LR warmup type given: {self.model_config.training_hparams.lr_warmup.type}")
 
         self.lr_values.append(optimizer.param_groups[0]["lr"])
         
@@ -539,11 +593,11 @@ class VisReasModel(pl.LightningModule):
         optimizer.step(closure=optimizer_closure)   # update params
 
     def configure_optimizers(self):
-        """ Initializes the optimizer and the learning rate scheduler. 
+        """ 
+        Initializes the optimizer and the learning rate scheduler. 
         The optimizer is initialized with the parameters of the model and the learning rate scheduler is initialized with the optimizer.
         
         See: https://lightning.ai/docs/pytorch/stable/api/lightning.pytorch.core.LightningModule.html#lightning.pytorch.core.LightningModule.configure_optimizers
-
 
         Returns:
             optimizer_config (dict): A dictionary containing the optimizer and the learning rate scheduler to be used during training.
@@ -563,23 +617,25 @@ class VisReasModel(pl.LightningModule):
             raise ValueError(f"Unknown optimizer given: {self.model_config.training_hparams.optimizer}")
 
         # Define the learning rate scheduler
-        if self.model_config.training_hparams.scheduler == 'ReduceLROnPlateau':
+        if self.model_config.training_hparams.scheduler.type == 'ReduceLROnPlateau':
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10)
         
-        elif self.model_config.training_hparams.scheduler == 'CosineAnnealingLR':
+        elif self.model_config.training_hparams.scheduler.type == 'CosineAnnealingLR':
             scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10)
 
-        elif self.model_config.training_hparams.scheduler == 'StepLR':
+        elif self.model_config.training_hparams.scheduler.type == 'StepLR':
             scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
 
         else:
-            raise ValueError(f"Unknown scheduler given: {self.model_config.training_hparams.scheduler}")
+            raise ValueError(f"Unknown scheduler given: {self.model_config.training_hparams.scheduler.type}")
 
         optimizer_config = {
             "optimizer": optimizer,
             "lr_scheduler": {
                 "scheduler": scheduler,
-                "monitor": "metrics/val_loss",  # here write the metric to track for lr scheduling. E.g., metrics/val_loss or metrics/val_acc
+                "interval": self.model_config.training_hparams.scheduler.interval,  # 'epoch' or 'step'
+                "frequency": self.model_config.training_hparams.scheduler.frequency,  # 'epoch' or 'step'; how often to call the scheduler w.r.t. the interval
+                "monitor": f"metrics/{self.model_config.training_hparams.scheduler.monitored_metric}",  # metric to track for lr scheduling. E.g., metrics/val_loss or metrics/val_acc
             },
         }
 
