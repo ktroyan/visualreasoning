@@ -1,13 +1,80 @@
 import os
 import torch
 import numpy as np
+import hashlib
 import matplotlib.pyplot as plt
 from matplotlib.colors import ListedColormap
 import seaborn as sns
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 # Personal codebase dependencies
 from utility.logging import logger
+
+
+def check_train_test_contamination(train_dataloader, test_dataloader):
+    log_message = "Checking for data contamination between train and test sets...\n"
+
+    def hash_sample(sample):
+        """ Hash the raw bytes of a PyTorch tensor, later ensuring reliable comparison between samples. """
+        
+        # Ensure tensor is on CPU
+        if sample.is_cuda:
+            sample = sample.cpu()
+        
+        # Ensure contiguous memory layout (for tobytes())
+        tensor_contiguous = sample.contiguous()
+        
+        # Convert to NumPy array and get bytes
+        tensor_bytes = tensor_contiguous.numpy().tobytes()
+        
+        # Hash the bytes
+        return hashlib.md5(tensor_bytes).hexdigest()
+
+    def get_sample_hashes(dataloader: torch.utils.data.DataLoader) -> Tuple[set, set]:
+        x_hashes = set()
+        y_hashes = set()
+
+        for i, tuple_of_batches in enumerate(dataloader):  # for each tuple of batches in the dataloader
+            x_batch = tuple_of_batches[0]
+            y_batch = tuple_of_batches[1]
+            # task_id_batch = tuple_of_batches[2]
+            # y_true_size_batch = tuple_of_batches[3]
+
+            for j in range(x_batch.shape[0]): # for each sample in the batch
+                x_sample = x_batch[j]
+                y_sample = y_batch[j]
+
+                x_hash = hash_sample(x_sample)
+                y_hash = hash_sample(y_sample)
+                x_hashes.add(x_hash)
+                y_hashes.add(y_hash)
+
+        return x_hashes, y_hashes
+
+    # Get hashes for each dataset split
+    train_x_hashes, train_y_hashes = get_sample_hashes(train_dataloader)
+    test_x_hashes, test_y_hashes = get_sample_hashes(test_dataloader)
+
+    # Print the number of unique hashes in each dataset split
+    log_message += f"Number of unique x samples in train set: {len(train_x_hashes)}\n"
+    log_message += f"Number of unique y samples in train set: {len(train_y_hashes)}\n"
+    log_message += f"Number of unique x samples in test set: {len(test_x_hashes)}\n"
+    log_message += f"Number of unique y samples in test set: {len(test_y_hashes)}\n"
+
+    # Compare the train and test hashes to check for contamination
+    x_overlap = train_x_hashes.intersection(test_x_hashes)
+    y_overlap = train_y_hashes.intersection(test_y_hashes)
+
+    log_message += f"Number of x overlapping samples: {len(x_overlap)}\n"
+    log_message += f"Number of y overlapping samples: {len(y_overlap)}\n"
+
+    if len(x_overlap) == 0:
+        log_message += "Success! No data contamination between train and test sets (it seems)."
+        logger.info(log_message)
+    else:
+        log_message += f"Overlapping x samples: {x_overlap}\n"
+        log_message += "Warning! Data contamination detected between train and test sets."
+        logger.warning(log_message)
 
 
 def one_hot_encode(x: torch.Tensor, num_token_categories: int) -> torch.Tensor:

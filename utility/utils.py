@@ -5,7 +5,10 @@ import glob
 import datetime
 import torch
 from omegaconf import OmegaConf
+import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap
+import seaborn as sns
 import shutil
 from typing import Any, Dict, List, Tuple
 
@@ -300,4 +303,136 @@ def copy_folder(source_folder, destination_folder):
             shutil.copytree(source_path, destination_path, dirs_exist_ok=True)  
         else:
             # Copy files
-            shutil.copy2(source_path, destination_path)  
+            shutil.copy2(source_path, destination_path)
+
+
+def observe_input_output_images(dataloader, batch_id=0, n_samples=4, split="test"):
+    """ 
+    Observe the input and output images of a batch from the dataloader.
+    
+    TODO: It only works for REARC. Update it or create another function for CVR as well if needed.
+    """
+    
+    # Get the batch batch_id from the dataloader
+    for i, batch in enumerate(dataloader):
+        if i == batch_id:
+            break
+    
+    # Get the input and output images
+    inputs, outputs = batch[0], batch[1]
+
+    # Number of samples to observe
+    n_samples = min(n_samples, len(inputs))
+
+    logger.debug(f"Observing {n_samples} samples from {split} batch {batch_id}. See /figs folder.")
+
+    # Handle padding tokens. Replace the symbols for pad tokens with the background color
+    pad_token = 10
+    inputs[inputs == pad_token] = 0
+    outputs[outputs == pad_token] = 0
+
+    # Use the same color map as REARC
+    cmap = ListedColormap([
+        '#000', '#0074D9', '#FF4136', '#2ECC40', '#FFDC00',
+        '#AAAAAA', '#F012BE', '#FF851B', '#7FDBFF', '#870C25'
+    ])
+    
+    vmin = 0
+    vmax = 9
+
+    # Create a figure to plot the samples
+    fig, axs = plt.subplots(2, n_samples, figsize=(n_samples * 3, 6), dpi=150)
+
+    for i in range(n_samples):
+        input_img = inputs[i].cpu().numpy()
+        target_img = outputs[i].cpu().numpy()
+
+        for ax, img, title in zip([axs[0, i], axs[1, i]], 
+                                  [input_img, target_img], 
+                                  [f"Input {i} of batch {batch_id}", f"Output {i} of batch {batch_id}"]
+                                  ):
+            sns.heatmap(img, ax=ax, cbar=False, linewidths=0.05, linecolor='gray', square=True, cmap=cmap, vmin=vmin, vmax=vmax)
+            ax.set_title(title, fontsize=8)
+            ax.set_xticks([])
+            ax.set_yticks([])
+
+    fig.suptitle(f"{split} batch {batch_id}", fontsize=18)
+
+    plt.tight_layout()
+    # plt.show()
+
+    # Save the figure
+    os.makedirs("./figs", exist_ok=True)   # create the /figs folder if it does not exist
+    fig.savefig(f"./figs/{split}_image_input_output_batch{batch_id}.png")
+
+    plt.close(fig)
+
+
+def process_test_results(config, test_results, test_type="test", exp_logger=None):
+    """
+    Process the test results and log them.
+
+    FIXME: 
+    For this code to work currently, the batch size should yield a number of elements in each key of results so that it is a multiple of the number of tasks, otherwise the reshape will fail.
+    Also see how to handle the case where the results are for multiple test dataloaders
+    """
+
+    # Just handle some naming consistency issue with the generated data splits that are named "test_gen" instead of "gen_test"
+    if test_type == "gen_test":
+        test_set_path = f"{config.data.dataset_dir}/{'_'.join(reversed(test_type.split('_')))}"
+    else:
+        test_set_path = f"{config.data.dataset_dir}/{test_type}"
+
+    # Check if the folder config.data.dataset_dir contains test_set_path with .csv or .json extension and load it accordingly with pandas
+    if os.path.exists(f"{test_set_path}.csv"):
+        test_set = pd.read_csv(f"{test_set_path}.csv")
+    elif os.path.exists(f"{test_set_path}.json"):
+        test_set = pd.read_json(f"{test_set_path}.json")
+    else:
+        raise FileNotFoundError(f"Test set file not found in the dataset directory: {test_set_path}")
+
+    # Processing of the results and wrap-up of the parameters used
+    tasks_considered = test_set['task'].unique()
+
+    logger.debug(f"Post-processing results for tasks: {tasks_considered}")
+
+    global_avg = {metric_key: r.mean() for metric_key, r in test_results.items()}
+    per_task = {}
+    per_task_avg = {}
+
+    # nb_of_tasks = len(tasks_considered)
+
+    for metric_key, r in test_results.items():
+        logger.debug(f"Processing results for metric key: {metric_key}, and result with shape: {r.shape}")
+        k_result = r.reshape([len(tasks_considered), -1])
+        for i, task in enumerate(tasks_considered):
+            if 'task' not in task:
+                per_task[f'{metric_key}_task_{task}'] = k_result[i]
+                per_task_avg[f'{metric_key}_task_{task}'] = k_result[i].mean()
+                
+            else:
+                per_task[f'{metric_key}_{task}'] = k_result[i]
+                per_task_avg[f'{metric_key}_{task}'] = k_result[i].mean()
+    
+    logger.info(f"Global average results:\n{global_avg}")
+    
+    log_message = "Per task results for each batch/step:\n"
+    for key, value in per_task.items():
+        log_message += f"{key}: {value}\n"
+    logger.info(log_message)
+    
+    logger.info(f"Per task average results:\n{per_task_avg}")
+
+    if exp_logger is not None:
+        exp_logger.experiment.log({f"{test_type}_results_global_avg/{k}": v for k, v in global_avg.items()})
+        exp_logger.experiment.log({f"{test_type}_results_per_task_avg/{k}": v for k, v in per_task_avg.items()})
+        # exp_logger.experiment.log({f"{test_type}_results_per_task/{k}": v for k, v in per_task.items()})   # TODO: check how to to log it properly if needed
+        exp_logger.save()
+
+    processed_test_results = {
+        f"{test_type}_results_global_avg": global_avg,
+        f"{test_type}_results_per_task": per_task,
+        f"{test_type}_results_per_task_avg": per_task_avg
+    }
+
+    return processed_test_results
