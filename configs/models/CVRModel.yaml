@@ -22,10 +22,15 @@ model:
     enabled: true # TODO: we could add a field to specify the pooling technique for example
   training_hparams:
     optimizer: 'AdamW' # choices: Adam, AdamW, SGD
-    scheduler: 'CosineAnnealingLR' # choices: ReduceLROnPlateau, StepLR, CosineAnnealingLR
+    scheduler:
+      monitored_metric: 'val_loss' # choices: 'val_acc', 'val_loss'
+      type: 'CosineAnnealingLR' # choices: ReduceLROnPlateau, StepLR, CosineAnnealingLR
+      interval: 'epoch' # choices: 'step', 'epoch'
+      frequency: 1
     lr_warmup:
-      enabled: true
-      num_steps: 100.0
+      enabled: false
+      type: 'linear' # choices: 'linear'
+      num_steps: 200.0
     lr: 0.001
     wd: 0.001
   observe_preds:

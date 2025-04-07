@@ -8,7 +8,7 @@ model:
     enabled: true
     ape_type: '2dsincos'  # choices: 'learn', '2dsincos'; absolute positional encoding
   rpe:
-    enabled: false
+    enabled: true
     rpe_type: 'rope'  # choices: 'rope'; relative positional encoding
   use_cls_token: false # whether to use a cls token or not
   num_reg_tokens: 0
@@ -18,13 +18,18 @@ model:
   n_tasks: 400    # used for the task embedding (i.e., to inform the model through an embedding of which tasks to consider)
   task_embedding:
     enabled: false
-    task_embedding_dim: ${resolve_if_then_else:${model.task_embedding.enabled},128}
+    task_embedding_dim: ${resolve_if_then_else:${model.task_embedding.enabled},64}
   training_hparams:
     optimizer: 'AdamW' # choices: Adam, AdamW, SGD
-    scheduler: 'CosineAnnealingLR' # choices: ReduceLROnPlateau, StepLR, CosineAnnealingLR
+    scheduler:
+      monitored_metric: 'val_loss' # choices: 'val_acc', 'val_loss'
+      type: 'CosineAnnealingLR' # choices: ReduceLROnPlateau, StepLR, CosineAnnealingLR
+      interval: 'epoch' # choices: 'step', 'epoch'
+      frequency: 1
     lr_warmup:
       enabled: true
-      num_steps: 100.0
+      type: 'linear' # choices: 'linear'
+      num_steps: 200.0
     lr: 0.001
     wd: 0.001
   attention_map:

@@ -24,7 +24,9 @@ parameters:
           optimizer:
             values: ['Adam', 'SGD']
           scheduler:
-            values: ['CosineAnnealingLR', 'ReduceLROnPlateau', 'StepLR']
+            parameters:
+              type:
+                values: ['CosineAnnealingLR', 'ReduceLROnPlateau', 'StepLR']
           lr_warmup:
             parameters:
               enabled:
