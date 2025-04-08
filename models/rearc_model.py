@@ -8,6 +8,7 @@ import pytorch_lightning as pl
 from networks.backbones.resnet import get_resnet
 from networks.backbones.transformer import get_transformer_encoder
 from networks.backbones.vit import get_vit
+from networks.backbones.llada import get_llada_encoder
 from networks.heads.mlp import get_mlp_head
 from networks.heads.transformer import get_transformer_decoder
 from utility.utils import plot_lr_schedule
@@ -700,6 +701,16 @@ class REARCModel(VisReasModel):
                                    num_classes=self.num_classes,
                                    )
             self.backbone_input_embed_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
+
+        elif model_config.backbone == "llada":
+            self.encoder = get_llada_encoder(base_config=base_config,
+                                             model_config=model_config,
+                                             network_config=backbone_network_config,
+                                             image_size=self.image_size,
+                                             num_channels=self.num_channels,
+                                             num_classes=self.num_classes,
+                                             )
+            self.backbone_input_embed_dim = backbone_network_config.d_model  # embedding dimension backbone model
 
         elif model_config.backbone == "looped_vit":
             raise NotImplementedError("Looped ViT not implemented yet")

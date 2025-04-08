@@ -11,7 +11,7 @@ from utility.rearc.utils import one_hot_encode
 from utility.logging import logger
 
 
-__all__ = ['get_vit']
+__all__ = ['get_vit', 'PatchEmbed']
 
 
 class PatchEmbed(nn.Module):
