@@ -8,12 +8,26 @@ import torch.nn.functional as F
 from .data_base import DataModuleBase
 from utility.logging import logger
 
+def create_object_grid(input_grid, max_img_size, special_tokens_dic):
+    """
+    Create a grid of object ids for the given input grid.
+    The resulting grid is a 2D tensor of size (max_img_size, max_img_size) where each cell contains the object id for that cell.
+    """
+    # TODO: Implement based on ViTARC
+
+    raise NotImplementedError("The function create_object_grids is not implemented.")
 
 class REARCDataset(Dataset):
-    def __init__(self, json_dataset_path, image_size, transform=None):
+    def __init__(self, json_dataset_path, image_size, use_visual_tokens, use_grid_object_ids, transform=None):
         super().__init__()
 
-        # Get the samples paths from the dataset csv metadata file
+        # Get whether visual tokens should be used or not
+        self.use_visual_tokens = use_visual_tokens
+
+        # Get whether grid object ids should be used or not
+        self.use_grid_object_ids = use_grid_object_ids
+
+        # Get the samples paths from the json dataset split
         self.data_samples_df = pd.read_json(json_dataset_path)
 
         # Load the dictionary mapping the task name to the task id
@@ -24,20 +38,69 @@ class REARCDataset(Dataset):
         self.n_samples = len(self.data_samples_df)
         self.transform = transform
 
-        # Define the maximum image size to which all images will be padded
-        self.max_img_size = image_size + 1 + 1 # +1 to account for the border tokens (right, bottom) and +1 for the newline token at the end of each row and make the grid square
+        # Store special tokens
+        self.special_tokens = {}
 
-        self.PAD_TOKEN = 10
-        self.X_ENDGRID_TOKEN = 11
-        self.Y_ENDGRID_TOKEN = 12
-        self.XY_ENDGRID_TOKEN = 13
-        self.NL_GRID_TOKEN = 14
-        self.NUM_SPECIAL_TOKENS = 5 # PAD, X_END, Y_END, XY_END, NL_GRID_TOKEN
+        # Define padding token (always)
+        self.PAD_TOKEN = 10 # token id
+        self.special_tokens['PAD'] = self.PAD_TOKEN
+
+        # Define visual tokens (only if enabled)
+        if use_visual_tokens:
+            self.X_ENDGRID_TOKEN = 11   # token id
+            self.Y_ENDGRID_TOKEN = 12   # token id
+            self.XY_ENDGRID_TOKEN = 13  # token id
+            self.NL_GRID_TOKEN = 14     # token id
+            self.NUM_SPECIAL_TOKENS = 5 # PAD, X_END, Y_END, XY_END, NL_GRID_TOKEN
+
+            self.special_tokens['X_ENDGRID'] = self.X_ENDGRID_TOKEN
+            self.special_tokens['Y_ENDGRID'] = self.Y_ENDGRID_TOKEN
+            self.special_tokens['XY_ENDGRID'] = self.XY_ENDGRID_TOKEN
+            self.special_tokens['NL_GRID'] = self.NL_GRID_TOKEN
+            
+            # Define the maximum image size to which all images have to be padded
+            self.max_img_size = image_size + 1 + 1 # +1 to account for the border tokens (right, bottom) and +1 for the newline token at the end of each row and make the grid square
+
+            log_message = f"Input grid size (with special tokens): {self.max_img_size}x{self.max_img_size}"
+            log_message += f"\nSpecial data token IDs: PAD={self.PAD_TOKEN}, X_END={self.X_ENDGRID_TOKEN}, Y_END={self.Y_ENDGRID_TOKEN}, XY_END={self.XY_ENDGRID_TOKEN}, NL_GRID_TOKEN={self.NL_GRID_TOKEN}"
+
+        else:
+            self.NUM_SPECIAL_TOKENS = 1 # only the PAD token
+
+            # Define the maximum image size to which all images have to be padded
+            self.max_img_size = image_size
+            
+            log_message = f"Input grid size (with special tokens): {self.max_img_size}x{self.max_img_size}"
+            log_message += f"\nSpecial data token IDs: PAD={self.PAD_TOKEN}"
         
-        log_message = ""
-        log_message += f"Input grid size (with special tokens): {self.max_img_size}x{self.max_img_size}"
-        log_message += f"\nSpecial data token IDs: PAD={self.PAD_TOKEN}, X_END={self.X_ENDGRID_TOKEN}, Y_END={self.Y_ENDGRID_TOKEN}, XY_END={self.XY_ENDGRID_TOKEN}, NL_GRID_TOKEN={self.NL_GRID_TOKEN}"
         logger.info(log_message)
+
+    def add_noise(self, grid: torch.Tensor, noise_ratio: float = 0.5) -> torch.Tensor:
+        """
+        Add noise to the grid by randomizing `noise_ratio` of the values in a contiguous block (randomly placed).
+        The noise ratio is thus the expected maximum accuracy that a model can reach with such data.
+        """
+        h, w = grid.shape
+        num_elements = int(h * w * noise_ratio)
+
+        # Clone the original grid (to avoid in-place modification with possible side-effects)
+        grid = grid.clone()
+
+        # Randomly choose a start index for the contiguous block
+        max_start = h * w - num_elements
+        start_idx = torch.randint(0, max_start + 1, (1,)).item()
+        indices = torch.arange(start_idx, start_idx + num_elements)
+
+        # Number of different tokens that can appear in the grid
+        num_token_types = 10 + self.NUM_SPECIAL_TOKENS
+
+        # Add the noise
+        for idx in indices:
+            row = idx // w
+            col = idx % w
+            grid[row, col] = torch.randint(0, num_token_types, (1,)).item()
+
+        return grid
 
 
     def pad_with_2d_visual_tokens(self, grid: torch.Tensor) -> torch.Tensor:
@@ -69,8 +132,8 @@ class REARCDataset(Dataset):
 
         grid_padded = F.pad(
             bordered_grid, 
-            (0, pad_right,  # pad width dim (left, right)
-             0, pad_bottom), # pad height dim (top, bottom)
+            (0, pad_right,      # pad width dim (left, right)
+             0, pad_bottom),    # pad height dim (top, bottom)
             mode='constant', 
             value=self.PAD_TOKEN    # padding value
         )   # [self.max_img_size, self.max_img_size-1]
@@ -82,6 +145,33 @@ class REARCDataset(Dataset):
              0, 0), # pad height dim (top, bottom)
             mode='constant', 
             value=self.NL_GRID_TOKEN    # padding value
+        )   # [self.max_img_size, self.max_img_size]
+
+        assert grid_padded.shape == (self.max_img_size, self.max_img_size), f"Grid shape after padding {grid_padded.shape} does not match expected shape ({self.max_img_size}, {self.max_img_size})."
+        
+        return grid_padded
+    
+    def pad_2d(self, grid: torch.Tensor) -> torch.Tensor:
+        """ 
+        Pad the grid (to a fixed size) with pad tokens.
+        Essentially:
+        - add pad tokens to the right and bottom of the grid to reach the max grid size.
+        """
+        
+        current_h, current_w = grid.shape
+        
+        pad_right = self.max_img_size - current_w
+        pad_bottom = self.max_img_size - current_h
+        
+        if pad_right < 0 or pad_bottom < 0:
+             raise ValueError(f"Grid ({current_h}x{current_w}) exceeds target image_size ({self.max_img_size}x{self.max_img_size}). Increase image_size.")
+        
+        grid_padded = F.pad(
+            grid, 
+            (0, pad_right,      # pad width dim (left, right)
+             0, pad_bottom),    # pad height dim (top, bottom)
+            mode='constant', 
+            value=self.PAD_TOKEN    # padding value
         )   # [self.max_img_size, self.max_img_size]
 
         assert grid_padded.shape == (self.max_img_size, self.max_img_size), f"Grid shape after padding {grid_padded.shape} does not match expected shape ({self.max_img_size}, {self.max_img_size})."
@@ -106,7 +196,7 @@ class REARCDataset(Dataset):
         x = torch.tensor(x, dtype=torch.long)
 
         # Perform the given transformation on the input image
-        # TODO: Should the potential transform be applied before the border and pad tokens added or after?
+        # TODO: Should the potential transform be applied before the border and pad tokens added or after? Usually before?
         if self.transform is not None:
             x = self.transform(x)
 
@@ -117,16 +207,34 @@ class REARCDataset(Dataset):
         y_true_size = y.shape
         y_true_size = torch.tensor(y_true_size, dtype=torch.long)
 
-        # Add special visual tokens and pad the input tensor to the desired fixed size
-        x = self.pad_with_2d_visual_tokens(x)
+        if self.use_visual_tokens:
+            # Use special visual tokens and pad the input tensor to the desired fixed size
+            x = self.pad_with_2d_visual_tokens(x)
 
-        # Add special visual tokens and pad the output tensor to the desired fixed size
-        y = self.pad_with_2d_visual_tokens(y)
+            # Use special visual tokens and pad the output tensor to the desired fixed size
+            y = self.pad_with_2d_visual_tokens(y)
+        
+        else:
+            # Pad the input tensor to the desired fixed size
+            x = self.pad_2d(x)
+
+            # Pad the output tensor to the desired fixed size
+            y = self.pad_2d(y)
 
         assert x.shape == (self.max_img_size, self.max_img_size), f"Input grid shape {x.shape} does not match expected shape ({self.max_img_size}, {self.max_img_size})."
         assert y.shape == (self.max_img_size, self.max_img_size), f"Output grid shape {y.shape} does not match expected shape ({self.max_img_size}, {self.max_img_size})."
 
+        # Create a grid containing object ids for the input grid x
+        # TODO: Should they be created with the original input grid or the padded one (possibly with special visual tokens too) ?
+        #       I guess the latter.
+        if self.use_grid_object_ids:
+            x_grid_object_ids = create_object_grid(x, self.max_img_size, self.special_tokens)
+
+        # Add noise to the target grid y
+        # y = self.add_noise(y, noise_ratio=0.5)  # TODO: Remove after we have checked that the code is correct
+
         return x, y, sample_task_id, y_true_size
+        return x, y, sample_task_id, y_true_size, x_grid_object_ids, self.special_tokens
 
 
 def get_max_grid_size(df, columns=["input", "output"]):
@@ -166,7 +274,7 @@ def get_max_img_size_across_dataset_splits(data_splits_paths):
 
 class REARCDataModule(DataModuleBase):
 
-    def __init__(self, data_config, **kwargs):
+    def __init__(self, data_config, model_config, **kwargs):
 
         super().__init__(data_config.num_workers,
                          data_config.shuffle_train_dl,
@@ -189,14 +297,27 @@ class REARCDataModule(DataModuleBase):
             gen_test_set_path = data_config.dataset_dir + '/test_gen.json'
             data_splits_paths.append(gen_test_set_path)
 
-        # Max. image size (without considering the special visual tokens)
+        # Max. image size (without considering any sort of special tokens such as padding or other visual tokens)
         if self.image_size is None:
             self.image_size = get_max_img_size_across_dataset_splits(data_splits_paths)
             if self.image_size == 0:
                 raise ValueError("The max grid image size across the dataset splits is 0. Please check the dataset.")
-            logger.info(f"Using the max grid image size of {self.image_size} that was inferred from the dataset splits.")
+            logger.info(f"Using a max grid image size of {self.image_size} that was inferred from the dataset splits.")
         else:
-            logger.info(f"Using the set max grid image size of {self.image_size} for padding.")
+            logger.info(f"Using a set (through config) max grid image size of {self.image_size}.")
+
+        # Get whether visual tokens should be used or not
+        if model_config.visual_tokens.enabled:
+            use_visual_tokens = True
+            logger.info(f"Visual Tokens enabled. Using special visual tokens for the input and output grids.")
+        else:
+            use_visual_tokens = False
+
+        if model_config.ope.enabled:
+            use_grid_object_ids = True
+            logger.info(f"OPE enabled. We will create grid object ids for the input grid.")
+        else:
+            use_grid_object_ids = False
 
         # Data transformation
         if data_config.transform.enabled:
@@ -205,12 +326,12 @@ class REARCDataModule(DataModuleBase):
             transform = None
 
         # Create the torch Dataset objects that will then be used to create the dataloaders
-        self.train_set = REARCDataset(train_set_path, self.image_size, transform=transform)
-        self.val_set = REARCDataset(val_set_path, self.image_size, transform=transform)
-        self.test_set = REARCDataset(test_set_path, self.image_size, transform=transform)
+        self.train_set = REARCDataset(train_set_path, self.image_size, use_visual_tokens, use_grid_object_ids, transform=transform)
+        self.val_set = REARCDataset(val_set_path, self.image_size, use_visual_tokens, use_grid_object_ids, transform=transform)
+        self.test_set = REARCDataset(test_set_path, self.image_size, use_visual_tokens, use_grid_object_ids, transform=transform)
 
         if data_config.use_gen_test_set:
-            self.gen_test_set = REARCDataset(gen_test_set_path, self.image_size, transform=transform)
+            self.gen_test_set = REARCDataset(gen_test_set_path, self.image_size, use_visual_tokens, use_grid_object_ids, transform=transform)
 
     def _transforms(self):
         return None
