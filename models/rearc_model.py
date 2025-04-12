@@ -10,6 +10,8 @@ from networks.backbones.transformer import get_transformer_encoder
 from networks.backbones.vit import get_vit
 from networks.heads.mlp import get_mlp_head
 from networks.heads.transformer import get_transformer_decoder
+from networks.heads.xtransformer import get_xtransformer_decoder
+from networks.heads.mytransformer import get_mytransformer_decoder
 from utility.utils import plot_lr_schedule
 from utility.rearc.utils import plot_image_predictions, plot_attention_scores
 from utility.logging import logger
@@ -162,14 +164,14 @@ class VisReasModel(pl.LightningModule):
 
         # Accuracy per symbol (with padding) (i.e., the accuracy of the model in predicting the correct symbol for each pixel of the grid considering the whole max. padded grid, thus also the padding tokens)
         # acc_symbol_with_pad = (torch.sum(y == preds).float() / (y.numel())).unsqueeze(0)    # same as line below
-        acc_symbol_with_pad = (y == preds).float().mean().unsqueeze(0)
+        acc_symbol_with_pad = (preds == y).float().mean().unsqueeze(0)
 
         # Accuracy per symbol (without padding) (i.e., the accuracy of the model in predicting the correct symbol for each pixel of the grid considering only the target grid, that is, without considering the padding tokens)
         acc_symbol_no_pad = (((preds == y) * mask).sum().float() / mask.sum()).unsqueeze(0)  # only consider non-padding elements
 
         # Grid accuracy (only count as correct if the entire padded grid is correct)
         # grid_acc = (torch.sum(torch.all(y == preds, dim=1)).float() / B).unsqueeze(0)    # same as line below
-        acc_grid_with_pad = torch.all(y == preds, dim=1).float().mean().unsqueeze(0)
+        acc_grid_with_pad = torch.all(preds == y, dim=1).float().mean().unsqueeze(0)
 
         # Grid accuracy (only count as correct if entire non-padding grid is correct)
         # acc_grid_no_pad = (torch.sum(torch.all((preds == y) | ~mask, dim=1)).float() / B).unsqueeze(0)    # same as line below
@@ -447,14 +449,14 @@ class VisReasModel(pl.LightningModule):
 
         # Accuracy per symbol (with padding) (i.e., the accuracy of the model in predicting the correct symbol for each pixel of the grid considering the whole max. padded grid, thus also the padding tokens)
         # acc_symbol_with_pad = (torch.sum(y == preds).float() / (y.numel())).unsqueeze(0)    # same as line below
-        acc_symbol_with_pad = (y == preds).float().mean().unsqueeze(0)
+        acc_symbol_with_pad = (preds == y).float().mean().unsqueeze(0)
 
         # Accuracy per symbol (without padding) (i.e., the accuracy of the model in predicting the correct symbol for each pixel of the grid considering only the target grid, that is, without considering the padding tokens)
         acc_symbol_no_pad = (((preds == y) * mask).sum().float() / mask.sum()).unsqueeze(0)  # only consider non-padding elements
 
         # Grid accuracy with pad (only count as correct if the entire padded grid is correct)
         # grid_acc = (torch.sum(torch.all(y == preds, dim=1)).float() / B).unsqueeze(0)    # same as line below
-        acc_grid_with_pad = torch.all(y == preds, dim=1).float().mean().unsqueeze(0)
+        acc_grid_with_pad = torch.all(preds == y, dim=1).float().mean().unsqueeze(0)
 
         # Grid accuracy without pad (only count as correct if entire non-padding grid is correct)
         # acc_grid_no_pad = (torch.sum(torch.all((preds == y) | ~mask, dim=1)).float() / B).unsqueeze(0)    # same as line below
@@ -554,7 +556,6 @@ class VisReasModel(pl.LightningModule):
                                           images=[fig_path]
                                           )
 
-
     def on_train_end(self):
         """
         This method is called at the end of the training phase.
@@ -590,6 +591,7 @@ class VisReasModel(pl.LightningModule):
         self.lr_values.append(optimizer.param_groups[0]["lr"])
         
         # This is the content of the original optimizer_step method from PyTorch Lightning
+        # TODO: Get warning due to this line? Even though it is the original PTL code?
         optimizer.step(closure=optimizer_closure)   # update params
 
     def configure_optimizers(self):
@@ -648,10 +650,14 @@ class REARCModel(VisReasModel):
         # Save the hyperparameters to self.hparams so that they can be stored in the model checkpoint when using torch.save()
         self.save_hyperparameters()
 
-        # Update the max image size to take into account the border and newline tokens
-        self.image_size = image_size + 1 + 1 # +1 for the border tokens (bottom and right) and +1 for the newline token (last column of the grid)
-
-        logger.info(f"Image grid size with all the special visual tokens considered: {self.image_size}x{self.image_size}")
+        # Update the max image size to take into account the visual tokens (i.e., border and newline tokens)
+        if model_config.visual_tokens.enabled:
+            self.image_size = image_size + 1 + 1 # +1 for the border tokens (bottom and right) and +1 for the newline token (last column of the grid)
+            logger.info(f"Image grid size (with all the special visual tokens considered): {self.image_size}x{self.image_size}")
+        else:
+            self.image_size = image_size
+            logger.info(f"Image grid size: {self.image_size}x{self.image_size}")
+        
 
         super().__init__(base_config=base_config, 
                          model_config=model_config, 
@@ -665,7 +671,11 @@ class REARCModel(VisReasModel):
         self.num_channels = 1
 
         self.num_data_tokens = 10   # symbols in the grid (0-9)
-        self.num_special_tokens = 5  # PAD_TOKEN (10), X_ENDGRID_TOKEN (11), Y_ENDGRID_TOKEN (12), XY_ENDGRID_TOKEN (13), NL_GRID_TOKEN (14)
+
+        if self.model_config.visual_tokens.enabled:
+            self.num_special_tokens = 5     # PAD_TOKEN (10), X_ENDGRID_TOKEN (11), Y_ENDGRID_TOKEN (12), XY_ENDGRID_TOKEN (13), NL_GRID_TOKEN (14)
+        else:
+            self.num_special_tokens = 1     # PAD_TOKEN (10)
 
         self.num_classes = self.num_data_tokens + self.num_special_tokens   # number of token categories that can be predicted by the _whole_ model; 10 for symbols + 1 for each special token that could be predicted
 
@@ -734,7 +744,21 @@ class REARCModel(VisReasModel):
                                                    num_classes=self.num_classes,
                                                    seq_len=self.seq_len,
                                                    )
-
+            
+        elif model_config.head == "mytransformer":  
+            self.decoder = get_mytransformer_decoder(model_config=self.model_config,
+                                                     network_config=head_network_config,
+                                                     num_classes=self.num_classes,
+                                                     seq_len=self.seq_len,
+                                                     )
+              
+        elif model_config.head == "xtransformer":
+            self.decoder = get_xtransformer_decoder(model_config=self.model_config,
+                                                    network_config=head_network_config,
+                                                    num_classes=self.num_classes,
+                                                    seq_len=self.seq_len
+                                                    )
+        
 
         elif model_config.head == "mlp":
             self.decoder = get_mlp_head(network_config=head_network_config, 
@@ -800,14 +824,14 @@ class REARCModel(VisReasModel):
             x_encoded = torch.cat([x_encoded, task_embedding], 2)  # [B, seq_len, backbone_input_embed_dim + task_embedding_dim]
 
         # Decode the encoded input sequence
-        if self.model_config.head in ["transformer"]:
+        if self.model_config.head in ["transformer", "xtransformer", "mytransformer"]:
             # Transformer Decoder
 
             if self.head_input_dim != self.head_input_embed_dim:
                 # Map the encoded input sequence to the same embedding dimension as the decoder's
                 x_encoded = self.enc_to_dec_proj(x_encoded)  # [B, seq_len, head_input_embed_dim]
 
-            logits = self.decoder(y, x_encoded)
+            logits = self.decoder(y, x_encoded) # [B, seq_len, num_classes]
 
         elif self.model_config.head in ["mlp"]:
             # MLP Decoder/Head
