@@ -3,6 +3,7 @@ import torch.nn as nn
 
 # Personal codebase dependencies
 from utility.logging import logger
+from utility.utils import timer_decorator
 
 
 __all__ = ['get_transformer_decoder']
@@ -11,8 +12,11 @@ __all__ = ['get_transformer_decoder']
 def create_absolute_positional_encoding(ape_type: str, ape_length: int, embed_dim: int) -> nn.Parameter:
     """ 
     Create and return an APE (absolute positional embedding) to be added to the network input in the forward pass.
-    TODO: What PE to consider for decoding?
-    NOTE: The BOS token is considered for the APE, and the current token to predict is not, hence the APE length is seq_len.
+    TODO: What PE to consider for the decoder?
+    TODO: Check if the PE length is correct with a BOS token used. 
+          How to handle the special control token BOS, since we use PE for it?
+          In 2dsincos, prepend a zero PE (for BOS) and thus we need h as (ape_length-1)**0.5 and w as (ape_length-1)**0.5 ?
+          Or ape_length is simply seq_len as y is shifted right ?
     """
 
     if ape_type == 'learn':    # learned positional encoding
@@ -20,7 +24,7 @@ def create_absolute_positional_encoding(ape_type: str, ape_length: int, embed_di
         pos_embed.requires_grad = True    # NOTE: set to True for the PE to be learned
 
     elif ape_type == '2dsincos':    # 2D sin-cos fixed positional embedding
-        h, w = ape_length**0.5, ape_length**0.5
+        h, w = ape_length**0.5, ape_length**0.5 # assuming a square grid image
         grid_w = torch.arange(w, dtype=torch.float32)
         grid_h = torch.arange(h, dtype=torch.float32)
         grid_w, grid_h = torch.meshgrid(grid_w, grid_h)
@@ -73,6 +77,7 @@ class TransformerDecoder(nn.TransformerDecoder):
         log_message = "Special decoding tokens for Transformer decoder: "
         self.BOS_TOKEN = 15  # beginning of sequence token
         self.vocab_size = self.num_classes + 1  # number of different tokens that we consider; +1 for the BOS token
+        self.pos_length = self.seq_len  # the actual number of positions in the sequence when using the BOS token
         log_message += f"BOS={self.BOS_TOKEN}"
         
         self.use_EOS_for_decoding = False  # TODO: See why error when True; whether to use the EOS token for decoding or not
@@ -97,7 +102,7 @@ class TransformerDecoder(nn.TransformerDecoder):
 
         ## Absolute positional encoding
         if model_config.ape.enabled:
-            self.ape = create_absolute_positional_encoding(model_config.ape.ape_type, seq_len, network_config.embed_dim)
+            self.ape = create_absolute_positional_encoding(model_config.ape.ape_type, self.pos_length, network_config.embed_dim)
 
 
         ## Output layer to go from a decoder output embedding to logits; we use self.vocab_size as the EOS token could be predicted
