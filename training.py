@@ -18,12 +18,12 @@ from utility.logging import logger
 
 torch.backends.cudnn.benchmark = False
 torch.backends.cudnn.deterministic = False
-torch.set_float32_matmul_precision('medium')
+torch.set_float32_matmul_precision('medium')    # 'high'
 # os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
 # os.environ['TORCH_USE_CUDA_DSA'] = 'true'
 
 # os.environ['TORCH_LOGS'] = "graph_breaks"
-os.environ['TORCH_LOGS'] = "recompiles"
+# os.environ['TORCH_LOGS'] = "recompiles"
 # os.environ['TORCH_LOGS'] = "recompiles,dynamic"
 
 
@@ -102,6 +102,8 @@ class MetricsCallback(Callback):
 
         return all_local_plotting_metrics
 
+    def on_train_start(self, trainer, pl_model_module):
+        logger.info("Training started!")
 
     def on_train_epoch_end(self, trainer, pl_model_module):
         """ 
