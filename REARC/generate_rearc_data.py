@@ -39,12 +39,15 @@ if __name__ == '__main__':
 
     # Parameters
     base_data_dir = './generated_data'
-    seed = 2025
+    seed = 1230
     n_tasks = 10    # max is 400; tasks are randomly selected unless specific_tasks is provided
     n_examples = 102000 # for training + validation + test
     difficulties_lb = [0.0, 0.0, 0.7]
     difficulties_ub = [0.4, 0.7, 1.0]
-    specific_tasks = []
+    
+    # difficulties_lb = [0.0]
+    # difficulties_ub = [1.0]
+    # specific_tasks = ['2bcee788', '5521c0d9', 'e9afcf9a', '6d0160f0', 'd9f24cd1', '4be741c5', 'f15e1fac', 'f8b3ba0a', 'd406998b', '5daaa586']
 
     assert len(difficulties_lb) == len(difficulties_ub), "The number of lower bounds and upper bounds of the level of difficulty must be the same as they define a range."
 
