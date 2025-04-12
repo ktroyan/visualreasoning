@@ -8,7 +8,7 @@ import pytorch_lightning as pl
 from networks.backbones.resnet import get_resnet
 from networks.backbones.transformer import get_transformer_encoder
 from networks.backbones.vit import get_vit
-from networks.backbones.llada import get_llada_encoder
+from networks.backbones.llada import get_llada_encoder, LLaDAModel
 from networks.heads.mlp import get_mlp_head
 from networks.heads.transformer import get_transformer_decoder
 from utility.utils import plot_lr_schedule
@@ -123,25 +123,35 @@ class VisReasModel(pl.LightningModule):
         # Forward pass of the model
         if self.model_config.task_embedding.enabled:
             # Forward pass (with the task embeddings)
-            y_hat = self(x, y, samples_task_id)    # computed logits
+            y_hat, prediction_mask = self(x, y, samples_task_id)    # computed logits
         else:
             # Forward pass
-            y_hat = self(x, y)   # computed logits
+            y_hat, prediction_mask = self(x, y)   # computed logits
 
-        # Permute the dimensions of y_hat to be [B, num_classes, seq_len] instead of [B, seq_len, num_classes] to match PyTorch's cross_entropy function format
-        y_hat = y_hat.permute(0, 2, 1)  # [B, num_classes, seq_len] <-- [B, seq_len, num_classes]
+        if len(y_hat.shape) > 2:
+            # Permute the dimensions of y_hat to be [B, num_classes, seq_len] instead of [B, seq_len, num_classes] to match PyTorch's cross_entropy function format
+            y_hat = y_hat.permute(0, 2, 1)  # [B, num_classes, seq_len] <-- [B, seq_len, num_classes]
 
         # Create the multiplicative mask based on the true sizes of y to only compute the metrics w.r.t. the actual tokens to predict in the target
         true_size_mask = self.create_true_size_mask(B, H, W, y_true_size)
 
-        return x, y_hat, y, true_size_mask
+        return x, y_hat, y, true_size_mask, prediction_mask
 
     def step(self, batch, batch_idx):
 
-        x, y_hat, y, mask = self.shared_step(batch)    # [B, num_classes, seq_len], [B, seq_len], [B, seq_len]
+        x, y_hat, y, true_size_mask, prediction_mask = self.shared_step(batch)    # [B, num_classes, seq_len], [B, seq_len], [B, seq_len]
+        y_orig =  y.clone()  # store the original inputs and targets for logging
+        preds_orig = torch.argmax(y_hat.clone(), dim=1)
 
-        B, H, W = x.shape
-        B, seq_len = y.shape
+        if prediction_mask is not None: # TODO; Set to false for debugging
+            # LLaDA is trained in an autoregressive manner, so we have only some tokens of the target masked
+            # we ignore all tokens that have not been masked, as the masked ones must only be copied
+
+            # prediction_mask == 1 means that the token was masked and predicted while the other tokens were given
+            y = y[prediction_mask]  # [#masked_tokens]
+            y_hat = y_hat.permute(0, 2, 1)[prediction_mask]  # permute to [B, seq_len, num_classes] then mask => [#masked_tokens, num_classes]
+            true_size_mask = true_size_mask[prediction_mask]  # [#masked_tokens]
+
 
         # probabilities = F.softmax(y_hat, dim=1)  # compute the probabilities (normalized logits) of the model for each sample of the batch
 
@@ -150,31 +160,47 @@ class VisReasModel(pl.LightningModule):
         # Also, convert the non-data tokens to background tokens (i.e., 0) when computing the loss and metrics, no?
         # Also, consider weighting the tokens (e.g., there are many more bakground tokens) differently when computing the loss for grid with padding.
 
-        # Loss per symbol (with all sorts of padding considered): compute the loss per token/symbol
-        per_sample_loss = F.cross_entropy(y_hat, y.long(), reduction='none').float()  # [B, seq_len]
-        loss_symbol_with_pad = (per_sample_loss.mean()).unsqueeze(0)
+        # Determine if y_hat is logits or class predictions
+        if y_hat.dtype.is_floating_point:
+            # Loss per symbol (with all sorts of padding considered): compute the loss per token/symbol
+            per_sample_loss = F.cross_entropy(y_hat, y.long(), reduction='none').float()  # [B, seq_len]
+            loss_symbol_with_pad = (per_sample_loss.mean()).unsqueeze(0)
 
-        # Loss per symbol (without padding): compute the loss per token/symbol and then apply the mask to ignore the padding tokens
-        per_sample_loss = F.cross_entropy(y_hat, y.long(), reduction='none').float()  # [B, seq_len]
-        loss_symbol_no_pad = ((per_sample_loss * mask).sum() / mask.sum()).unsqueeze(0)  # only consider non-padding elements
+            # Loss per symbol (without padding): compute the loss per token/symbol and then apply the mask to ignore the padding tokens
+            per_sample_loss = F.cross_entropy(y_hat, y.long(), reduction='none').float()  # [B, seq_len]
+            loss_symbol_no_pad = ((per_sample_loss * true_size_mask).sum() / true_size_mask.sum()).unsqueeze(0)  # only consider non-padding elements
+            # Compute predictions
+            preds = torch.argmax(y_hat, dim=1)  # [B, seq_len]; predictions for each token/symbol of the model for each sample of the batch
 
-        # Compute predictions
-        preds = torch.argmax(y_hat, dim=1)  # [B, seq_len]; predictions for each token/symbol of the model for each sample of the batch
+        else:
+            # Already predicted class indices: cannot compute loss
+            per_sample_loss = None
+            loss_symbol_with_pad = torch.tensor([0.0], device=y_hat.device)
+            loss_symbol_no_pad = torch.tensor([0.0], device=y_hat.device)
+            preds = y_hat
+
+
 
         # Accuracy per symbol (with padding) (i.e., the accuracy of the model in predicting the correct symbol for each pixel of the grid considering the whole max. padded grid, thus also the padding tokens)
         # acc_symbol_with_pad = (torch.sum(y == preds).float() / (y.numel())).unsqueeze(0)    # same as line below
         acc_symbol_with_pad = (y == preds).float().mean().unsqueeze(0)
 
         # Accuracy per symbol (without padding) (i.e., the accuracy of the model in predicting the correct symbol for each pixel of the grid considering only the target grid, that is, without considering the padding tokens)
-        acc_symbol_no_pad = (((preds == y) * mask).sum().float() / mask.sum()).unsqueeze(0)  # only consider non-padding elements
+        acc_symbol_no_pad = (((preds == y) * true_size_mask).sum().float() / true_size_mask.sum()).unsqueeze(0)  # only consider non-padding elements
 
-        # Grid accuracy (only count as correct if the entire padded grid is correct)
-        # grid_acc = (torch.sum(torch.all(y == preds, dim=1)).float() / B).unsqueeze(0)    # same as line below
-        acc_grid_with_pad = torch.all(y == preds, dim=1).float().mean().unsqueeze(0)
+        if prediction_mask is None:
+            # Grid accuracy (only count as correct if the entire padded grid is correct)
+            # grid_acc = (torch.sum(torch.all(y == preds, dim=1)).float() / B).unsqueeze(0)    # same as line below
+            acc_grid_with_pad = torch.all(y == preds, dim=1).float().mean().unsqueeze(0)
 
-        # Grid accuracy (only count as correct if entire non-padding grid is correct)
-        # acc_grid_no_pad = (torch.sum(torch.all((preds == y) | ~mask, dim=1)).float() / B).unsqueeze(0)    # same as line below
-        acc_grid_no_pad = torch.all((preds == y) | ~mask, dim=1).float().mean().unsqueeze(0)   # | ~mask ensures automatically count as correct the padding tokens
+            # Grid accuracy (only count as correct if entire non-padding grid is correct)
+            # acc_grid_no_pad = (torch.sum(torch.all((preds == y) | ~mask, dim=1)).float() / B).unsqueeze(0)    # same as line below
+            acc_grid_no_pad = torch.all((preds == y) | ~true_size_mask, dim=1).float().mean().unsqueeze(0)   # | ~mask ensures automatically count as correct the padding tokens
+
+        else:
+            # Does not make that much sense when using a random masking...
+            acc_grid_with_pad = torch.tensor([0.0], device=acc_symbol_with_pad.device)
+            acc_grid_no_pad = torch.tensor([0.0], device=acc_symbol_with_pad.device)
 
         logs = {'loss': loss_symbol_with_pad, 
                 'acc': acc_symbol_with_pad, 
@@ -186,7 +212,7 @@ class VisReasModel(pl.LightningModule):
         
         loss = loss_symbol_with_pad
 
-        return loss, logs, preds, y
+        return loss, logs, preds_orig, y_orig
 
     def training_step(self, batch, batch_idx):
         """
@@ -427,7 +453,9 @@ class VisReasModel(pl.LightningModule):
 
         x, y, samples_task_id, y_true_size = batch
 
-        x, y_hat, y, mask = self.shared_step(batch)
+        x, y_hat, y, mask, prediction_mask = self.shared_step(batch)
+
+        assert prediction_mask is None, "Prediction mask should be None during testing as we generate all the tokens."
 
         B, H, W = x.shape
         B, seq_len = y.shape
@@ -798,22 +826,55 @@ class REARCModel(VisReasModel):
 
 
     def forward(self, x, y, samples_task_id=None):
-        B, H, W = x.shape
-        B, seq_len = y.shape
 
+        if isinstance(self.encoder, LLaDAModel):
+            # LLaDA expects a token sequence, not an image. We flatten already here as this makes it easier to mask
+            # the input sequence
+            x = x.flatten(1)
+            assert x.shape == y.shape, "Input and target sequences must have the same shape for LLaDA"
+
+            # TODO: Also implement an attention mask to ignore the padding tokens (10) in the input sequence
+
+            if self.training:
+                # training -> mask the input sequence before processing
+
+                # we concatenate x and y (used as target) and mask some of the y tokens (used as input)
+                y_masked, mask = self.encoder.mask_input_sequence(y)
+                xy = torch.cat([x, y], dim=1)
+                xy_masked = torch.cat([x, y_masked], dim=1)
+
+                # Optional, ignore padding and NL Token
+                # attention_mask = self.encoder.get_attention_mask(xy_masked)
+
+                logits = self.forward_sample(samples_task_id, x=xy_masked, y=xy) # TODO: Debugging here, was xy_masked, xy
+
+            else:
+                # inference -> LLaDA Diffusion Process
+                logits = self.encoder.generate_masked_sequence(self.forward_sample, samples_task_id, x, y)
+                mask = None
+
+            # The logits are both, input and prediction. Lets only keep the prediction logits.
+            logits = logits[:, x.shape[1]:]
+
+        else:
+            logits = self.forward_sample(samples_task_id, x, y)
+            mask = None
+
+        return logits, mask # TODO: use mask in the loss to only calculate the loss and metrics for the tokens that are masked (other tokens are given as input to the model)
+
+    def forward_sample(self, samples_task_id, x, y):
         # Encode the input sequence
-        x_encoded = self.encoder(x)  # [B, seq_len, backbone_input_embed_dim]; NOTE: the extra tokens will have been truncated so the encoded sequence will also have a dim seq_len 
-        
+        x_encoded = self.encoder(x)  # [B, seq_len, backbone_input_embed_dim]; NOTE: the extra tokens will have been truncated so the encoded sequence will also have a dim seq_len
+
         # Handle the task embedding if needed
         if samples_task_id is not None:
-            task_embedding = self.task_embedding(samples_task_id)   # [B, task_embedding_dim]
-            task_embedding = task_embedding.unsqueeze(1).repeat(1, x_encoded.shape[1], 1) # [B, seq_len, task_embedding_dim]
-            x_encoded = torch.cat([x_encoded, task_embedding], 2)  # [B, seq_len, backbone_input_embed_dim + task_embedding_dim]
+            task_embedding = self.task_embedding(samples_task_id)  # [B, task_embedding_dim]
+            task_embedding = task_embedding.unsqueeze(1).repeat(1, x_encoded.shape[1], 1)  # [B, seq_len, task_embedding_dim]
+            x_encoded = torch.cat([x_encoded, task_embedding],2)  # [B, seq_len, backbone_input_embed_dim + task_embedding_dim]
 
         # Decode the encoded input sequence
         if self.model_config.head in ["transformer"]:
             # Transformer Decoder
-
             if self.head_input_dim != self.head_input_embed_dim:
                 # Map the encoded input sequence to the same embedding dimension as the decoder's
                 x_encoded = self.enc_to_dec_proj(x_encoded)  # [B, seq_len, head_input_embed_dim]
@@ -822,10 +883,10 @@ class REARCModel(VisReasModel):
 
         elif self.model_config.head in ["mlp"]:
             # MLP Decoder/Head
-    
+
             # Forward pass through the model head
-            # We can treat each pixel/token independently as part of a sequence, so we can directly apply a Linear layer 
+            # We can treat each pixel/token independently as part of a sequence, so we can directly apply a Linear layer
             # where the last dimension is the features dimension, instead of reshaping the tensor
-            logits = self.decoder(x_encoded)   # [B, seq_len, num_classes] <-- [B, seq_len=H*W, C=self.network_config.embed_dim]
+            logits = self.decoder(x_encoded)  # [B, seq_len, num_classes] <-- [B, seq_len=H*W, C=self.network_config.embed_dim]
 
         return logits

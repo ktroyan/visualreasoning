@@ -20,6 +20,7 @@ from typing import (
 )
 from typing import List, Optional, Tuple, Union
 
+import numpy as np
 import torch
 import torch.backends.cuda
 import torch.nn as nn
@@ -1463,7 +1464,7 @@ class LLaDAModel(nn.Module):
         self.num_channels = num_channels
         self.num_classes = num_classes
         network_config.effective_n_kv_heads = self.effective_n_kv_heads(network_config)
-        self.config = config = network_config
+        self.config = network_config
         self.__cache = BufferCache()
 
         # Validate config.
@@ -1498,13 +1499,15 @@ class LLaDAModel(nn.Module):
         if base_config.data_env == "REARC":
             # TODO: @Klim: Please check these values
             # TODO: This is pretty ugly and should probably be stored in the dataset config, not set here
-            grid_tokens = 4 # X_END, Y_END, XY_END, NL_GRID_TOKEN
-            special_tokens = 4 # Pad, BOS, EOS, MASK
-            self.config.vocab_size = num_classes + grid_tokens + special_tokens
+            special_tokens = 1 #  MASK
+            self.config.vocab_size = num_classes + special_tokens
             self.config.pad_token_id = 10
-            self.config.mask_token_id = self.config.vocab_size - 3
-            self.config.eos_token_id = self.config.vocab_size - 1
+            self.config.nlgrid_token_id = 14
+            self.config.mask_token_id = self.config.vocab_size - 1
+            self.config.eos_token_id = None # there is no BOS and EOS tokens in REARC
             self.config.embedding_size = self.config.vocab_size
+
+            self.ignored_tokens = [self.config.pad_token_id, self.config.nlgrid_token_id]
 
         else:
             raise NotImplementedError("Only REARC dataset is supported for now")
@@ -1640,6 +1643,152 @@ class LLaDAModel(nn.Module):
         self.__cache["alibi_attention_bias"] = alibi_bias
         return alibi_bias
 
+    def get_attention_mask(self, input_ids: torch.LongTensor) -> torch.Tensor:
+
+        # ignore all input_ids that are in self.ignored_tokens
+        mask = torch.ones_like(input_ids, dtype=torch.float)
+        for token in self.ignored_tokens:
+            mask[input_ids == token] = 0.0
+
+        return mask
+
+
+    def mask_input_sequence(
+            self,
+            target_ids: torch.LongTensor,
+            eps: float = 1e-3,
+    ) -> Tuple[torch.LongTensor, torch.BoolTensor]:
+        """
+        We mask the target sequence to create a masked input sequence for training.
+
+        :param target_ids: A tensor of shape `(batch_size, seq_len)`.
+        :param eps: Minimum masking probability per sample.
+        :return: A tuple of two tensors: the masked target sequence and the mask.
+        """
+        batch_size, target_len = target_ids.shape
+
+        # Generate a random masking probability per sample in the batch
+        t = torch.rand(batch_size, device=target_ids.device)  # [B]
+        p_mask = (1 - eps) * t + eps  # Ensure at least `eps` masking probability
+        p_mask = p_mask[:, None].expand(-1, target_len)  # [B, T]
+
+        # Generate random values per target token for masking decision
+        rand_vals_tar = torch.rand((batch_size, target_len), device=target_ids.device)
+        mask_target = (rand_vals_tar < p_mask).bool()  # 0: keep, 1: mask
+
+        masked_sequence = target_ids.clone()
+        masked_sequence[mask_target] = self.config.mask_token_id  # set to masking token
+
+        return masked_sequence, mask_target
+
+    @torch.no_grad()
+    def generate_masked_sequence(
+            self,
+            forward_f: Callable[[Optional[int], torch.Tensor, torch.Tensor], torch.Tensor],
+            samples_task_id: [Optional[int]],
+            input_ids: torch.LongTensor,
+            target_ids: torch.LongTensor,
+            steps=8,
+            cfg_scale=0.,
+            temperature=0.,
+            remasking='low_confidence'
+    ):
+
+        def add_gumbel_noise(logits, temperature):
+            '''
+            The Gumbel max is a method for sampling categorical distributions.
+            According to arXiv:2409.02908, for MDM, low-precision Gumbel Max improves perplexity score but reduces generation quality.
+            Thus, we use float64.
+            '''
+            if temperature == 0:
+                return logits
+            logits = logits.to(torch.float64)
+            noise = torch.rand_like(logits, dtype=torch.float64)
+            gumbel_noise = (- torch.log(noise)) ** temperature
+            return logits.exp() / gumbel_noise
+
+        def get_num_transfer_tokens(mask_index, steps):
+            '''
+            In the reverse process, the interval [0, 1] is uniformly discretized into steps intervals.
+            Furthermore, because LLaDA employs a linear noise schedule (as defined in Eq. (8)),
+            the expected number of tokens transitioned at each step should be consistent.
+
+            This function is designed to precompute the number of tokens that need to be transitioned at each step.
+            '''
+            mask_num = mask_index.sum(dim=1, keepdim=True)
+
+            base = mask_num // steps
+            remainder = mask_num % steps
+
+            num_transfer_tokens = torch.zeros(mask_num.size(0), steps, device=mask_index.device,
+                                              dtype=torch.int64) + base
+
+            for i in range(mask_num.size(0)):
+                num_transfer_tokens[i, :remainder[i]] += 1
+
+            return num_transfer_tokens
+
+
+        prompt = input_ids
+        gen_length = target_ids.shape[1]
+        mask_id = self.config.mask_token_id
+        block_length = gen_length
+
+        x = torch.full((prompt.shape[0], prompt.shape[1] + gen_length), mask_id, dtype=torch.long).to(self.device)
+        x[:, :prompt.shape[1]] = prompt.clone()
+
+        prompt_index = (x != mask_id)
+
+        assert gen_length % block_length == 0
+        num_blocks = gen_length // block_length
+
+        assert steps % num_blocks == 0
+        steps = steps // num_blocks
+
+        for num_block in range(num_blocks):
+            block_mask_index = (x[:, prompt.shape[1] + num_block * block_length: prompt.shape[1] + (num_block + 1) * block_length:] == mask_id)
+            num_transfer_tokens = get_num_transfer_tokens(block_mask_index, steps)
+            for i in range(steps):
+                mask_index = (x == mask_id)
+                if cfg_scale > 0.:
+                    un_x = x.clone()
+                    un_x[prompt_index] = mask_id
+                    x_ = torch.cat([x, un_x], dim=0)
+                    logits = forward_f(samples_task_id, x_, target_ids)
+                    logits, un_logits = torch.chunk(logits, 2, dim=0)
+                    logits = un_logits + (cfg_scale + 1) * (logits - un_logits)
+                else:
+                    logits = forward_f(samples_task_id, x, target_ids)
+
+                logits_with_noise = add_gumbel_noise(logits, temperature=temperature)
+                x0 = torch.argmax(logits_with_noise, dim=-1)  # b, l
+
+                if remasking == 'low_confidence':
+                    p_dtype = torch.float64 if torch.cuda.is_available() else torch.float32
+                    p = F.softmax(logits.to(p_dtype), dim=-1)
+                    x0_p = torch.squeeze(torch.gather(p, dim=-1, index=torch.unsqueeze(x0, -1)), -1)  # b, l
+                elif remasking == 'random':
+                    x0_p = torch.rand((x0.shape[0], x0.shape[1]), device=x0.device)
+                else:
+                    raise NotImplementedError(remasking)
+
+                x0_p[:, prompt.shape[1] + (num_block + 1) * block_length:] = -np.inf
+
+                x0 = torch.where(mask_index, x0, x)
+                confidence = torch.where(mask_index, x0_p, -np.inf)
+
+                transfer_index = torch.zeros_like(x0, dtype=torch.bool, device=x0.device)
+                for j in range(confidence.shape[0]):
+                    _, select_index = torch.topk(confidence[j], k=num_transfer_tokens[j, i])
+                    transfer_index[j, select_index] = True
+                x[transfer_index] = x0[transfer_index]
+
+        return x
+
+
+
+
+
     def forward(
         self,
         input_ids: torch.LongTensor,
@@ -1690,9 +1839,6 @@ class LLaDAModel(nn.Module):
 
         if past_key_values:
             assert len(past_key_values) == self.config.n_layers
-
-        # TODO: This is just an ugly hack since the input_ids are 2D images
-        input_ids = input_ids.flatten(1)
 
         batch_size, seq_len = input_ids.size() if input_embeddings is None else input_embeddings.size()[:2]
         if past_key_values is None:
