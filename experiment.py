@@ -20,7 +20,7 @@ from utility.logging import logger
 
 torch.backends.cudnn.benchmark = False
 torch.backends.cudnn.deterministic = False
-torch.set_float32_matmul_precision('medium')
+torch.set_float32_matmul_precision('medium')    # 'high'
 
 
 def main() -> None:
@@ -68,7 +68,7 @@ def main() -> None:
 
     # Data chosen
     data_module = vars(data)[config.base.data_module]
-    datamodule = data_module(config.data)   # initialize the data with the data config
+    datamodule = data_module(config.data, config.model)   # initialize the data with the data config
     logger.info(f"Data module instantiated. Now showing the total number of samples per dataloader:\n{datamodule}\n")
 
     # Get the image size from the datamodule. Useful for the model backbone
