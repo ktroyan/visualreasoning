@@ -73,7 +73,7 @@ class CVRDataset(Dataset):
 
 class CVRDataModule(DataModuleBase):
 
-    def __init__(self, data_config, **kwargs):
+    def __init__(self, data_config, model_config, **kwargs):
 
         super().__init__(data_config.num_workers,
                          data_config.shuffle_train_dl,
