@@ -1,5 +1,5 @@
 head_network:
-  name: 'transformer'
+  name: 'xtransformer'
   embed_dim: 128  # 384 for small, 768 for base
   num_heads: 4  # 12
   mlp_ratio: 4  # used instead of explicit ff_dim
