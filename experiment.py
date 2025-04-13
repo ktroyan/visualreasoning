@@ -73,7 +73,7 @@ def main() -> None:
 
     # Get the image size from the datamodule. Useful for the model backbone
     image_size = datamodule.image_size
-    logger.info(f"Max. image size considered (with padding): {image_size}")
+    logger.info(f"Image size considered (with padding): {image_size}")
 
     # Model chosen
     model_module = vars(models)[config.base.model_module]

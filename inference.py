@@ -13,7 +13,7 @@ from utility.rearc.utils import check_train_test_contamination as check_rearc_tr
 from utility.logging import logger
 
 
-torch.set_float32_matmul_precision('medium')
+torch.set_float32_matmul_precision('medium')    # 'high'
 torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.deterministic = True
 
@@ -117,7 +117,7 @@ if __name__ == '__main__':
 
     # Get the image size from the datamodule. Useful for the model backbone
     image_size = datamodule.image_size
-    logger.info(f"Max. image size considered (with padding): {image_size}")
+    logger.info(f"Image size considered (with padding): {image_size}")
 
     # Model chosen
     model_ckpt = config.inference.inference_model_ckpt
