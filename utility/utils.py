@@ -243,32 +243,43 @@ def plot_lr_schedule(lr_values: List) -> str:
 
 def plot_absolute_positional_embeddings(pos_embed, num_prefix_tokens=None, viz_as_heatmap=False):
     """ 
-    Plot the absolute positional embeddings (APE) used.
-    If needed, we can truncate the first num_prefix_tokens tokens from the embeddings plot.
-    TODO: Fix the labeling of the plot as currently the y-axis does not correspond to the sequence position but to the positional embedding value for each dimension.
+    Plot the absolute positional embeddings (APE).
+
+    Args:
+        pos_embed (torch.Tensor): Positional embedding tensor of shape [1, seq_len(+num_extra_tokens), embed_dim]
+        num_prefix_tokens (int, optional): Number of extra/prefixed tokens (e.g., cls, register tokens)
+        viz_as_heatmap (bool): If True, plot a heatmap; otherwise, plot line plots per embedding dimension.
     """
-    # Ensure the figs directory exists
     os.makedirs('./figs', exist_ok=True)
 
-    # Truncate the first num_prefix_tokens tokens from the embeddings plot if needed and convert embeddings to numpy
-    if num_prefix_tokens is not None:
-        embeddings = pos_embed[0, num_prefix_tokens:, :].detach().cpu().numpy()
+    # Remove extra/prefix tokens if needed
+    if num_prefix_tokens is not None and num_prefix_tokens > 0:
+        embeddings = pos_embed[0, num_prefix_tokens:, :].detach().cpu().numpy()  # [seq_len, embed_dim]
     else:
         embeddings = pos_embed[0, :, :].detach().cpu().numpy()
 
     plt.figure(figsize=(10, 5))
 
     if viz_as_heatmap:
-        ims = plt.imshow(embeddings, aspect='auto', label="Absolute Positional Embeddings")
+        # Each row is a position in the sequence, each column is a dimension in the embedding
+        ims = plt.imshow(embeddings, aspect='auto', cmap='viridis')
         plt.colorbar(ims)
+        plt.xlabel("Embedding dimension")
+        plt.ylabel("Sequence position")
+        plt.title("APE")
+
     else:
-        plt.plot(embeddings, label="Absolute Positional Embeddings")
-    
-    plt.xlabel("Embedding position")
-    plt.ylabel("Sequence position")
-    plt.title("Positional Embeddings")
+        # Plot all embedding dimensions for each position in the sequence
+        for i in range(embeddings.shape[1]):  # for each embedding dim
+            plt.plot(embeddings[:, i], label=f"Dim {i}", alpha=0.5)  # dim-wise trace across sequence
+
+        plt.xlabel("Sequence position")
+        plt.ylabel("Embedding value")
+        plt.title("APE Line Plot (dim traces)")
+        plt.legend(loc='upper right', bbox_to_anchor=(1.15, 1), ncol=1, fontsize='small', frameon=False)
+
+    plt.tight_layout()
     plt.savefig('./figs/positional_embeddings.png')
-    # plt.show()
     plt.close()
 
 def timer_decorator(func):
