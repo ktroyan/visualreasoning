@@ -247,8 +247,8 @@ def plot_absolute_positional_embeddings(pos_embed, num_prefix_tokens=None, viz_a
 
     Args:
         pos_embed (torch.Tensor): Positional embedding tensor of shape [1, seq_len(+num_extra_tokens), embed_dim]
-        num_prefix_tokens (int, optional): Number of extra/prefixed tokens (e.g., cls, register tokens)
-        viz_as_heatmap (bool): If True, plot a heatmap; otherwise, plot line plots per embedding dimension.
+        num_prefix_tokens (int): Number of extra/prefixed tokens (e.g., cls, register tokens)
+        viz_as_heatmap (bool): If True, plot a heatmap; otherwise, plot line plots per embedding dimension
     """
     os.makedirs('./figs', exist_ok=True)
 
