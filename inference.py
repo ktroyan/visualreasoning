@@ -62,7 +62,7 @@ def main(config, datamodule, model=None, model_ckpt_path=None, exp_logger=None):
    
 
     # Additional logging and plotting if needed
-    if config.inference.inference_verbose == 1 and config.base.data_env == "REARC":
+    if config.inference.inference_verbose == 1 and config.base.data_env in ["REARC", "BEFOREARC"]:
         # TODO: Implement for other data environments
 
         logger.debug(f"Test predictions: {model.test_preds}")

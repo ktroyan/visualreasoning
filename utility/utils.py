@@ -383,7 +383,10 @@ def process_test_results(config, test_results, test_type="test", exp_logger=None
     """
     Process the test results and log them.
 
-    FIXME: 
+    FIXME:
+    Update code for it to work with REARC, BEFOREARC and CVR
+    
+    FIXME:
     For this code to work currently, the batch size should yield a number of elements in each key of results so that it is a multiple of the number of tasks, otherwise the reshape will fail.
     Also see how to handle the case where the results are for multiple test dataloaders
     """
@@ -403,7 +406,15 @@ def process_test_results(config, test_results, test_type="test", exp_logger=None
         raise FileNotFoundError(f"Test set file not found in the dataset directory: {test_set_path}")
 
     # Processing of the results and wrap-up of the parameters used
-    tasks_considered = test_set['task'].unique()
+    if config.base.data_env == "REARC":
+        tasks_considered = test_set['task'].unique()
+    
+    elif config.base.data_env == "BEFOREARC":
+        unique_transformations = test_set['transformations'].drop_duplicates().tolist() # TODO: the field 'transformations' contains a list of transformations applied to obtain the output grid form the input grid?
+        tasks_considered = ["-".join(transformation_list) for transformation_list in unique_transformations]
+    
+    elif config.base.data_env == "CVR":
+        pass
 
     logger.debug(f"Post-processing results for tasks: {tasks_considered}")
 

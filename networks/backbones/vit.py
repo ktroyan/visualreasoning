@@ -42,7 +42,7 @@ class PatchEmbed(nn.Module):
         # TODO: See if it is correct to create patches (in the forward pass) without the extra tokens (so not considered when creating the artificial channels)
         
         self.base_config = base_config
-        if self.base_config.data_env == 'REARC':
+        if self.base_config.data_env in ['REARC', 'BEFOREARC']:
             self.num_token_categories = num_token_categories
             if self.num_token_categories is not None:
                 in_channels = self.num_token_categories
@@ -57,7 +57,7 @@ class PatchEmbed(nn.Module):
         self.patch_proj = nn.Conv2d(in_channels=in_channels, out_channels=embed_dim, kernel_size=patch_size, stride=patch_size)
 
     def forward(self, x):
-        if self.base_config.data_env == 'REARC':
+        if self.base_config.data_env in ['REARC', 'BEFOREARC']:
             if self.num_token_categories is not None:
                 x = one_hot_encode(x, self.num_token_categories)  # add a channel dimension for the input image: [B, C=num_token_categories, H, W] <-- [B, H, W]
             else:
@@ -809,7 +809,7 @@ class VisionTransformer(nn.Module):
         self.embed_dim = network_config.embed_dim
         assert self.embed_dim % network_config.num_heads == 0, 'Embedding dimension must be divisible by the number of heads'
 
-        if base_config.data_env == 'REARC':
+        if base_config.data_env in ['REARC', 'BEFOREARC']:
             if model_config.visual_tokens.enabled:
                 self.num_token_categories = self.num_classes + 1 + 4 # 10 symbols (0-9) + 1 pad token + 4 x,y,xy border tokens and newline tokens
             else:
@@ -825,7 +825,7 @@ class VisionTransformer(nn.Module):
             self.cls_token = nn.Parameter(torch.zeros(1, 1, self.embed_dim)) # create the [cls] token
             self.num_all_tokens += 1
             self.num_extra_tokens += 1
-            if base_config.data_env == 'REARC':
+            if base_config.data_env in ['REARC', 'BEFOREARC']:
                 self.num_token_categories += 1  # + 1 cls token
 
         # Create register tokens
@@ -833,7 +833,7 @@ class VisionTransformer(nn.Module):
             self.reg_tokens = nn.Parameter(torch.zeros(1, model_config.num_reg_tokens, self.embed_dim)) # create the register tokens
             self.num_all_tokens += model_config.num_reg_tokens
             self.num_extra_tokens += model_config.num_reg_tokens
-            if base_config.data_env == 'REARC':
+            if base_config.data_env in ['REARC', 'BEFOREARC']:
                 self.num_token_categories += 1  # + 1 register token
 
 
@@ -843,14 +843,14 @@ class VisionTransformer(nn.Module):
             # Using channels: input x is [B, C=3, H, W] and we should get [B, seq_len=num_patches, embed_dim]
             self.patch_embed = PatchEmbed(base_config, img_size=self.image_size, patch_size=self.patch_size, in_channels=self.num_channels, embed_dim=self.embed_dim)
         
-        elif base_config.data_env == 'REARC':
+        elif base_config.data_env in ['REARC', 'BEFOREARC']:
             # NOTE: When patch_size=1 (i.e., consider pixels), this is equivalent to flattening the input image and projecting it to the embedding dimension
             if model_config.use_ohe_repr:
-                # We are in REARC and we want to use OHE (resulting in channels) for the possible tokens and thus create artificial channels for the linear projection of patches/pixels/tokens
+                # We are in REARC/BEFOREARC and we want to use OHE (resulting in channels) for the possible tokens and thus create artificial channels for the linear projection of patches/pixels/tokens
                 # Using Channels: we create input x [B, C=num_token_categories, H, W] and we should get [B, seq_len=num_patches, embed_dim]
                 self.patch_embed = PatchEmbed(base_config, img_size=self.image_size, patch_size=self.patch_size, in_channels=self.num_channels, embed_dim=self.embed_dim, num_token_categories=self.num_token_categories)
             else:
-                # We are in REARC and we want to simply flatten the input image (resulting in a sequence of tokens) and thus create an artificial channel for the linear projection of patches/pixels/tokens
+                # We are in REARC/BEFOREARC and we want to simply flatten the input image (resulting in a sequence of tokens) and thus create an artificial channel for the linear projection of patches/pixels/tokens
                 # Using Seq2Seq: we create input x [B, C=1, H, W] and we should get [B, seq_len, embed_dim]
                 self.patch_embed = PatchEmbed(base_config, img_size=self.image_size, patch_size=self.patch_size, in_channels=self.num_channels, embed_dim=self.embed_dim)
 

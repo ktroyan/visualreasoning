@@ -1,0 +1,29 @@
+# NOTE: The parameters structure should follow that of the nested keys used in the config files in /configs by using "parameters" to create imbrication
+
+# Program to run
+program: experiment.py
+
+# Method to use for HPs optimization: random, grid, bayes
+method: grid
+
+# Project of the sweep
+# project: 'VisReas-project'
+# entity: 'klim-t'
+
+# Metric to optimize
+metric:
+  goal: minimize
+  name: metrics/val_loss_epoch  # TODO: see why metrics/val_loss does not exist in the Sweep section on WandB
+
+# Hyperparameters space to search
+parameters:
+  experiment:
+    parameters:
+      name:
+        values: ['experiment_4', 'experiment_8']
+
+# early_terminate:
+#   type: hyperband
+#   s: 2
+#   eta: 3
+#   max_iter: 10

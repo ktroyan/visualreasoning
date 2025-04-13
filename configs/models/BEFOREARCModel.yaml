@@ -1,0 +1,46 @@
+model:
+  backbone: 'vit'  # choices: 'vit', 'transformer', 'resnet'
+  head: 'mlp'  # choices: 'transformer', 'mlp', 'mytransformer', 'xtransformer'
+  pretrained: null
+  patch_size: 1
+  visual_tokens:
+    enabled: true
+  use_ohe_repr: true # if True, use OHE for the possible tokens thus yielding as many artificial channels as there are different possible tokens; if False, use a simple sequence of tokens with an artificial channel only created to use convolution for linear projection of patches/pixels/tokens
+  ape:
+    enabled: true
+    ape_type: '2dsincos'  # choices: 'learn', '2dsincos'; absolute positional encoding
+    mixer: 'default'  # choices: 'default', 'weighted_sum'; how to mix the input embeddings and the positional embeddings
+  ope:
+    enabled: false
+  rpe:
+    enabled: true
+    rpe_type: 'rope'  # choices: 'rope', 'Two-slope-Alibi', 'Four-diag-slope-Alibi'; relative positional encoding
+  use_cls_token: false # whether to use a cls token or not
+  num_reg_tokens: 0 # number of register tokens to prepend to the input sequence
+  encoder_aggregation:
+    enabled: false
+    method: '' # choices: '' (for no pooling and returning a sequence), 'mean', 'max', 'token' (for aggregating features and returning the cls token)
+  n_tasks: 400    # used for the task embedding (i.e., to inform the model through an embedding of which tasks to consider)
+  task_embedding:
+    enabled: false
+    task_embedding_dim: ${resolve_if_then_else:${model.task_embedding.enabled},64}
+  training_hparams:
+    optimizer: 'AdamW' # choices: Adam, AdamW, SGD
+    scheduler:
+      monitored_metric: 'val_loss' # choices: 'val_acc', 'val_loss'
+      type: 'CosineAnnealingLR' # choices: ReduceLROnPlateau, StepLR, CosineAnnealingLR
+      interval: 'epoch' # choices: 'step', 'epoch'
+      frequency: 1
+    lr_warmup:
+      enabled: true
+      type: 'linear' # choices: 'linear'
+      num_steps: 200.0
+    lr: 0.001
+    wd: 0.001
+  attention_map:
+    enabled: false
+    layer: -1  # layer to use for the attention map (-1 for the last, 0 for the first layer, 1 for the second layer, etc.)
+    n_samples: 2  # number of samples to consider for the attention map
+  observe_preds:
+    enabled: true
+    n_samples: 4
