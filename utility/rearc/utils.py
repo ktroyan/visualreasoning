@@ -639,3 +639,169 @@ def plot_image_predictions(split: str,
     plt.close(fig)
 
     return fig_paths
+
+def plot_grid_image(grid_image):
+    """ 
+    Plot a grid image from REARC.
+    """
+
+    if not isinstance(grid_image, torch.Tensor):
+        grid_image = torch.tensor(grid_image)
+    
+    # Explicit the symbols chosen for the tokens
+    PAD_TOKEN = 10
+    X_ENDGRID_TOKEN = 11 
+    Y_ENDGRID_TOKEN = 12
+    XY_ENDGRID_TOKEN = 13
+    NL_GRID_TOKEN = 14
+    background_token = 0  # background (typically black color, as in REARC)
+
+    replace_pad_tokens = True  # whether to replace pad tokens with background token (0)
+    if replace_pad_tokens:
+        # Count pad tokens tokens BEFORE replacement
+        input_pad_count = torch.sum(grid_image == PAD_TOKEN).item()
+
+        input_background_count = torch.sum(grid_image == background_token).item()
+
+        # Replace pad tokens with background token
+        grid_image[grid_image == PAD_TOKEN] = background_token
+
+        # Count pad tokens and background tokens AFTER replacement
+        input_pad_count_after = torch.sum(grid_image == PAD_TOKEN).item()
+
+        input_background_count_after = torch.sum(grid_image == background_token).item()
+
+        # Since pad tokens are replaced with background token, we need to adjust the symbols for the other special tokens
+        # Shift down by 1 the special tokens (X_ENDGRID_TOKEN, Y_ENDGRID_TOKEN, XY_ENDGRID_TOKEN, NL_GRID_TOKEN)
+        min_special_token = min(X_ENDGRID_TOKEN, Y_ENDGRID_TOKEN, XY_ENDGRID_TOKEN, NL_GRID_TOKEN)
+        grid_image[grid_image >= min_special_token] -= 1
+
+        X_ENDGRID_TOKEN = X_ENDGRID_TOKEN - 1
+        Y_ENDGRID_TOKEN = Y_ENDGRID_TOKEN - 1
+        XY_ENDGRID_TOKEN = XY_ENDGRID_TOKEN - 1
+        NL_GRID_TOKEN = NL_GRID_TOKEN - 1
+
+
+    replace_border_tokens = False  # whether to replace border tokens with background token (0)
+    if replace_border_tokens:
+        # Replace border tokens with background token
+        grid_image[grid_image == X_ENDGRID_TOKEN] = background_token
+        grid_image[grid_image == Y_ENDGRID_TOKEN] = background_token
+        grid_image[grid_image == XY_ENDGRID_TOKEN] = background_token
+
+    replace_newline_tokens = False  # whether to replace newline tokens with background token (0)
+    if replace_newline_tokens:
+        # Replace newline tokens with background token
+        grid_image[grid_image == NL_GRID_TOKEN] = background_token
+
+    # Log grid tokens info after some tokens may have been replaced for plotting
+    log_message = "Grid tokens info AFTER any token replacement:\n"
+    log_message += f"inputs dtype: {grid_image.dtype}\n"
+    log_message += f"grid_image shape: {grid_image.shape}\n"
+    log_message += f"grid_image min: {grid_image.min()}\n"
+    log_message += f"grid_image max: {grid_image.max()}\n"
+    logger.debug(log_message)
+
+    # Decide on the colors for the different tokens
+    # Choose one:
+    no_merge_of_special_tokens = False
+    merge_border_tokens = True
+    merge_all_special_tokens = False
+
+    if merge_all_special_tokens:
+        # Merge all special tokens (border, newline) into one color (gray)
+        cmap = ListedColormap([
+            '#000',     # black (background)
+            '#0074D9',  # blue
+            '#FF4136',  # red
+            '#2ECC40',  # green
+            '#FFDC00',  # yellow
+            '#AAAAAA',  # gray
+            '#F012BE',  # pink
+            '#FF851B',  # orange
+            '#7FDBFF',  # light blue
+            '#870C25',  # burgundy
+            '#555555',  # dark gray (all the special visual tokens, so border (3) + newline (1) tokens)
+        ])
+
+        vmin = 0
+        vmax = 9 + 1
+    
+    if merge_border_tokens:
+        # Replace tokens Y_ENDGRID_TOKEN, XY_ENDGRID_TOKEN with X_ENDGRID_TOKEN
+        # Newline token has to take the next lowest index, so NL_GRID_TOKEN
+        grid_image[grid_image == Y_ENDGRID_TOKEN] = X_ENDGRID_TOKEN
+        grid_image[grid_image == XY_ENDGRID_TOKEN] = X_ENDGRID_TOKEN
+        grid_image[grid_image == NL_GRID_TOKEN] = X_ENDGRID_TOKEN + 1
+
+        cmap = ListedColormap([
+            '#000',     # black (background)
+            '#0074D9',  # blue
+            '#FF4136',  # red
+            '#2ECC40',  # green
+            '#FFDC00',  # yellow
+            '#AAAAAA',  # gray
+            '#F012BE',  # pink
+            '#FF851B',  # orange
+            '#7FDBFF',  # light blue
+            '#870C25',  # burgundy
+            '#555555',  # dark gray (border (3) + newline (1) tokens)
+            '#9D00FF',  # purple (newline tokens)
+        ])
+
+        vmin = 0
+        vmax = 9 + 1 + 1    # 10 possible symbols (0-9) to predict in the grid image + 1 for the borders' color + 1 for the newline tokens' colors
+
+    if no_merge_of_special_tokens:
+        # No merging of special tokens, each token has its own color
+        cmap = ListedColormap([
+            '#000',     # black (background)
+            '#0074D9',  # blue
+            '#FF4136',  # red
+            '#2ECC40',  # green
+            '#FFDC00',  # yellow
+            '#AAAAAA',  # gray
+            '#F012BE',  # pink
+            '#FF851B',  # orange
+            '#7FDBFF',  # light blue
+            '#870C25',  # burgundy
+            '#FF00AA',  # fuchsia (border token X)
+            '#9D00FF',  # purple (border token Y)
+            '#FF00FF',  # magenta (border token XY)
+            '#555555',  # dark gray (newline tokens)
+        ])
+
+        vmin = 0
+        vmax = 9 + 3 + 1
+
+
+    # Log how many different symbols are in the grid images
+    log_message = "Grid images info:\n"
+    log_message += f"inputs dtype: {grid_image.dtype}\n"
+    log_message += f"grid_image shape: {grid_image.shape}\n"
+    log_message += f"grid_image min: {grid_image.min()}\n"
+    log_message += f"grid_image max: {grid_image.max()}\n"
+    log_message += f"grid_image unique values: {torch.unique(grid_image)}\n"
+    logger.debug(log_message)
+
+    # Create a figure to plot the samples (input, prediction, target) of the batch
+    fig, _ = plt.subplots(nrows=1,
+                            ncols=1,
+                            figsize=(15, 4),
+                            dpi=150,
+                            )
+    title = "Grid Image"
+    sns.heatmap(grid_image, cbar=False, linewidths=0.01, linecolor='gray', square=True, cmap=cmap, vmin=vmin, vmax=vmax)
+
+    fig.suptitle(title, family='serif', fontsize=22, fontweight='bold')
+    
+    plt.tight_layout()
+    # plt.show()
+
+    # Save the figure
+    os.makedirs("./figs", exist_ok=True)   # create the /figs folder if it does not exist
+
+    fig_path = f"./figs/grid_image.png"
+    fig.savefig(fig_path)
+
+    plt.close(fig)
