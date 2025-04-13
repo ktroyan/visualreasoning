@@ -17,7 +17,7 @@ backbone_network:
   include_bias: false
   include_qkv_bias: false
   init_cutoff_factor: null
-  init_device: mps
+  init_device: cuda
   init_fn: mitchell
   init_std: 0.02
   input_emb_norm: false

@@ -141,7 +141,7 @@ class VisReasModel(pl.LightningModule):
 
         x, y_hat, y, true_size_mask, prediction_mask = self.shared_step(batch)    # [B, num_classes, seq_len], [B, seq_len], [B, seq_len]
         y_orig =  y.clone()  # store the original inputs and targets for logging
-        preds_orig = torch.argmax(y_hat.clone(), dim=1)
+        y_hat_orig = y_hat.clone()
 
         if prediction_mask is not None: # TODO; Set to false for debugging
             # LLaDA is trained in an autoregressive manner, so we have only some tokens of the target masked
@@ -171,6 +171,7 @@ class VisReasModel(pl.LightningModule):
             loss_symbol_no_pad = ((per_sample_loss * true_size_mask).sum() / true_size_mask.sum()).unsqueeze(0)  # only consider non-padding elements
             # Compute predictions
             preds = torch.argmax(y_hat, dim=1)  # [B, seq_len]; predictions for each token/symbol of the model for each sample of the batch
+            preds_orig = torch.argmax(y_hat_orig, dim=1)  # [B, seq_len]; predictions for each token/symbol of the model for each sample of the batch
 
         else:
             # Already predicted class indices: cannot compute loss
@@ -178,6 +179,7 @@ class VisReasModel(pl.LightningModule):
             loss_symbol_with_pad = torch.tensor([0.0], device=y_hat.device)
             loss_symbol_no_pad = torch.tensor([0.0], device=y_hat.device)
             preds = y_hat
+            preds_orig = y_hat_orig
 
 
 
