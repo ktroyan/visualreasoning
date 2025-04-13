@@ -20,4 +20,5 @@ env_name="visualreasoning"
 module load python/3.12
 VENV=$env_name module load uv/0.6.12
 
-uv run ../experiment.py --config ../configs/experiment_config.yaml
+cd ../
+uv run experiment.py --config configs/experiment_config.yaml

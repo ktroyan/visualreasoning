@@ -175,7 +175,6 @@ class VisReasModel(pl.LightningModule):
 
         else:
             # Already predicted class indices: cannot compute loss
-            per_sample_loss = None
             loss_symbol_with_pad = torch.tensor([0.0], device=y_hat.device)
             loss_symbol_no_pad = torch.tensor([0.0], device=y_hat.device)
             preds = y_hat
@@ -465,16 +464,24 @@ class VisReasModel(pl.LightningModule):
         # TODO: See exactly how we want to compute the loss and metrics. What types of tokens we want to consider.
         # Also, convert the non-data tokens to background tokens (i.e., 0) when computing the loss and metrics, no?
 
-        # Loss per symbol (with all sort of padding considered): compute the loss per token/symbol
-        per_sample_loss = F.cross_entropy(y_hat, y.long(), reduction='none').float()  # [B, seq_len]
-        loss_symbol_with_pad = per_sample_loss.mean().unsqueeze(0)
+        # Determine if y_hat is logits or class predictions
+        if y_hat.dtype.is_floating_point:
+            # Loss per symbol (with all sort of padding considered): compute the loss per token/symbol
+            per_sample_loss = F.cross_entropy(y_hat, y.long(), reduction='none').float()  # [B, seq_len]
+            loss_symbol_with_pad = per_sample_loss.mean().unsqueeze(0)
 
-        # Loss per symbol (without padding considered): compute the loss per token/symbol and then apply the mask to ignore the padding tokens
-        per_sample_loss = F.cross_entropy(y_hat, y.long(), reduction='none').float()  # [B, seq_len]
-        loss_symbol_no_pad = ((per_sample_loss * mask).sum() / mask.sum()).unsqueeze(0)  # only consider non-padding elements
+            # Loss per symbol (without padding considered): compute the loss per token/symbol and then apply the mask to ignore the padding tokens
+            per_sample_loss = F.cross_entropy(y_hat, y.long(), reduction='none').float()  # [B, seq_len]
+            loss_symbol_no_pad = ((per_sample_loss * mask).sum() / mask.sum()).unsqueeze(0)  # only consider non-padding elements
 
-        # Compute predictions
-        preds = torch.argmax(y_hat, dim=1)  # [B, seq_len]; predictions for each token/symbol of the model for each sample of the batch
+            # Compute predictions
+            preds = torch.argmax(y_hat, dim=1)  # [B, seq_len]; predictions for each token/symbol of the model for each sample of the batch
+
+        else:
+            # Already predicted class indices: cannot compute loss
+            loss_symbol_with_pad = torch.tensor([0.0], device=y_hat.device)
+            loss_symbol_no_pad = torch.tensor([0.0], device=y_hat.device)
+            preds = y_hat
 
         # Accuracy per symbol (with padding) (i.e., the accuracy of the model in predicting the correct symbol for each pixel of the grid considering the whole max. padded grid, thus also the padding tokens)
         # acc_symbol_with_pad = (torch.sum(y == preds).float() / (y.numel())).unsqueeze(0)    # same as line below
