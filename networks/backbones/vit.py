@@ -1,3 +1,10 @@
+"""
+Vision Transformer (ViT) (encoder).
+It works for REARC, BEFOREARC, and CVR.
+It supports different types of: 2D APE, OPE, PE Mixer, RPE.
+It supports register tokens.
+"""
+
 import math
 import torch
 import torch.nn as nn
@@ -6,6 +13,7 @@ from rotary_embedding_torch import RotaryEmbedding, apply_rotary_emb
 from einops import rearrange
 import matplotlib.pyplot as plt
 import torch.nn.functional as F
+
 
 # Personal codebase dependencies
 from utility.utils import plot_absolute_positional_embeddings
@@ -32,6 +40,7 @@ class PatchEmbed(nn.Module):
         super().__init__()
 
         # TODO: See if it is correct to create patches (in the forward pass) without the extra tokens (so not considered when creating the artificial channels)
+        
         self.base_config = base_config
         if self.base_config.data_env == 'REARC':
             self.num_token_categories = num_token_categories
@@ -771,6 +780,7 @@ def calculate_2d_relative_positions(grid_height, grid_width, rpe_type):
             relative_position[i, j] = manhattan_distance
 
     return relative_position
+
 class VisionTransformer(nn.Module):
     """ Vision Transformer """
     def __init__(self,
@@ -959,7 +969,6 @@ class VisionTransformer(nn.Module):
 
     def forward_embed(self, x, x_grid_object_ids=None):
         x_shape = x.shape
-        
         B = x_shape[0]
 
         x = self.patch_embed(x) # [B, num_patches, embed_dim]; embed the input
