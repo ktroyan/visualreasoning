@@ -3,19 +3,51 @@ import pandas as pd
 import torch
 from torch.utils.data import Dataset
 import torch.nn.functional as F
+import numpy as np
 
 # Personal codebase dependencies
 from .data_base import DataModuleBase
 from utility.logging import logger
+from .external.vitarc.obj_idx_utils import generate_input_type_ids_multi
 
 def create_object_grid(input_grid, max_img_size, special_tokens_dic):
     """
     Create a grid of object ids for the given input grid.
     The resulting grid is a 2D tensor of size (max_img_size, max_img_size) where each cell contains the object id for that cell.
-    """
-    # TODO: Implement based on ViTARC
+    
+    TODO: What should be our approach? Moreover, discuss their rectangle bounding boxes approach vs. my thought of segmenting instead.
+          The former may confuse the model I think.
+    
+    What they seem to do in ViTARC is: (see gen_dataset.py from line 185)
+    - replace all the values in the grid by their custom tokens
+    - create the object ids grid for the original input grid (without any padding or special tokens)
+    - flatten the object ids grid
+    - pad the object ids grid with zeros to reach the tgt size (which is their maximum size)
+    I am not sure why they do it for both the input grid and target grid, but I guess that what matters is the input grid.
 
-    raise NotImplementedError("The function create_object_grids is not implemented.")
+    Regardless, I think that what we should do is:
+    - create the object ids grid for the original input grid (without any padding or special tokens)
+    - [convert to a tensor]
+    - pad the object ids grid with PAD tokens to reach the max_img_size
+    - flatten the grid
+    """
+
+    object_ids_grid = generate_input_type_ids_multi(np.array(input_grid), visualize=False)  # NOTE: may get warning due to several workers/processes running for data
+    object_ids_grid = torch.tensor(object_ids_grid, dtype=torch.long)
+
+    # Pad with PAD tokens
+    object_ids_grid = F.pad(
+        object_ids_grid, 
+        (0, max_img_size - object_ids_grid.shape[1],    # pad right
+         0, max_img_size - object_ids_grid.shape[0]),   # pad bottom
+        mode='constant', 
+        value=special_tokens_dic['PAD']    # padding value
+    )   # [max_img_size, max_img_size]
+
+    # Flatten the object ids grid to a sequence
+    object_ids_grid = object_ids_grid.flatten()
+
+    return object_ids_grid
 
 class REARCDataset(Dataset):
     def __init__(self, json_dataset_path, image_size, use_visual_tokens, use_grid_object_ids, transform=None):
@@ -74,6 +106,10 @@ class REARCDataset(Dataset):
             log_message += f"\nSpecial data token IDs: PAD={self.PAD_TOKEN}"
         
         logger.info(log_message)
+
+    def is_grid_valid(self, grid: torch.Tensor) -> bool:
+        """ TODO: Implement this function to check if a grid is valid w.r.t. the tokens defined, sizes, etc. """
+        raise NotImplementedError("The function is_grid_valid is not implemented.")
 
     def add_noise(self, grid: torch.Tensor, noise_ratio: float = 0.5) -> torch.Tensor:
         """
@@ -207,6 +243,15 @@ class REARCDataset(Dataset):
         y_true_size = y.shape
         y_true_size = torch.tensor(y_true_size, dtype=torch.long)
 
+
+        # TODO: See the TODO below.
+        # if self.use_grid_object_ids:
+        #     x_grid_object_ids = create_object_grid(x, self.max_img_size, self.special_tokens)
+        # else:
+        #     # We cannot return None, so we create a grid of -1 values (as such value never appears) as it will not be used
+        #     x_grid_object_ids = torch.full((self.max_img_size * self.max_img_size,), -1, dtype=torch.long)  # [max_img_size * max_img_size]
+
+
         if self.use_visual_tokens:
             # Use special visual tokens and pad the input tensor to the desired fixed size
             x = self.pad_with_2d_visual_tokens(x)
@@ -224,16 +269,24 @@ class REARCDataset(Dataset):
         assert x.shape == (self.max_img_size, self.max_img_size), f"Input grid shape {x.shape} does not match expected shape ({self.max_img_size}, {self.max_img_size})."
         assert y.shape == (self.max_img_size, self.max_img_size), f"Output grid shape {y.shape} does not match expected shape ({self.max_img_size}, {self.max_img_size})."
 
+
         # Create a grid containing object ids for the input grid x
         # TODO: Should they be created with the original input grid or the padded one (possibly with special visual tokens too) ?
-        #       I guess the latter.
+        #       I guess the latter, but not sure when checking VITARC code as they seem to use the original input grid.
+        #       But then I am not sure if it's a good choice as the model will see border tokens and newline tokens and in the
+        #       object ids grid there would be zeros (according to ViTARC code), so background (?) at those locations.
+        #       Hence, I am thinking that it is better to perform it on the fully padded (with special tokens too) grid?
+        #       Otherwise mark them as PAD tokens instead of background ?
         if self.use_grid_object_ids:
             x_grid_object_ids = create_object_grid(x, self.max_img_size, self.special_tokens)
+        else:
+            # We cannot return None, so we create a grid of -1 values (as such value never appears) as it will not be used
+            x_grid_object_ids = torch.full((self.max_img_size * self.max_img_size,), -1, dtype=torch.long)  # [max_img_size * max_img_size]
+
 
         # Add noise to the target grid y
         # y = self.add_noise(y, noise_ratio=0.5)  # TODO: Remove after we have checked that the code is correct
 
-        return x, y, sample_task_id, y_true_size
         return x, y, sample_task_id, y_true_size, x_grid_object_ids, self.special_tokens
 
 
