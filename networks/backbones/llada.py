@@ -1499,7 +1499,7 @@ class LLaDAModel(nn.Module):
         if base_config.data_env == "REARC":
             # TODO: @Klim: Please check these values
             # TODO: This is pretty ugly and should probably be stored in the dataset config, not set here
-            special_tokens = 2 if self.config.diffusion.sage_thinking else 1 #  MASK, THINKING
+            special_tokens = 1 #  MASK
             self.config.vocab_size = num_classes + special_tokens
             self.config.pad_token_id = 10
             self.config.nlgrid_token_id = 14
@@ -1658,7 +1658,7 @@ class LLaDAModel(nn.Module):
             self,
             target_ids: torch.LongTensor,
             eps: float = 1e-3,
-    ) -> Tuple[torch.LongTensor, torch.BoolTensor]:
+    ) -> Tuple[torch.LongTensor, torch.BoolTensor, torch.LongTensor]:
         """
         We mask the target sequence to create a masked input sequence for training.
 

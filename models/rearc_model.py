@@ -707,6 +707,9 @@ class REARCModel(VisReasModel):
 
         self.num_classes = self.num_data_tokens + self.num_special_tokens   # number of token categories that can be predicted by the _whole_ model; 10 for symbols + 1 for each special token that could be predicted
 
+        if self.backbone_network_config == 'llada' and self.backbone_network_config.diffusion.sage_thinking:
+            self.num_classes += 1
+
         ## Model backbone/encoder
         if model_config.backbone == "resnet":
             self.encoder, bb_num_out_features = get_resnet(base_config=base_config,
