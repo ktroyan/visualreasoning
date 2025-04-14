@@ -1,6 +1,7 @@
 import os
 import numpy as np
 import pandas as pd
+import wandb
 from PIL import Image
 import torch
 from torchvision import transforms as tvt
@@ -222,7 +223,8 @@ def observe_image_predictions(split: str,
 
 
     # Save the figure
-    os.makedirs("./figs", exist_ok=True)   # create the /figs folder if it does not exist
+    wandb_subfolder = "/" + wandb.run.id if wandb.run is not None else ""
+    os.makedirs(f"./figs{wandb_subfolder}", exist_ok=True)   # create the /figs folder if it does not exist
     
     # NOTE: "_of_saved_batches" indicates that the index of the batch here is that of the list given
     # as argument where we saved batches, not that of the batch in the dataloader. 
@@ -230,9 +232,9 @@ def observe_image_predictions(split: str,
     # Most likely we only save the first and the last batch of the epoch.
     if epoch is not None:
         # Training or Validation
-        fig.savefig(f"./figs/{split}_image_predictions_epoch{epoch}_batch{batch_index}_of_saved_batches.png")
+        fig.savefig(f"./figs{wandb_subfolder}/{split}_image_predictions_epoch{epoch}_batch{batch_index}_of_saved_batches.png")
     else:
         # Testing
-        fig.savefig(f"./figs/{split}_image_predictions_batch{batch_index}_of_saved_batches.png")
+        fig.savefig(f"./figs{wandb_subfolder}/{split}_image_predictions_batch{batch_index}_of_saved_batches.png")
 
     plt.close(fig)

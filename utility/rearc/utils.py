@@ -3,6 +3,7 @@ import torch
 import numpy as np
 import hashlib
 import matplotlib.pyplot as plt
+import wandb
 from matplotlib.colors import ListedColormap
 import seaborn as sns
 from typing import Dict, List, Tuple
@@ -262,8 +263,9 @@ def plot_attention_scores(split: str,
             ax_target.set_title("Target Grid", fontdict={'fontsize': 12, 'fontweight': 'bold', 'family': 'serif'})
 
         plt.tight_layout()
-        os.makedirs("./figs", exist_ok=True)
-        fig_path = f"./figs/{split}_attention_layer{layer_index}_sample{sample_index}_epoch{epoch}_batch{batch_index}.png"
+        wandb_subfolder = "/" + wandb.run.id if wandb.run is not None else ""
+        os.makedirs(f"./figs{wandb_subfolder}", exist_ok=True)
+        fig_path = f"./figs{wandb_subfolder}/{split}_attention_layer{layer_index}_sample{sample_index}_epoch{epoch}_batch{batch_index}.png"
         plt.savefig(fig_path)
         plt.close(fig)
         fig_paths.append(fig_path)
@@ -620,19 +622,20 @@ def plot_image_predictions(split: str,
     # plt.show()
 
     # Save the figure
-    os.makedirs("./figs", exist_ok=True)   # create the /figs folder if it does not exist
+    wandb_subfolder = "/" + wandb.run.id if wandb.run is not None else ""
+    os.makedirs(f"./figs{wandb_subfolder}", exist_ok=True)   # create the /figs folder if it does not exist
     # NOTE: "_of_saved_batches" indicates that the index of the batch here is that of the list given
     # as argument where we saved batches, not that of the batch in the dataloader. 
     # Hence, we can refer to the code in rearc_model.py to see what batches are saved to the list. 
     # Most likely we only save the first and the last batch of the epoch.
     if epoch is not None:
         # Training or Validation
-        fig_path = f"./figs/{split}_image_predictions_epoch{epoch}_batch{batch_index}_of_saved_batches.png"
+        fig_path = f"./figs{wandb_subfolder}/{split}_image_predictions_epoch{epoch}_batch{batch_index}_of_saved_batches.png"
         fig.savefig(fig_path)
         fig_paths.append(fig_path)
     else:
         # Testing
-        fig_path = f"./figs/{split}_image_predictions_batch{batch_index}_of_saved_batches.png"
+        fig_path = f"./figs{wandb_subfolder}/{split}_image_predictions_batch{batch_index}_of_saved_batches.png"
         fig.savefig(fig_path)
         fig_paths.append(fig_path)
 

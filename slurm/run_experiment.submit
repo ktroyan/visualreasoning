@@ -21,4 +21,9 @@ module load python/3.12
 VENV=$env_name module load uv/0.6.12
 
 cd ../
-uv run experiment.py --config configs/experiment_config.yaml
+uv run experiment.py training.max_epochs=20 wandb.sweep.enabled=false experiment.name=experiment_2
+uv run experiment.py training.max_epochs=20 wandb.sweep.enabled=false experiment.name=experiment_2 backbone_network.alibi=true backbone_network.rope=false
+uv run experiment.py training.max_epochs=20 wandb.sweep.enabled=false experiment.name=experiment_2 backbone_network.diffusion.steps=32
+uv run experiment.py training.max_epochs=20 wandb.sweep.enabled=false experiment.name=experiment_2 backbone_network.alibi=true backbone_network.rope=false backbone_network.diffusion.steps=32
+uv run experiment.py training.max_epochs=20 wandb.sweep.enabled=false experiment.name=experiment_2 backbone_network.diffusion.steps=64
+uv run experiment.py training.max_epochs=20 wandb.sweep.enabled=false experiment.name=experiment_2 backbone_network.alibi=true backbone_network.rope=false backbone_network.diffusion.steps=64

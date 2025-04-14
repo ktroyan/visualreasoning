@@ -1,5 +1,7 @@
 import os
 import time
+
+import wandb
 import yaml
 import glob
 import datetime
@@ -228,6 +230,8 @@ def get_model_from_ckpt(model_ckpt_path):
     return model
 
 def plot_lr_schedule(lr_values: List) -> str:
+    wandb_subfolder = "/" + wandb.run.id if wandb.run is not None else ""
+
     plt.figure(figsize=(10, 5))
     plt.plot(lr_values, label="Learning Rate")
     plt.xlabel("Training Steps")
@@ -235,7 +239,7 @@ def plot_lr_schedule(lr_values: List) -> str:
     plt.title("Learning Rate Schedule")
     plt.legend()
     plt.grid()
-    fig_path = "./figs/learning_rate_schedule.png"
+    fig_path = f"./figs{wandb_subfolder}/learning_rate_schedule.png"
     plt.savefig(fig_path)
     # plt.show()
     plt.close()
@@ -248,7 +252,8 @@ def plot_absolute_positional_embeddings(pos_embed, num_prefix_tokens=None, viz_a
     TODO: Fix the labeling of the plot as currently the y-axis does not correspond to the sequence position but to the positional embedding value for each dimension.
     """
     # Ensure the figs directory exists
-    os.makedirs('./figs', exist_ok=True)
+    wandb_subfolder = "/" + wandb.run.id if wandb.run is not None else ""
+    os.makedirs(f'./figs{wandb_subfolder}', exist_ok=True)
 
     # Truncate the first num_prefix_tokens tokens from the embeddings plot if needed and convert embeddings to numpy
     if num_prefix_tokens is not None:
@@ -267,7 +272,7 @@ def plot_absolute_positional_embeddings(pos_embed, num_prefix_tokens=None, viz_a
     plt.xlabel("Embedding position")
     plt.ylabel("Sequence position")
     plt.title("Positional Embeddings")
-    plt.savefig('./figs/positional_embeddings.png')
+    plt.savefig(f'./figs{wandb_subfolder}/positional_embeddings.png')
     # plt.show()
     plt.close()
 
@@ -362,8 +367,9 @@ def observe_input_output_images(dataloader, batch_id=0, n_samples=4, split="test
     # plt.show()
 
     # Save the figure
-    os.makedirs("./figs", exist_ok=True)   # create the /figs folder if it does not exist
-    fig.savefig(f"./figs/{split}_image_input_output_batch{batch_id}.png")
+    wandb_subfolder = "/" + wandb.run.id if wandb.run is not None else ""
+    os.makedirs(f"./figs{wandb_subfolder}", exist_ok=True)   # create the /figs folder if it does not exist
+    fig.savefig(f"./figs{wandb_subfolder}/{split}_image_input_output_batch{batch_id}.png")
 
     plt.close(fig)
 

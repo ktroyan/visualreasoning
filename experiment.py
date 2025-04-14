@@ -30,9 +30,10 @@ def main() -> None:
     exp_start_time = time.time()
 
     # Empty the /figs folder to avoid the later copying of old figures from previous experiments
-    figs_folder = "./figs"
+    wandb_subfolder = "/" + wandb.run.id if wandb.run is not None else ""
+    figs_folder = f"./figs{wandb_subfolder}"
     os.makedirs(figs_folder, exist_ok=True)
-    delete_folder_content("./figs")
+    delete_folder_content(f"./figs{wandb_subfolder}")
 
     # Get all the config arguments for a regular experiment run
     config, config_dict = get_complete_config()
@@ -119,7 +120,7 @@ def main() -> None:
     # Save the figures produced in the /figs folder during the experiment to the experiment folder
     experiment_figs_folder = f"{experiment_folder}/figs"
     os.makedirs(experiment_figs_folder, exist_ok=True)
-    copy_folder("./figs", experiment_figs_folder)   # copy everything in the /figs folder to the current experiment folder
+    copy_folder(f"./figs{wandb_subfolder}", experiment_figs_folder)   # copy everything in the /figs folder to the current experiment folder
 
     # Save the results and config arguments that we are the most interested to check quickly when experimenting
     exp_results_dict = {
