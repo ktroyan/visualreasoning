@@ -848,7 +848,7 @@ class REARCModel(VisReasModel):
                 # training -> mask the input sequence before processing
 
                 # we concatenate x and y (used as target) and mask some of the y tokens (used as input)
-                y_masked, mask = self.encoder.mask_input_sequence(y)
+                y_masked, mask, y = self.encoder.mask_input_sequence(y)
                 xy = torch.cat([x, y], dim=1)
                 xy_masked = torch.cat([x, y_masked], dim=1)
 

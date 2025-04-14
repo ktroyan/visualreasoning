@@ -48,4 +48,5 @@ backbone_network:
     cfg_scale: 0.0
     temperature: 0.0
     remasking: low_confidence
+    sage_thinking: false
 

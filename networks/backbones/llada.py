@@ -1499,11 +1499,12 @@ class LLaDAModel(nn.Module):
         if base_config.data_env == "REARC":
             # TODO: @Klim: Please check these values
             # TODO: This is pretty ugly and should probably be stored in the dataset config, not set here
-            special_tokens = 1 #  MASK
+            special_tokens = 2 if self.config.diffusion.sage_thinking else 1 #  MASK, THINKING
             self.config.vocab_size = num_classes + special_tokens
             self.config.pad_token_id = 10
             self.config.nlgrid_token_id = 14
             self.config.mask_token_id = self.config.vocab_size - 1
+            self.config.thinking_token_id = self.config.vocab_size - 2
             self.config.eos_token_id = None # there is no BOS and EOS tokens in REARC
             self.config.embedding_size = self.config.vocab_size
 
@@ -1679,7 +1680,31 @@ class LLaDAModel(nn.Module):
         masked_sequence = target_ids.clone()
         masked_sequence[mask_target] = self.config.mask_token_id  # set to masking token
 
-        return masked_sequence, mask_target
+        if self.config.diffusion.sage_thinking:
+            # Get indices where masking is to be applied
+            mask_indices = mask_target.nonzero(as_tuple=True)
+
+            # Calculate the number of random replacements (15%)
+            num_random = int(mask_indices[0].numel() * 0.15)
+
+            # Randomly select a subset of these indices
+            if num_random > 0:
+                selected_indices = torch.randperm(mask_indices[0].numel())[:num_random]
+                random_positions = tuple(index[selected_indices] for index in mask_indices)
+
+                # Replace with random token IDs in the specified range
+                random_token_ids = torch.randint(
+                    low=0,
+                    high=self.config.vocab_size-2,
+                    size=(num_random,),
+                    device=target_ids.device
+                )
+                masked_sequence[random_positions] = random_token_ids
+
+                # Set the corresponding target_ids to the mask token ID
+                target_ids[random_positions] = self.config.thinking_token_id
+
+        return masked_sequence, mask_target, target_ids
 
     @torch.no_grad()
     def generate_masked_sequence(
@@ -1727,15 +1752,18 @@ class LLaDAModel(nn.Module):
 
         prompt = input_ids
         gen_length = target_ids.shape[1]
+        thinking_id = self.config.thinking_token_id
         mask_id = self.config.mask_token_id
         steps = self.config.diffusion.steps
         cfg_scale = self.config.diffusion.cfg_scale
         temperature = self.config.diffusion.temperature
         remasking = self.config.diffusion.remasking
         block_length = gen_length
+        x_hist = []
 
         x = torch.full((prompt.shape[0], prompt.shape[1] + gen_length), mask_id, dtype=torch.long).to(self.device)
         x[:, :prompt.shape[1]] = prompt.clone()
+        x_hist.append(x.reshape(x.shape[0], 2, int(np.sqrt(x.shape[1]//2).item()), int(np.sqrt(x.shape[1]//2).item()))[0, 1, :, :])
 
         prompt_index = (x != mask_id)
 
@@ -1749,7 +1777,9 @@ class LLaDAModel(nn.Module):
             block_mask_index = (x[:, prompt.shape[1] + num_block * block_length: prompt.shape[1] + (num_block + 1) * block_length:] == mask_id)
             num_transfer_tokens = get_num_transfer_tokens(block_mask_index, steps)
             for i in range(steps):
-                mask_index = (x == mask_id)
+                if self.config.diffusion.sage_thinking:
+                    num_transfer_tokens = get_num_transfer_tokens(block_mask_index, steps - i)
+                    mask_index = (x == mask_id) | (x != thinking_id)
                 if cfg_scale > 0.:
                     un_x = x.clone()
                     un_x[prompt_index] = mask_id
@@ -1779,9 +1809,10 @@ class LLaDAModel(nn.Module):
 
                 transfer_index = torch.zeros_like(x0, dtype=torch.bool, device=x0.device)
                 for j in range(confidence.shape[0]):
-                    _, select_index = torch.topk(confidence[j], k=num_transfer_tokens[j, i])
+                    _, select_index = torch.topk(confidence[j], k=num_transfer_tokens[j, 0 if self.config.diffusion.sage_thinking else i])
                     transfer_index[j, select_index] = True
                 x[transfer_index] = x0[transfer_index]
+                x_hist.append(x.reshape(x.shape[0], 2, int(np.sqrt(x.shape[1]//2).item()), int(np.sqrt(x.shape[1]//2).item()))[0, 1, :, :])
 
         return x
 
