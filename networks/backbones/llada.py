@@ -1730,7 +1730,7 @@ class LLaDAModel(nn.Module):
         mask_id = self.config.mask_token_id
         steps = self.config.diffusion.steps
         cfg_scale = self.config.diffusion.cfg_scale
-        temperature = self.config.temperature
+        temperature = self.config.diffusion.temperature
         remasking = self.config.diffusion.remasking
         block_length = gen_length
 
