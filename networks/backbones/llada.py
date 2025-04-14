@@ -1688,10 +1688,6 @@ class LLaDAModel(nn.Module):
             samples_task_id: [Optional[int]],
             input_ids: torch.LongTensor,
             target_ids: torch.LongTensor,
-            steps=8,
-            cfg_scale=0.,
-            temperature=0.,
-            remasking='low_confidence'
     ):
 
         def add_gumbel_noise(logits, temperature):
@@ -1732,6 +1728,10 @@ class LLaDAModel(nn.Module):
         prompt = input_ids
         gen_length = target_ids.shape[1]
         mask_id = self.config.mask_token_id
+        steps = self.config.diffusion.steps
+        cfg_scale = self.config.diffusion.cfg_scale
+        temperature = self.config.temperature
+        remasking = self.config.diffusion.remasking
         block_length = gen_length
 
         x = torch.full((prompt.shape[0], prompt.shape[1] + gen_length), mask_id, dtype=torch.long).to(self.device)

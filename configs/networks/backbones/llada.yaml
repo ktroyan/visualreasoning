@@ -43,3 +43,9 @@ backbone_network:
   use_cache: false
   vocab_size: 126464
   weight_tying: false
+  diffusion:
+    steps: 8
+    cfg_scale: 0.0
+    temperature: 0.0
+    remasking: low_confidence
+
