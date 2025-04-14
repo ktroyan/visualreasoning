@@ -1780,6 +1780,8 @@ class LLaDAModel(nn.Module):
                 if self.config.diffusion.sage_thinking:
                     num_transfer_tokens = get_num_transfer_tokens(block_mask_index, steps - i)
                     mask_index = (x == mask_id) | (x != thinking_id)
+                else:
+                    mask_index = (x == mask_id)
                 if cfg_scale > 0.:
                     un_x = x.clone()
                     un_x[prompt_index] = mask_id
