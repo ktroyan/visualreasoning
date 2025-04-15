@@ -29,12 +29,6 @@ def main() -> None:
     logger.info("*** Experiment started ***")
     exp_start_time = time.time()
 
-    # Empty the /figs folder to avoid the later copying of old figures from previous experiments
-    wandb_subfolder = "/" + wandb.run.id if wandb.run is not None else ""
-    figs_folder = f"./figs{wandb_subfolder}"
-    os.makedirs(figs_folder, exist_ok=True)
-    delete_folder_content(f"./figs{wandb_subfolder}")
-
     # Get all the config arguments for a regular experiment run
     config, config_dict = get_complete_config()
 
@@ -50,6 +44,12 @@ def main() -> None:
         dir=experiment_folder,
         name=experiment_name_timestamped,
         )
+
+    # Empty the /figs folder to avoid the later copying of old figures from previous experiments
+    wandb_subfolder = "/" + wandb.run.id if wandb.run is not None else ""
+    figs_folder = f"./figs{wandb_subfolder}"
+    os.makedirs(figs_folder, exist_ok=True)
+    delete_folder_content(f"./figs{wandb_subfolder}")
     
     if config.wandb.sweep.enabled:
         # Merge the current sweep config arguments with the complete default config arguments
