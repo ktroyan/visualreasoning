@@ -1799,7 +1799,7 @@ class LLaDAModel(nn.Module):
             for i in range(steps):
                 if self.config.diffusion.sage_thinking:
                     num_transfer_tokens = get_num_transfer_tokens(block_mask_index, steps - i)
-                    mask_index = (x == mask_id) | (x != thinking_id)
+                    mask_index = (x == mask_id) | (x == thinking_id)
                 else:
                     mask_index = (x == mask_id)
                 if cfg_scale > 0.:
