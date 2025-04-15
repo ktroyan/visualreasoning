@@ -1,7 +1,5 @@
 import os
 import time
-
-import wandb
 import yaml
 import glob
 import datetime
@@ -230,6 +228,7 @@ def get_model_from_ckpt(model_ckpt_path):
     return model
 
 def plot_lr_schedule(lr_values: List) -> str:
+    import wandb
     wandb_subfolder = "/" + wandb.run.id if wandb.run is not None else ""
 
     plt.figure(figsize=(10, 5))
@@ -251,6 +250,8 @@ def plot_absolute_positional_embeddings(pos_embed, num_prefix_tokens=None, viz_a
     If needed, we can truncate the first num_prefix_tokens tokens from the embeddings plot.
     TODO: Fix the labeling of the plot as currently the y-axis does not correspond to the sequence position but to the positional embedding value for each dimension.
     """
+    import wandb
+
     # Ensure the figs directory exists
     wandb_subfolder = "/" + wandb.run.id if wandb.run is not None else ""
     os.makedirs(f'./figs{wandb_subfolder}', exist_ok=True)
