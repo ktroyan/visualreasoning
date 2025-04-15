@@ -1695,6 +1695,9 @@ class LLaDAModel(nn.Module):
                 mask_indices = keep_target.nonzero(as_tuple=True)
                 num_masked = mask_indices[0].numel()
 
+        else:
+            keep_target = mask_target
+
         masked_sequence = target_ids.clone()
         masked_sequence[keep_target] = self.config.mask_token_id  # set to masking token
 
