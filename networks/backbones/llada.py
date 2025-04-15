@@ -1675,21 +1675,38 @@ class LLaDAModel(nn.Module):
 
         # Generate random values per target token for masking decision
         rand_vals_tar = torch.rand((batch_size, target_len), device=target_ids.device)
-        mask_target = (rand_vals_tar < p_mask).bool()  # 0: keep, 1: mask
-
-        masked_sequence = target_ids.clone()
-        masked_sequence[mask_target] = self.config.mask_token_id  # set to masking token
+        mask_target = (rand_vals_tar < p_mask).bool() # 0: keep, 1: mask
 
         if self.config.diffusion.sage_thinking:
-            # Get indices where masking is to be applied
+            # Get all masked indices
             mask_indices = mask_target.nonzero(as_tuple=True)
+            num_masked = mask_indices[0].numel()
 
-            # Calculate the number of random replacements (15%)
-            num_random = int(mask_indices[0].numel() * 0.15)
+            # === STEP 1: 10% of masked tokens -> Keep original (unset from mask_target) ===
+            num_keep = int(num_masked * 0.10)
+            if num_keep > 0:
+                selected_keep = torch.randperm(num_masked, device=target_ids.device)[:num_keep]
+                keep_positions = tuple(index[selected_keep] for index in mask_indices)
+                keep_target = mask_target.clone()
+                keep_target[keep_positions] = False
+                mask_target[keep_positions] = True
+
+                # Update masked indices after removing the kept tokens
+                mask_indices = keep_target.nonzero(as_tuple=True)
+                num_masked = mask_indices[0].numel()
+
+        masked_sequence = target_ids.clone()
+        masked_sequence[keep_target] = self.config.mask_token_id  # set to masking token
+
+        if self.config.diffusion.sage_thinking:
+            # === STEP 2: 10% of remaining masked tokens -> Replace with random token ===
+
+            # Calculate the number of random replacements (10%)
+            num_random = int(num_masked * 0.10)
 
             # Randomly select a subset of these indices
             if num_random > 0:
-                selected_indices = torch.randperm(mask_indices[0].numel())[:num_random]
+                selected_indices = torch.randperm(num_masked)[:num_random]
                 random_positions = tuple(index[selected_indices] for index in mask_indices)
 
                 # Replace with random token IDs in the specified range
