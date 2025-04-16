@@ -1,5 +1,5 @@
 """
-Looped Vision Transformer (ViT) (encoder).
+Vision Transformer (ViT) (encoder).
 It works for REARC, BEFOREARC, and CVR.
 It supports different types of: 2D APE, OPE, PE Mixer, RPE.
 It supports register tokens.
@@ -8,6 +8,7 @@ It supports register tokens.
 import math
 import torch
 import torch.nn as nn
+# from torchtune.modules.position_embeddings import VisionRotaryPositionalEmbeddings
 from rotary_embedding_torch import RotaryEmbedding, apply_rotary_emb
 from einops import rearrange
 import matplotlib.pyplot as plt
@@ -20,7 +21,7 @@ from utility.rearc.utils import one_hot_encode
 from utility.logging import logger
 
 
-__all__ = ['get_looped_vit']
+__all__ = ['get_vit']
 
 
 class PatchEmbed(nn.Module):
