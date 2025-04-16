@@ -12,5 +12,5 @@ declare -a configs=(
 )
 
 for config in "${configs[@]}"; do
-  sbatch run_experiment.submit training.max_epochs=20 wandb.sweep.enabled=false experiment.name=experiment_4 $config
+  sbatch run_experiment.submit wandb.sweep.enabled=false experiment.name=experiment_4 $config
 done
