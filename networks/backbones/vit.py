@@ -1,5 +1,5 @@
 """
-Vision Transformer (ViT) (encoder).
+Looped Vision Transformer (ViT) (encoder).
 It works for REARC, BEFOREARC, and CVR.
 It supports different types of: 2D APE, OPE, PE Mixer, RPE.
 It supports register tokens.
@@ -8,7 +8,6 @@ It supports register tokens.
 import math
 import torch
 import torch.nn as nn
-# from torchtune.modules.position_embeddings import VisionRotaryPositionalEmbeddings
 from rotary_embedding_torch import RotaryEmbedding, apply_rotary_emb
 from einops import rearrange
 import matplotlib.pyplot as plt
@@ -21,7 +20,7 @@ from utility.rearc.utils import one_hot_encode
 from utility.logging import logger
 
 
-__all__ = ['get_vit']
+__all__ = ['get_looped_vit']
 
 
 class PatchEmbed(nn.Module):
@@ -395,15 +394,9 @@ class ViTARCMHSA(nn.Module):
     """ 
     Multi-Head Self-Attention block with ViTARC (Two/Four-slope Alibi) RPE (Relative Positional Encoding).
 
-    NOTE: See ViTARC for RPE code. The code was modified here.
+    NOTE: See ViTARC for RPE code. The code here was modified.
     https://github.com/khalil-research/ViTARC/blob/effa665802946de83807143797247e81e8e7c4b3/vitarc/models/model.py#L195
 
-    TODO: Check why they do not seem to scale the attention scores/weights? Is it correct?
-    TODO: 
-    It seems that we can only define the distance matrix once, and use the same for each layer instead of recomputing it.
-    Is that correct?
-    Also, in VITARC code, they seem to consider some computations only for the first layer(s) ? But I do not know honestly.
-    
     """
     def __init__(self, model_config, image_size, embed_dim, num_heads, rpe_type, grid_2d_distance_matrix, qkv_bias=False, attn_drop=0., proj_drop=0., num_extra_tokens=0):
         super().__init__()
@@ -411,11 +404,6 @@ class ViTARCMHSA(nn.Module):
         self.model_config = model_config
         self.image_size = image_size
         self.num_extra_tokens = num_extra_tokens
-
-        self.rpe_type = rpe_type
-        self.rpe_abs = False    # for now fixed to False
-        self.has_relative_attention_bias = True # for now fixed to True
-        self.relative_attention_num_buckets = 32    # default is 32 as per: https://github.com/huggingface/transformers/blob/953196a43dae6a3c474165fba7d215fcbc7b7730/src/transformers/models/t5/configuration_t5.py#L54
 
         self.num_heads = num_heads
         self.scale = (embed_dim // num_heads) ** -0.5
@@ -426,105 +414,74 @@ class ViTARCMHSA(nn.Module):
         self.proj_drop = nn.Dropout(proj_drop)
 
         ## ViTARC RPE (modified code from ViTARC)
-        self.relative_attention_bias = nn.Embedding(self.relative_attention_num_buckets, self.num_heads)
-        device = self.relative_attention_bias.weight.device
+        self.rpe_type = rpe_type
+        self.rpe_abs = False    # for now fixed to False
 
-        if self.rpe_type in ["Four-diag-slope-Alibi", "Two-slope-Alibi"]:
-            # Two slopes are sufficient here, since we manipulate the distance matrix with pre-added per-diag-direction ratios
-            self.slopes_l = torch.Tensor(self.get_slopes(self.num_heads, start_exponent=1)).to(device)*-1
-            self.slopes_r = torch.Tensor(self.get_slopes(self.num_heads, start_exponent=0.5)).to(device)*-1
+        # Two slopes are sufficient here, since we manipulate the distance matrix with pre-added per-diag-direction ratios
+        self.register_buffer("slopes_l", torch.Tensor(self.get_slopes(self.num_heads, start_exponent=1)) * -1)
+        self.register_buffer("slopes_r", torch.Tensor(self.get_slopes(self.num_heads, start_exponent=0.5)) * -1)    # TODO: Why 0.5 and not 1 like the left slope?
 
-            ## Relative position
-            # Calculate relative positions for the 2D grid
-            # Four different slopes for each diag direction, top-left, top-right, down-left, down-right
-            grid_height = self.image_size # VITARC wrote: 33
-            grid_width = self.image_size # VITARC wrote: 34
-            
-            # TODO: Why + 10 ? Just an arbitrary large distance? Why not much more? when we observe the matrix during a run it also contains distance values such as 61 (which is greater than 44) ?
-            large_dist = self.image_size + 10 # VITARC wrote: 44
+        # Relative position
+        # Calculate relative positions for the 2D grid
+        grid_height = self.image_size # VITARC wrote: 33
+        grid_width = self.image_size # VITARC wrote: 34
+        
+        # TODO: Why + 10 ? Just an arbitrary large distance? Why not much more? when we observe the matrix during a run it also contains distance values such as 61 (which is greater than 44) ?
+        large_dist = self.image_size + 100 # VITARC wrote +10 and get 44
 
-            # Calculate the x and y difference matrices
-            # TODO: I understand that this is the same for each Attention module instance created.
-            #       But this takes a relatively long time to calculate (due to the two for-loops) for no good reason.
-            #       Hence, I compute it in the VisionTransformer class instance if applicable given the config RPE,
-            #       and I store it as self.grid_2d_distance_matrix so that we can pass reuse it by passing it to each
-            #       VITARC Attention module created.
-            
-            # relative_position_2d = self.calculate_2d_relative_positions(grid_height, grid_width)    # [seq_len, seq_len]
+        ## Calculate matrix of x and y differences
+        total_length = grid_height * grid_width + num_extra_tokens
+        
+        distance_matrix = torch.full((total_length, total_length), fill_value=large_dist, dtype=torch.float)  # 100 as a large distance
 
-            # Create distance matrices for x_diff and y_diff including <s> and </s> tokens
-            # TODO: See if correct how I adapted it since we do not have <s> and </s> tokens but possibly extra tokens prepended (e.g., cls, register tokens)
-            # total_length = grid_height * grid_width + 2  # +2 for <s> and </s>
-            total_length = grid_height * grid_width + num_extra_tokens
-            
-            distance_matrix = torch.full((total_length, total_length), fill_value=large_dist, dtype=torch.float)  # 100 as a large distance
+        # Assign the 2D relative positions to the correct part of the matrix
+        distance_matrix[num_extra_tokens:total_length, num_extra_tokens:total_length] = grid_2d_distance_matrix
 
-            # Assign the 2D relative positions to the correct part of the matrix
-            # TODO: See if correct how I adapated it since we do not have <s> and </s> tokens but possibly extra tokens prepended (e.g., cls, register tokens)
-            # distance_matrix[1:1 + grid_height * grid_width, 1:1 + grid_height * grid_width] = relative_position_2d
-            distance_matrix[num_extra_tokens:total_length, num_extra_tokens:total_length] = grid_2d_distance_matrix
+        # Handle extra tokens relative positions. Extra tokens are assumed to be far from everything
+        distance_matrix[num_extra_tokens, :] = large_dist
+        distance_matrix[:, num_extra_tokens] = large_dist
 
-            # Optionally handle <s> and </s> relative positions
-            # TODO: See if what I did correct. We need to handle extra tokens here (cls, register tokens) instead of VITARC's <s> and </s>.
-            #       Moreover, we do not consider extra tokens appended, only prepended, so we can comment out the two other lines below ? 
-            distance_matrix[num_extra_tokens, :] = large_dist  # <s> is far from everything
-            distance_matrix[:, num_extra_tokens] = large_dist
-            # distance_matrix[-1, :] = large_dist+1  # </s> is far from everything
-            # distance_matrix[:, -1] = large_dist+1
-
-            self.distance_matrix_2D = distance_matrix   # [total_length, total_length]; distance matrix for the 2D grid with extra tokens prepended    
+        self.register_buffer("distance_matrix", distance_matrix)   # [total_length, total_length]; distance matrix for the 2D grid with extra tokens
 
         
     def get_slopes(self, n, start_exponent=1):
+        """ ViTARC. Create the slopes for the relative position bias. """
         def get_geometric_slopes(n, start_exponent):
-            start = 2 ** (-start_exponent)  # Starting value 2^(-start_exponent)
-            ratio = 2 ** -1  # Halving each step
+            start = 2 ** (-start_exponent)  # starting value 2^(-start_exponent)
+            ratio = 2 ** -1     # halving each step
             return [start * (ratio ** i) for i in range(n)]
 
         if math.log2(n).is_integer():
             return get_geometric_slopes(n, start_exponent)
+        
         else:
             closest_power_of_2 = 2 ** math.floor(math.log2(n))
             return (get_geometric_slopes(closest_power_of_2, start_exponent) +
                     self.get_slopes(2 * closest_power_of_2, start_exponent)[0::2][:n - closest_power_of_2])    
 
 
+    def compute_bias(self, query_length, key_length, relative_position, device):
+        """ ViTARC. Compute binned relative position bias. """
 
-
-    def compute_bias(self, query_length, key_length, device=None, relative_position=None):
-        """Compute binned relative position bias"""
-        if device is None:
-            device = self.relative_attention_bias.weight.device
-
-        if self.rpe_type in ["NoRPE"]:
-            # Zeros
-            return torch.zeros((1, self.num_heads, query_length, key_length), device=device)        
-        
-        elif self.rpe_type in ["Four-diag-slope-Alibi", "Two-slope-Alibi"]:            
-            relative_position = relative_position.to(device)
-
-            if self.rpe_abs:
-                relative_position = torch.abs(relative_position).unsqueeze(0).expand(self.num_heads, -1,-1)
-            else:
-                relative_position = relative_position.unsqueeze(0).expand(self.num_heads, -1,-1)
-
-            self.slopes_l = self.slopes_l.to(device)
-            self.slopes_r = self.slopes_r.to(device)
-
-            # relative_position is pre-mult with factor 2**0.25 for top-right, down-right
-            alibi_left = self.slopes_l.unsqueeze(1).unsqueeze(1) * relative_position
-            alibi_right = self.slopes_r.unsqueeze(1).unsqueeze(1) * relative_position
-
-            values = torch.triu(alibi_right) + torch.tril(alibi_left)
-
-            # Slice the relevant part of the bias before reshaping
-            values = values[:, :query_length, :key_length]  # Slicing the tensor before reshaping
-            values = values.view(1, self.num_heads, query_length, key_length)  # shape (1, num_heads, query_length, key_length)            
-
-            return values            
+        if self.rpe_abs:
+            relative_position = torch.abs(relative_position).unsqueeze(0).expand(self.num_heads, -1, -1)
         else:
-            # Zeros
-            return torch.zeros((1, self.num_heads, query_length, key_length), device=device)  
+            relative_position = relative_position.unsqueeze(0).expand(self.num_heads, -1, -1)
+
+        self.slopes_l = self.slopes_l.to(device)
+        self.slopes_r = self.slopes_r.to(device)
+
+        # relative_position is pre-mult with factor 2**0.25 for top-right, down-right
+        alibi_left = self.slopes_l.unsqueeze(1).unsqueeze(1) * relative_position
+        alibi_right = self.slopes_r.unsqueeze(1).unsqueeze(1) * relative_position
+
+        values = torch.triu(alibi_right) + torch.tril(alibi_left)
+
+        # Slice the relevant part of the bias before reshaping
+        values = values[:, :query_length, :key_length]  # Slicing the tensor before reshaping
+        values = values.view(1, self.num_heads, query_length, key_length)  # shape (1, num_heads, query_length, key_length)            
+
+        return values            
 
     def forward(self, x):
         
@@ -543,27 +500,21 @@ class ViTARCMHSA(nn.Module):
         x_q, x_k, x_v = x_qkv[0], x_qkv[1], x_qkv[2]    # ([B, num_heads, seq_len, head_embed_dim], [B, num_heads, seq_len, head_embed_dim], [B, num_heads, seq_len, head_embed_dim])
 
         # Compute the attention scores
-        attn = (x_q @ x_k.transpose(-2, -1))    # [B, num_heads, seq_len, seq_len]
-        attn_scaled = attn * self.scale   # [B, num_heads, seq_len, seq_len]
+        attn = (x_q @ x_k.transpose(-2, -1))    # [B, num_heads, seq_len, seq_len]; logits
+        attn_scaled = attn * self.scale   # [B, num_heads, seq_len, seq_len]; scaled logits
 
-        ## VITARC. Compute relative bias for RPE
-        # Position bias should be [B, num_heads, seq_len, seq_len]
-        if not self.has_relative_attention_bias:
-            position_bias = torch.zeros((1, self.num_heads, seq_len, seq_len), device=device, dtype=attn.dtype)
-            if self.training:   # NOTE: I removed self.gradient_checkpointing check since default seems to be False as per: https://github.com/huggingface/transformers/blob/953196a43dae6a3c474165fba7d215fcbc7b7730/src/transformers/models/t5/modeling_t5.py#L906
-                position_bias.requires_grad = True
-        else:
-            if self.rpe_type in ["Four-diag-slope-Alibi", "Two-slope-Alibi"]:
-                position_bias = self.compute_bias(seq_len, seq_len, device=device, relative_position=self.distance_matrix_2D)
-            else:                    
-                position_bias = self.compute_bias(seq_len, seq_len, device=device, relative_position=None) 
+        ## ViTARC. Compute relative bias and add it to the attention logits for RPE
+        position_bias = self.compute_bias(seq_len, seq_len, relative_position=self.distance_matrix, device=device)  # [B, num_heads, seq_len, seq_len]
+        
+        # TODO:
+        # See if correct to add the position bias to the unscaled logits and to never scale them?
+        # Alibi says we should scale but ViTARC code does not seem to do it?
+        attn += position_bias
 
-        attn += position_bias   # TODO: See if correct to add the position bias to the unscaled scores and to never scale them?
-
-        scores = attn   # [B, num_heads, seq_len, seq_len]
+        logits = attn   # [B, num_heads, seq_len, seq_len]
 
         ## As usual
-        attn_scores = self.softmax(scores)   # [B, num_heads, seq_len, seq_len]; attention weights
+        attn_scores = self.softmax(logits)   # [B, num_heads, seq_len, seq_len]; attention weights
         attn_scores = self.attn_drop(attn_scores)   # [B, num_heads, seq_len, seq_len]; dropout
         self.attn_scores = attn_scores    # store the attention scores for visualization
         
@@ -572,7 +523,7 @@ class ViTARCMHSA(nn.Module):
         x = self.proj(x)    # [B, seq_len, embed_dim]; linearly project the new embeddings
         x = self.proj_drop(x)   # [B, seq_len, embed_dim]; dropout
 
-        ## ViTARC. 
+        ## ViTARC.
         # TODO: They return the position bias as well, but I don't (?)
 
         return x
@@ -735,11 +686,11 @@ class TransformerLayer(nn.Module):
 
     def forward(self, x):
         x = x + self.attn(self.first_norm(x))   # [B, seq_len, embed_dim]; this uses norm first and then attention
-        x = x + self.ff(self.second_norm(x))   # [B, seq_len, embed_dim]
+        x = x + self.ff(self.second_norm(x))    # [B, seq_len, embed_dim]
         return x, self.attn.attn_scores
 
-
 def calculate_2d_relative_positions(grid_height, grid_width, rpe_type):
+    """ ViTARC. Calculate the 2D relative positions of all the pixels in the grid. """
     if rpe_type == "Four-diag-slope-Alibi":
         # Define direction-specific factors
         # Pre-mult those to diagonal directions
@@ -882,12 +833,13 @@ class VisionTransformer(nn.Module):
             rpe_type = model_config.rpe.rpe_type
 
             if rpe_type in ["Four-diag-slope-Alibi", "Two-slope-Alibi"]:
-                self.grid_2d_distance_matrix = calculate_2d_relative_positions(self.image_size, self.image_size, rpe_type)
+                grid_2d_distance_matrix = calculate_2d_relative_positions(self.image_size, self.image_size, rpe_type)
             else:
-                self.grid_2d_distance_matrix = None
+                grid_2d_distance_matrix = None
 
         else:
             rpe_type = None
+            grid_2d_distance_matrix = None
 
         ## Transformer Encoder Layers
         self.transformer_layers = nn.ModuleList([
@@ -903,7 +855,7 @@ class VisionTransformer(nn.Module):
                 ff_drop=network_config.ff_dropout_rate,
                 num_extra_tokens=self.num_extra_tokens,
                 rpe_type=rpe_type,
-                grid_2d_distance_matrix=self.grid_2d_distance_matrix
+                grid_2d_distance_matrix=grid_2d_distance_matrix
             )
             for _ in range(self.network_config.num_layers)
             ])
