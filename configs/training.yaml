@@ -14,7 +14,7 @@ training:
     refresh_rate: ${resolve_if_then_else:${training.progress_bar.enabled},1} # every how many number of batches to refresh the TQDM. 0 for no refresh
   # Trainer
   trainer_precision: "16-mixed" # "16-mixed" usually for NVIDIA GPUs, "bf16-mixed" for TPUs and newer NVIDIA GPUs?
-  max_epochs: 80
+  max_epochs: 40
   log_every_n_steps: 5
   checkpointing:
     enabled: true

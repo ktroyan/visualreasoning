@@ -3,12 +3,12 @@
 declare -a configs=(
   ""
   "backbone_network.diffusion.steps=32"
-  "backbone_network.diffusion.steps=64"
-  "backbone_network.diffusion.steps=128"
-  "backbone_network.diffusion.sage_thinking=true"
-  "backbone_network.diffusion.steps=32 backbone_network.diffusion.sage_thinking=true"
-  "backbone_network.diffusion.steps=64 backbone_network.diffusion.sage_thinking=true"
-  "backbone_network.diffusion.steps=128 backbone_network.diffusion.sage_thinking=true"
+  # "backbone_network.diffusion.steps=64"
+  # "backbone_network.diffusion.steps=128"
+  # "backbone_network.diffusion.sage_thinking=true"
+  # "backbone_network.diffusion.steps=32 backbone_network.diffusion.sage_thinking=true"
+  # "backbone_network.diffusion.steps=64 backbone_network.diffusion.sage_thinking=true"
+  # "backbone_network.diffusion.steps=128 backbone_network.diffusion.sage_thinking=true"
 )
 
 for config in "${configs[@]}"; do
