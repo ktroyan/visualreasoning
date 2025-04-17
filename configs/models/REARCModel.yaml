@@ -30,7 +30,7 @@ model:
       enabled: true
       type: 'linear' # choices: 'linear'
       num_steps: 200.0
-    lr: 0.0003
+    lr: 0.0002
     wd: 0.01
   attention_map:
     enabled: false
