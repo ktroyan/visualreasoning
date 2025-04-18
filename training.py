@@ -191,9 +191,9 @@ def init_callbacks(config, training_folder):
 
     # Model checkpoint callback
     if config.training.checkpointing.enabled:
-        if config.training.checkpointing.monitored_metric == 'val_loss':
+        if 'loss' in config.training.checkpointing.monitored_metric:
             mode = 'min'
-        elif config.training.checkpointing.monitored_metric == 'val_acc':
+        elif 'acc' in config.training.checkpointing.monitored_metric:
             mode = 'max'
         else:
             raise ValueError(f"Unknown monitored metric for model checkpoint: {config.training.checkpointing.monitored_metric}")
@@ -210,9 +210,9 @@ def init_callbacks(config, training_folder):
 
     # Early stopping callback
     if config.training.early_stopping.enabled:
-        if config.training.early_stopping.monitored_metric == 'val_loss':
+        if 'loss' in config.training.early_stopping.monitored_metric:
             mode = 'min'
-        elif config.training.early_stopping.monitored_metric == 'val_acc':
+        elif 'acc' in config.training.early_stopping.monitored_metric:
             mode = 'max'
         else:
             raise ValueError(f"Unknown monitored metric for early stopping: {config.training.early_stopping.monitored_metric}")

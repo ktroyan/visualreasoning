@@ -845,7 +845,6 @@ class REARCModel(VisReasModel):
             x = x.flatten(1)
             assert x.shape == y.shape, "Input and target sequences must have the same shape for LLaDA"
 
-            # TODO: Also implement an attention mask to ignore the padding tokens (10) in the input sequence
 
             if self.training:
                 # training -> mask the input sequence before processing
@@ -858,7 +857,7 @@ class REARCModel(VisReasModel):
                 # Optional, ignore padding and NL Token
                 # attention_mask = self.encoder.get_attention_mask(xy_masked)
 
-                logits = self.forward_sample(samples_task_id, x=xy_masked, y=xy) # TODO: Debugging here, was xy_masked, xy
+                logits = self.forward_sample(samples_task_id, x=xy_masked, y=xy)
 
             else:
                 # inference -> LLaDA Diffusion Process
@@ -872,7 +871,7 @@ class REARCModel(VisReasModel):
             logits = self.forward_sample(samples_task_id, x, y)
             mask = None
 
-        return logits, mask # TODO: use mask in the loss to only calculate the loss and metrics for the tokens that are masked (other tokens are given as input to the model)
+        return logits, mask
 
     def forward_sample(self, samples_task_id, x, y):
         # Encode the input sequence
