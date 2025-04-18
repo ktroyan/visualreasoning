@@ -1,9 +1,19 @@
+"""
+Vision Transformer (ViT) (encoder).
+It works for REARC, BEFOREARC, and CVR.
+It supports different types of: 2D APE, OPE, PE Mixer, RPE.
+It supports register tokens.
+"""
+
+import math
 import torch
 import torch.nn as nn
 # from torchtune.modules.position_embeddings import VisionRotaryPositionalEmbeddings
 from rotary_embedding_torch import RotaryEmbedding, apply_rotary_emb
 from einops import rearrange
 import matplotlib.pyplot as plt
+import torch.nn.functional as F
+
 
 # Personal codebase dependencies
 from utility.utils import plot_absolute_positional_embeddings
@@ -30,8 +40,9 @@ class PatchEmbed(nn.Module):
         super().__init__()
 
         # TODO: See if it is correct to create patches (in the forward pass) without the extra tokens (so not considered when creating the artificial channels)
+        
         self.base_config = base_config
-        if self.base_config.data_env == 'REARC':
+        if self.base_config.data_env in ['REARC', 'BEFOREARC']:
             self.num_token_categories = num_token_categories
             if self.num_token_categories is not None:
                 in_channels = self.num_token_categories
@@ -46,7 +57,7 @@ class PatchEmbed(nn.Module):
         self.patch_proj = nn.Conv2d(in_channels=in_channels, out_channels=embed_dim, kernel_size=patch_size, stride=patch_size)
 
     def forward(self, x):
-        if self.base_config.data_env == 'REARC':
+        if self.base_config.data_env in ['REARC', 'BEFOREARC']:
             if self.num_token_categories is not None:
                 x = one_hot_encode(x, self.num_token_categories)  # add a channel dimension for the input image: [B, C=num_token_categories, H, W] <-- [B, H, W]
             else:
@@ -57,70 +68,288 @@ class PatchEmbed(nn.Module):
         x = x.transpose(1, 2)  # [B, num_patches, embed_dim], where num_patches = H*W = seq_len
         return x
 
-def create_absolute_positional_encoding(ape_type: str, seq_len: int, embed_dim: int, patch_embed: PatchEmbed, num_extra_tokens: int) -> nn.Parameter:
-    """ 
-    Create and return the desired APE (absolute positional embedding).
-    The APE will be added to the input embeddings of the backbone/encoder mode (e.g., ViT) during the forward pass.
-    
-    NOTE: The PE is considered for the actual tokens and other special types of tokens to predict (e.g., pad tokens)
-          However, the extra tokens (e.g., [cls] and register tokens) are not considered for the PE.
-          The PE should still be of the correct size since it is added to the whole input embeddings which include the extra tokens.
+class AbsolutePositionalEncoding(nn.Module):
     """
+    NOTE: Code adapted from the ViTARC repo. See their original class ViTARCEmbedding.
+
+    Support APEs:
+        - learned APE
+        - 2D sin-cos APE
+        - 2D sin-cos APE with OPE (Object Positional Encoding)
+
+    Supported PE mixer strategies:
+        - 'hardcoded_normalization'
+        - 'learnable_scaling'
+        - 'weighted_sum'
+        - 'weighted_sum_no_norm'
+        - 'learnable_scaling_vec'
+        - 'weighted_sum_vec'
+        - 'weighted_sum_no_norm_vec'
+        - 'layer_norm'
+        - 'default' (simple addition of the APE to the input embeddings)
+    """
+    def __init__(self, model_config, network_config, image_size, seq_len, patch_embed, embed_dim, num_extra_tokens, ape_type, mixer_strategy='default'):
+        super().__init__()
+
+        self.model_config = model_config
+        self.network_config = network_config
+        self.image_size = image_size
+        self.seq_len = seq_len
+        self.patch_embed = patch_embed
+        self.num_extra_tokens = num_extra_tokens
+        self.embed_dim = embed_dim
+
+        self.mixer_strategy = mixer_strategy
+
+        ## APE (static creation, as there is no OPE)
+        if not model_config.ope.enabled:
+            # We can already create the APE as it does not have to changed depending on the input sample
+            self.static_ape = self.create_ape(image_size=image_size,
+                                              seq_len=seq_len,
+                                              patch_embed=patch_embed,
+                                              embed_dim=embed_dim,
+                                              num_extra_tokens=num_extra_tokens,
+                                              ape_type=ape_type
+                                              )
+
+        ## PE Mixer
+        if self.mixer_strategy in ['learnable_scaling_vec', 'weighted_sum_vec', 'weighted_sum_no_norm_vec']:
+            self.position_scale = nn.Parameter(torch.ones(1, embed_dim))
+            self.input_weight = nn.Parameter(torch.ones(1, embed_dim))
+            self.position_weight = nn.Parameter(torch.ones(1, embed_dim))
+
+        if self.mixer_strategy in ['learnable_scaling', 'weighted_sum', 'weighted_sum_no_norm']:
+            self.position_scale = nn.Parameter(torch.ones(1))
+            self.input_weight = nn.Parameter(torch.ones(1))
+            self.position_weight = nn.Parameter(torch.ones(1))
+
+        if self.mixer_strategy == 'layer_norm':
+            self.layer_norm = nn.LayerNorm(embed_dim)
+
+
+        ## Dropout post APE
+        self.ape_drop = nn.Dropout(p=self.network_config.ape_dropout_rate)
+
+
+    def create_ape(self, image_size, seq_len, patch_embed, embed_dim, num_extra_tokens, ape_type) -> nn.Parameter:
+        """ 
+        Create and return the desired APE (absolute positional embedding).
+        The APE will be added to the input embeddings of the backbone/encoder mode (e.g., ViT) during the forward pass.
+        
+        NOTE: The PE is considered for the actual tokens and other special types of tokens to predict (e.g., pad tokens)
+            However, the extra tokens (e.g., [cls] and register tokens) are not considered for the PE.
+            The PE should still be of the correct size since it is added to the whole input embeddings which include the extra tokens.
+
+        TODO:
+        Check if 2D sin-cos APE is correctly implemented.
+        """
+        
+        num_pos_embeds = seq_len + num_extra_tokens
+
+        if ape_type == 'learn':    # learned APE
+
+            pos_embed_learned = nn.Parameter(torch.randn(1, seq_len, embed_dim))  # [1, seq_len, embed_dim]; by default requires_grad=True
+
+            if num_extra_tokens > 0:
+                # Set the PE for the extra tokens to zero (i.e., no PE for the extra tokens since PE is added to the input embeddings and the PE is not learned)
+                pos_embed_extra_tokens = torch.zeros(1, num_extra_tokens, embed_dim, dtype=torch.float32, requires_grad=False)     # define the PE for the [cls] and register tokens to be concatenated at the beginning of the PE for the patches
+                pos_embed = torch.cat([pos_embed_extra_tokens, pos_embed_learned], dim=1)   # [1, num_pos_embeds, embed_dim]
+            
+            else:
+                pos_embed = pos_embed_learned
+
+        elif ape_type == '2dsincos':    # fixed 2D sin-cos APE 
+
+            # PE dimension per axis and sin/cos
+            assert embed_dim % 4 == 0, 'Embed dimension must be divisible by 4 for 2D sin-cos position embedding'
+            pos_dim = embed_dim // 4
+
+            # Frequencies
+            omega = 1. / (10000** (torch.arange(pos_dim, dtype=torch.float32) / pos_dim))   # [pos_dim]
     
-    num_pos_embeds = seq_len + num_extra_tokens
+            # Create grid xy coordinates
+            H, W = (patch_embed.grid_size, patch_embed.grid_size)   # assume square input
+            seq_h = torch.arange(H, dtype=torch.float32)  # [H]; we will want y/vertical/rows
+            seq_w = torch.arange(W, dtype=torch.float32)  # [W]; we will want x/horizontal/cols
+            grid_y, grid_x = torch.meshgrid(seq_h, seq_w, indexing='ij')  # [H, W], [H, W]; ij indexing for usual/consistent image layout, so row is y, col is x
 
-    if ape_type == 'learn':    # learned positional encoding
+            grid_x_flat = grid_x.flatten()  # [seq_len]
+            grid_y_flat = grid_y.flatten()  # [seq_len]
 
-        pos_embed_learned = nn.Parameter(torch.randn(1, seq_len, embed_dim))  # [1, seq_len, embed_dim]; by default requires_grad=True
+            # Compute the input values for sincos and xy positions
+            out_x = torch.einsum('m,d->md', grid_x_flat, omega)  # [seq_len, pos_dim]; outer product
+            out_y = torch.einsum('m,d->md', grid_y_flat, omega)  # [seq_len, pos_dim]; outer product
 
-        if num_extra_tokens > 0:
-            # Set the PE for the extra tokens to zero (i.e., no PE for the extra tokens since PE is added to the input embeddings and the PE is not learned)
-            pos_embed_extra_tokens = torch.zeros(1, num_extra_tokens, embed_dim, dtype=torch.float32, requires_grad=False)     # define the PE for the [cls] and register tokens to be concatenated at the beginning of the PE for the patches
-            pos_embed = torch.cat([pos_embed_extra_tokens, pos_embed_learned], dim=1)   # [1, num_pos_embeds, embed_dim]
-        
+            # Concatenate the computed sin/cos of the x and y positions
+            pos_embed = torch.cat([torch.sin(out_x),
+                                   torch.cos(out_x),
+                                   torch.sin(out_y),
+                                   torch.cos(out_y)], dim=1)  # [seq_len, embed_dim]
+            
+            pos_embed = pos_embed.unsqueeze(0)  # [1, seq_len, embed_dim]; create a batch dimension so that it can be used for batched samples
+
+            # Handle extra tokens (e.g., cls, register tokens)
+            if num_extra_tokens > 0:
+                extra_pe = torch.zeros([1, num_extra_tokens, embed_dim], dtype=torch.float32)
+                pos_embed = nn.Parameter(torch.cat([extra_pe, pos_embed], dim=1))  # [1, seq_len+num_extra_tokens, embed_dim]; concatenate along sequence dimension
+            else:
+                pos_embed = nn.Parameter(pos_embed) # [1, seq_len, embed_dim]
+
+            # Ensure PE is fixed/non-learnable
+            pos_embed.requires_grad = False
+            
         else:
-            pos_embed = pos_embed_learned
+            raise ValueError(f"Invalid positional encoding type: {ape_type}. Choose from ['learn', '2dsincos']")
 
-    elif ape_type == '2dsincos':    # 2D sin-cos fixed positional embedding
-        h, w = (patch_embed.grid_size, patch_embed.grid_size)
-        grid_w = torch.arange(w, dtype=torch.float32)
-        grid_h = torch.arange(h, dtype=torch.float32)
-        grid_w, grid_h = torch.meshgrid(grid_w, grid_h)
-        assert embed_dim % 4 == 0, 'Embed dimension must be divisible by 4 for 2D sin-cos position embedding'
-        pos_dim = embed_dim // 4
-        omega = torch.arange(pos_dim, dtype=torch.float32) / pos_dim
-        omega = 1. / (10000**omega)
-        out_w = torch.einsum('m,d->md', [grid_w.flatten(), omega])
-        out_h = torch.einsum('m,d->md', [grid_h.flatten(), omega])
-        pos_embed = torch.cat([torch.sin(out_w), torch.cos(out_w), torch.sin(out_h), torch.cos(out_h)], dim=1)[None, :, :]
+        # Visualize PE
+        plot_absolute_positional_embeddings(pos_embed, num_prefix_tokens=num_extra_tokens, viz_as_heatmap=False)
 
-        # Handle extra tokens such as the [cls] and register tokens
+        return pos_embed    # [1, seq_len(+num_extra_tokens), embed_dim]
+
+    def create_ape_with_ope(self, image_size, seq_len, patch_embed, embed_dim, num_extra_tokens, x_grid_object_ids) -> nn.Parameter:
+        """
+        Dynamic PE.
+        Build 2D Sin-Cos Absolute Positional Embeddings (APE) + Object Positional Encoding (OPE).
+
+        seq_len is the number of positions to consider for the positional encoding, without the extra tokens.
+        For example, the length of the input grid with all sorts of special (not extra) tokens added, padded to a fixed size and flattened.
+        
+        The object IDs grid x_grid_object_ids is [B, seq_len] (i.e., already flattened).
+
+        Note that this method computes an APE (with OPE considered) for each input sample in the batch since
+        it is a dynamic APE computed (i.e., computed during each forward pass, and for each sample of a given batch).
+
+        TODO:
+        Check if how I attribute the dimensions is correct.
+        """
+
+        num_pos_embeds = seq_len + num_extra_tokens
+
+        # Check if x_grid_object_ids is flattened in the spatial dimensions
+        assert x_grid_object_ids.ndim == 2, "x_grid_object_ids should be a 2D tensor [B, seq_len]"
+        
+        B = x_grid_object_ids.shape[0]
+        device = x_grid_object_ids.device
+
+        # Allocate the embedding dimension for the xy positions and the object positions
+        # We want embed_dim = embed_dim//2 (object) + embed_dim//4 (x) + embed_dim//4 (y)
+        # But each sin,cos pair gets half of their allocation, so we divide more by 2
+        assert embed_dim % 8 == 0, 'Embed dimension must be divisible by 8 for 2D sin-cos PE with OPE'
+        obj_dim = embed_dim // 4    # dimension for the object PE for each sinusoid
+        xy_pos_dim = embed_dim // 8 # dimension for the x and y positions for each sinusoid
+
+        # Frequencies
+        omega_xy_pos = (1. / (10000 ** (torch.arange(xy_pos_dim, dtype=torch.float32) / xy_pos_dim))).to(device)    # [embed_dim//8]
+        omega_obj = (1. / (10000 ** (torch.arange(obj_dim, dtype=torch.float32) / obj_dim))).to(device)             # [embed_dim//4]
+
+        # Create grid xy coordinates
+        H, W = (patch_embed.grid_size, patch_embed.grid_size)  # assume square input
+        seq_h = torch.arange(H, dtype=torch.float32)   # [B, H]; for y-coordinates
+        seq_w = torch.arange(W, dtype=torch.float32)   # [B, W]; for x-coordinates
+        grid_x, grid_y = torch.meshgrid(seq_w, seq_h, indexing='ij')  # indexing 'ij' for (x,y) instead of (row,col), and repeat the coordinates across rows and columns respectively
+
+        grid_x_flat = grid_x.flatten().to(device)
+        grid_y_flat = grid_y.flatten().to(device)
+
+        # 2D-sincos APE for x and y positions (same across batch samples)
+        out_x = torch.einsum('n,d->nd', grid_x_flat, omega_xy_pos)      # [seq_len, embed_dim//8]; outer product; frequency-transformed positions for x
+        out_y = torch.einsum('n,d->nd', grid_y_flat, omega_xy_pos)      # [seq_len, embed_dim//8]; outer product; frequency-transformed positions for y
+        x_pe = torch.cat([torch.sin(out_x), torch.cos(out_x)], dim=1)   # [seq_len, embed_dim//4]; x-coordinate encoding
+        y_pe = torch.cat([torch.sin(out_y), torch.cos(out_y)], dim=1)   # [seq_len, embed_dim//4]; y-coordinate encoding
+
+        # Expand to batch
+        x_pe = x_pe.unsqueeze(0).expand(B, -1, -1)  # [B, seq_len, embed_dim//4]
+        y_pe = y_pe.unsqueeze(0).expand(B, -1, -1)  # [B, seq_len, embed_dim//4]
+
+        # OPE (per sample in the batch)
+        x_grid_object_ids = x_grid_object_ids.to(dtype=torch.float32)           # [B, seq_len]
+        out_obj = x_grid_object_ids.unsqueeze(-1) * omega_obj                   # [B, seq_len, embed_dim//4]
+        obj_pe = torch.cat([torch.sin(out_obj), torch.cos(out_obj)], dim=-1)    # [B, seq_len, embed_dim//2]
+
+        # Combined PE: APE with OPE
+        pos_embed = torch.cat([obj_pe, x_pe, y_pe], dim=-1)  # [B, seq_len, embed_dim]; NOTE: ViTARC prepends the OPE
+
+        # Handle extra tokens (e.g., cls, register tokens). 
+        # We simply increase the number of positions in the PE, so we don't create a useful PE for the extra tokens
         if num_extra_tokens > 0:
-            # Set the PE for the extra tokens to zero (i.e., no PE for the extra tokens since PE is added to the input embeddings and the PE is not learned)
-            pos_embed_extra_tokens = torch.zeros([1, num_extra_tokens, embed_dim], dtype=torch.float32)     # define the PE for the [cls] and register tokens to be concatenated at the beginning of the PE for the patches
-            pos_embed = nn.Parameter(torch.cat([pos_embed_extra_tokens, pos_embed], dim=1))    # [1, (num_patches+num_extra_tokens), embed_dim]; the PE will be added to the input embeddings of the ViT in the forward pass of the ViT backbone (VisionTransformer)
+            extra_pe = torch.zeros((B, num_extra_tokens, embed_dim), dtype=torch.float32, device=pos_embed.device)
+            pos_embed = torch.cat([extra_pe, pos_embed], dim=1)  # [B, num_extra_tokens + seq_len, embed_dim]
+
+        # Make sure the APE (with OPE) is fixed/non-learnable
+        pos_embed = nn.Parameter(pos_embed, requires_grad=False)  # [B, seq_len (+num_extra_tokens), embed_dim]; fixed/non-learnable
+
+        # Visualize PE
+        # NOTE: Should not uncomment this line if the goal is not to observe the PE, as this would plot for each batch during training
+        # plot_absolute_positional_embeddings(pos_embed, num_prefix_tokens=num_extra_tokens)
+
+        return pos_embed
+
+
+    def forward(self, inputs_embeds, x_grid_object_ids):
+        """
+        Args:
+            inputs_embeds (torch.Tensor): [batch_size, seq_len, embed_dim]
+            x_grid_object_ids (torch.Tensor): [batch_size, seq_len, 1] or [batch_size, seq_len]
+
+        Returns:
+            output_embeds (torch.Tensor): [batch_size, seq_len, embed_dim]
+        """
+
+        # Get the APE
+        if x_grid_object_ids is not None:
+            # Dynamic creation
+            position_embeds = self.create_ape_with_ope(image_size=self.image_size,
+                                                       seq_len=self.seq_len,
+                                                       patch_embed=self.patch_embed,
+                                                       embed_dim=self.embed_dim,
+                                                       num_extra_tokens=self.num_extra_tokens,
+                                                       x_grid_object_ids=x_grid_object_ids
+                                                       )    # [batch_size, seq_len, embed_dim]; created for each sample in the batch
+        else:
+            # Static creation
+            position_embeds = self.static_ape   # [1, seq_len, embed_dim]; create for a single sample, so need to be expanded to the batch size
+            position_embeds = position_embeds.expand(inputs_embeds.shape[0], -1, -1)  # [batch_size, seq_len, embed_dim]
+
+
+        # PE Mixer strategy
+        strategy = self.mixer_strategy
+
+        if strategy == 'hardcoded_normalization':
+            inputs_embeds_norm = F.normalize(inputs_embeds, p=2, dim=-1)
+            position_embeds_norm = F.normalize(position_embeds, p=2, dim=-1)
+            output_embeds = inputs_embeds_norm + position_embeds_norm
+
+        elif strategy in ['learnable_scaling', 'learnable_scaling_vec']:
+            scaled_position_embeds = self.position_scale * position_embeds
+            output_embeds = inputs_embeds + scaled_position_embeds
+
+        elif strategy in ['weighted_sum', 'weighted_sum_vec']:
+            inputs_embeds_norm = F.normalize(inputs_embeds, p=2, dim=-1)
+            position_embeds_norm = F.normalize(position_embeds, p=2, dim=-1)
+            output_embeds = (self.input_weight * inputs_embeds_norm) + (self.position_weight * position_embeds_norm)
+
+        elif strategy in ['weighted_sum_no_norm', 'weighted_sum_no_norm_vec']:
+            output_embeds = (self.input_weight * inputs_embeds) + (self.position_weight * position_embeds)
+
+        elif strategy == 'layer_norm':
+            combined_embeds = inputs_embeds + position_embeds
+            output_embeds = self.layer_norm(combined_embeds)
+
+        elif strategy == 'default':
+            output_embeds = inputs_embeds + position_embeds
 
         else:
-            pos_embed = nn.Parameter(pos_embed)
+            raise ValueError(f"Unsupported mixer_strategy: {strategy}")
         
-        pos_embed.requires_grad = False    # NOTE: set to False for the PE to not be learned
+        # Dropout after positional encoding
+        output_embeds = self.ape_drop(output_embeds)
 
-    else:
-        raise ValueError(f"Invalid positional encoding type: {ape_type}. Choose from ['learn', '2dsincos']")
-
-    # Visualize PE
-    plot_absolute_positional_embeddings(pos_embed, num_prefix_tokens=num_extra_tokens)
-
-    return pos_embed    # [1, num_patches(+num_extra_tokens), embed_dim]
+        return output_embeds
 
 class MHSA(nn.Module):
-    """ 
-    Multi-Head Self-Attention block.
+    """ (Vanilla) Multi-Head Self-Attention block. """
 
-    TODO: implement RPE (Relative Positional Encoding) from ViTARC (Two-slope Alibi)
-
-    """
-    def __init__(self, model_config, image_size, embed_dim, num_heads=6, qkv_bias=False, attn_drop=0., proj_drop=0., num_extra_tokens=0):
+    def __init__(self, model_config, image_size, embed_dim, num_heads, qkv_bias=False, attn_drop=0., proj_drop=0., num_extra_tokens=0):
         super().__init__()
 
         self.model_config = model_config
@@ -129,10 +358,10 @@ class MHSA(nn.Module):
 
         self.num_heads = num_heads
         self.scale = (embed_dim // num_heads) ** -0.5
-        self.qkv_proj = nn.Linear(embed_dim, embed_dim * 3, bias=qkv_bias)  # *3 because we want embeddings for q, k, v from the input; this is equivalent to defining three separate linear layers for q, k, and v
+        self.qkv_proj = nn.Linear(embed_dim, embed_dim * 3, bias=qkv_bias)  # W_qkv; *3 because we want embeddings for q, k, v from the input; this is equivalent to defining three separate linear layers (W_q, W_k, W_v) for q, k, and v
         self.softmax = nn.Softmax(dim=-1)
         self.attn_drop = nn.Dropout(attn_drop)
-        self.proj = nn.Linear(embed_dim, embed_dim)
+        self.proj = nn.Linear(embed_dim, embed_dim) # W_o
         self.proj_drop = nn.Dropout(proj_drop)
 
     def forward(self, x):
@@ -149,9 +378,10 @@ class MHSA(nn.Module):
         x_q, x_k, x_v = x_qkv[0], x_qkv[1], x_qkv[2]    # ([B, num_heads, seq_len, head_embed_dim], [B, num_heads, seq_len, head_embed_dim], [B, num_heads, seq_len, head_embed_dim])
 
         # Compute the attention scores
-        attn = (x_q @ x_k.transpose(-2, -1))    # [B, num_heads, seq_len, seq_len]
-        attn_scaled = attn * self.scale   # [B, num_heads, seq_len, seq_len]
-        attn_scores = self.softmax(attn_scaled)   # [B, num_heads, seq_len, seq_len]
+        attn = (x_q @ x_k.transpose(-2, -1))    # [B, num_heads, seq_len, seq_len]; attention matrix/logits
+        attn_scaled = attn * self.scale   # [B, num_heads, seq_len, seq_len]; scaled attention logits
+        # NOTE: no masking
+        attn_scores = self.softmax(attn_scaled)   # [B, num_heads, seq_len, seq_len]; attention scores/weights
         attn_scores = self.attn_drop(attn_scores)   # [B, num_heads, seq_len, seq_len]; dropout
         self.attn_scores = attn_scores    # store the attention scores for visualization
 
@@ -161,11 +391,149 @@ class MHSA(nn.Module):
         x = self.proj_drop(x)   # [B, seq_len, embed_dim]; dropout
         return x
 
+class ViTARCMHSA(nn.Module):
+    """ 
+    Multi-Head Self-Attention block with ViTARC (Two/Four-slope Alibi) RPE (Relative Positional Encoding).
+
+    NOTE: See ViTARC for RPE code. The code here was modified.
+    https://github.com/khalil-research/ViTARC/blob/effa665802946de83807143797247e81e8e7c4b3/vitarc/models/model.py#L195
+
+    """
+    def __init__(self, model_config, image_size, embed_dim, num_heads, rpe_type, grid_2d_distance_matrix, qkv_bias=False, attn_drop=0., proj_drop=0., num_extra_tokens=0):
+        super().__init__()
+
+        self.model_config = model_config
+        self.image_size = image_size
+        self.num_extra_tokens = num_extra_tokens
+
+        self.num_heads = num_heads
+        self.scale = (embed_dim // num_heads) ** -0.5
+        self.qkv_proj = nn.Linear(embed_dim, embed_dim * 3, bias=qkv_bias)  # W_qkv; *3 because we want embeddings for q, k, v from the input; this is equivalent to defining three separate linear layers (W_q, W_k, W_v) for q, k, and v
+        self.softmax = nn.Softmax(dim=-1)
+        self.attn_drop = nn.Dropout(attn_drop)
+        self.proj = nn.Linear(embed_dim, embed_dim) # W_o
+        self.proj_drop = nn.Dropout(proj_drop)
+
+        ## ViTARC RPE (modified code from ViTARC)
+        self.rpe_type = rpe_type
+        self.rpe_abs = False    # for now fixed to False
+
+        # Two slopes are sufficient here, since we manipulate the distance matrix with pre-added per-diag-direction ratios
+        self.register_buffer("slopes_l", torch.Tensor(self.get_slopes(self.num_heads, start_exponent=1)) * -1)
+        self.register_buffer("slopes_r", torch.Tensor(self.get_slopes(self.num_heads, start_exponent=0.5)) * -1)    # TODO: Why 0.5 and not 1 like the left slope?
+
+        # Relative position
+        # Calculate relative positions for the 2D grid
+        grid_height = self.image_size # VITARC wrote: 33
+        grid_width = self.image_size # VITARC wrote: 34
+        
+        # TODO: Why + 10 ? Just an arbitrary large distance? Why not much more? when we observe the matrix during a run it also contains distance values such as 61 (which is greater than 44) ?
+        large_dist = self.image_size + 100 # VITARC wrote +10 and get 44
+
+        ## Calculate matrix of x and y differences
+        total_length = grid_height * grid_width + num_extra_tokens
+        
+        distance_matrix = torch.full((total_length, total_length), fill_value=large_dist, dtype=torch.float)  # 100 as a large distance
+
+        # Assign the 2D relative positions to the correct part of the matrix
+        distance_matrix[num_extra_tokens:total_length, num_extra_tokens:total_length] = grid_2d_distance_matrix
+
+        # Handle extra tokens relative positions. Extra tokens are assumed to be far from everything
+        distance_matrix[num_extra_tokens, :] = large_dist
+        distance_matrix[:, num_extra_tokens] = large_dist
+
+        self.register_buffer("distance_matrix", distance_matrix)   # [total_length, total_length]; distance matrix for the 2D grid with extra tokens
+
+        
+    def get_slopes(self, n, start_exponent=1):
+        """ ViTARC. Create the slopes for the relative position bias. """
+        def get_geometric_slopes(n, start_exponent):
+            start = 2 ** (-start_exponent)  # starting value 2^(-start_exponent)
+            ratio = 2 ** -1     # halving each step
+            return [start * (ratio ** i) for i in range(n)]
+
+        if math.log2(n).is_integer():
+            return get_geometric_slopes(n, start_exponent)
+        
+        else:
+            closest_power_of_2 = 2 ** math.floor(math.log2(n))
+            return (get_geometric_slopes(closest_power_of_2, start_exponent) +
+                    self.get_slopes(2 * closest_power_of_2, start_exponent)[0::2][:n - closest_power_of_2])    
+
+
+    def compute_bias(self, query_length, key_length, relative_position, device):
+        """ ViTARC. Compute binned relative position bias. """
+
+        if self.rpe_abs:
+            relative_position = torch.abs(relative_position).unsqueeze(0).expand(self.num_heads, -1, -1)
+        else:
+            relative_position = relative_position.unsqueeze(0).expand(self.num_heads, -1, -1)
+
+        self.slopes_l = self.slopes_l.to(device)
+        self.slopes_r = self.slopes_r.to(device)
+
+        # relative_position is pre-mult with factor 2**0.25 for top-right, down-right
+        alibi_left = self.slopes_l.unsqueeze(1).unsqueeze(1) * relative_position
+        alibi_right = self.slopes_r.unsqueeze(1).unsqueeze(1) * relative_position
+
+        values = torch.triu(alibi_right) + torch.tril(alibi_left)
+
+        # Slice the relevant part of the bias before reshaping
+        values = values[:, :query_length, :key_length]  # Slicing the tensor before reshaping
+        values = values.view(1, self.num_heads, query_length, key_length)  # shape (1, num_heads, query_length, key_length)            
+
+        return values            
+
+    def forward(self, x):
+        
+        ## As usual
+        B, seq_len, embed_dim = x.shape
+        device = x.device
+        
+        # Compute the Queries, Keys, Values from the input embeddings by a linear projection
+        x_qkv = self.qkv_proj(x) # [B, seq_len, 3*embed_dim]
+
+        # Reshape the Queries, Keys, Values for multi-head
+        head_embed_dim = embed_dim // self.num_heads
+        x_qkv = x_qkv.reshape(B, seq_len, 3, self.num_heads, head_embed_dim).permute(2, 0, 3, 1, 4)  # [3, B, num_heads, seq_len, head_embed_dim]
+
+        # Get the Queries, Keys, Values for all heads
+        x_q, x_k, x_v = x_qkv[0], x_qkv[1], x_qkv[2]    # ([B, num_heads, seq_len, head_embed_dim], [B, num_heads, seq_len, head_embed_dim], [B, num_heads, seq_len, head_embed_dim])
+
+        # Compute the attention scores
+        attn = (x_q @ x_k.transpose(-2, -1))    # [B, num_heads, seq_len, seq_len]; logits
+        attn_scaled = attn * self.scale   # [B, num_heads, seq_len, seq_len]; scaled logits
+
+        ## ViTARC. Compute relative bias and add it to the attention logits for RPE
+        position_bias = self.compute_bias(seq_len, seq_len, relative_position=self.distance_matrix, device=device)  # [B, num_heads, seq_len, seq_len]
+        
+        # TODO:
+        # See if correct to add the position bias to the unscaled logits and to never scale them?
+        # Alibi says we should scale but ViTARC code does not seem to do it?
+        attn += position_bias
+
+        logits = attn   # [B, num_heads, seq_len, seq_len]
+
+        ## As usual
+        attn_scores = self.softmax(logits)   # [B, num_heads, seq_len, seq_len]; attention weights
+        attn_scores = self.attn_drop(attn_scores)   # [B, num_heads, seq_len, seq_len]; dropout
+        self.attn_scores = attn_scores    # store the attention scores for visualization
+        
+        # Get the new embeddings from the Values and Attention scores, and concatenate back the heads through reshaping
+        x = (attn_scores @ x_v).transpose(1, 2).reshape(B, seq_len, embed_dim)  # [B, seq_len, embed_dim] <-- [B, seq_len, num_heads, head_embed_dim] <-- [B, num_heads, seq_len, head_embed_dim] 
+        x = self.proj(x)    # [B, seq_len, embed_dim]; linearly project the new embeddings
+        x = self.proj_drop(x)   # [B, seq_len, embed_dim]; dropout
+
+        ## ViTARC.
+        # TODO: They return the position bias as well, but I don't (?)
+
+        return x
+
 class RoPEMHSA(nn.Module):
     """ 
     Multi-Head Self-Attention block including RoPE (RPE).
     """
-    def __init__(self, model_config, image_size, embed_dim, num_heads=6, qkv_bias=False, attn_drop=0., proj_drop=0., num_extra_tokens=0):
+    def __init__(self, model_config, image_size, embed_dim, num_heads, qkv_bias=False, attn_drop=0., proj_drop=0., num_extra_tokens=0):
         super().__init__()
 
         self.model_config = model_config
@@ -239,16 +607,16 @@ class RoPEMHSA(nn.Module):
         # Compute the attention scores
         attn = (x_q @ x_k.transpose(-2, -1))    # [B, num_heads, seq_len, seq_len]; unscaled attention logits
         attn_scaled = attn * self.scale   # [B, num_heads, seq_len, seq_len]; scaled attention logits
-        attn_scores = self.softmax(attn_scaled)   # [B, num_heads, seq_len, seq_len]; attention scores (normalized scaled attention logits)
+        attn_scores = self.softmax(attn_scaled)   # [B, num_heads, seq_len, seq_len]; attention scores/weights (normalized scaled attention logits)
+        # NOTE: no masking
         attn_scores = self.attn_drop(attn_scores)   # [B, num_heads, seq_len, seq_len]; dropout
-        self.attn_scores = attn_scores    # store the attention scores for visualization
+        self.attn_scores = attn_scores    # store the attention scores/weights for visualization
 
         # Get the new embeddings from the Values and Attention scores, and concatenate back the heads through reshaping
         x = (attn_scores @ x_v).transpose(1, 2).reshape(B, seq_len, embed_dim)  # [B, seq_len, embed_dim] <-- [B, seq_len, num_heads, head_embed_dim] <-- [B, num_heads, seq_len, head_embed_dim] 
         x = self.proj(x)    # [B, seq_len, embed_dim]; linearly project the new embeddings
         x = self.proj_drop(x)   # [B, seq_len, embed_dim]; dropout
         return x
-    
 
 class FeedForward(nn.Module):
     """ Feed-Forward Neural Network block """
@@ -270,7 +638,7 @@ class FeedForward(nn.Module):
 
 class TransformerLayer(nn.Module):
     """ Transformer layer """
-    def __init__(self, model_config, image_size, embed_dim, num_heads, mlp_ratio=4., qkv_bias=False, attn_drop=0., attn_proj_drop=0., ff_drop=0., num_extra_tokens=0, rpe_type=None):
+    def __init__(self, model_config, image_size, embed_dim, num_heads, mlp_ratio=4., qkv_bias=False, attn_drop=0., attn_proj_drop=0., ff_drop=0., num_extra_tokens=0, rpe_type=None, grid_2d_distance_matrix=None):
         super().__init__()
 
         self.first_norm = nn.LayerNorm(embed_dim)
@@ -286,8 +654,18 @@ class TransformerLayer(nn.Module):
                                  num_extra_tokens=num_extra_tokens
                                  )
 
-        elif rpe_type == 'vitarc-alibi':
-            raise NotImplementedError("RPE type 'vitarc-alibi' not yet implemented")
+        elif rpe_type in ["Four-diag-slope-Alibi", "Two-slope-Alibi"]:
+            self.attn = ViTARCMHSA(model_config,
+                                   image_size,
+                                   embed_dim,
+                                   num_heads=num_heads,
+                                   rpe_type=rpe_type,
+                                   grid_2d_distance_matrix=grid_2d_distance_matrix,
+                                   qkv_bias=qkv_bias,
+                                   attn_drop=attn_drop,
+                                   proj_drop=attn_proj_drop,
+                                   num_extra_tokens=num_extra_tokens,
+                                   )
 
         else:
             self.attn = MHSA(model_config,
@@ -309,8 +687,51 @@ class TransformerLayer(nn.Module):
 
     def forward(self, x):
         x = x + self.attn(self.first_norm(x))   # [B, seq_len, embed_dim]; this uses norm first and then attention
-        x = x + self.ff(self.second_norm(x))   # [B, seq_len, embed_dim]
+        x = x + self.ff(self.second_norm(x))    # [B, seq_len, embed_dim]
         return x, self.attn.attn_scores
+
+def calculate_2d_relative_positions(grid_height, grid_width, rpe_type):
+    """ ViTARC. Calculate the 2D relative positions of all the pixels in the grid. """
+    if rpe_type == "Four-diag-slope-Alibi":
+        # Define direction-specific factors
+        # Pre-mult those to diagonal directions
+        top_right_factor = 2 ** 0.25
+        down_right_factor = 2 ** 0.25
+    else:
+        top_right_factor = 1.0
+        down_right_factor = 1.0
+    
+    # Create grid coordinates
+    x_coords, y_coords = torch.meshgrid(
+        torch.arange(grid_height, dtype=torch.long),
+        torch.arange(grid_width, dtype=torch.long),
+        indexing='ij'
+    )
+
+    # Flatten the 2D grid coordinates
+    x_flat = x_coords.flatten()
+    y_flat = y_coords.flatten()
+
+    # Initialize the relative position matrix
+    num_positions = grid_height * grid_width
+    relative_position = torch.zeros((num_positions, num_positions), dtype=torch.float)
+
+    # Calculate Manhattan distance between each pair of points
+    for i in range(num_positions):
+        for j in range(num_positions):
+            x_diff = x_flat[i] - x_flat[j]
+            y_diff = y_flat[i] - y_flat[j]
+            manhattan_distance = float(abs(x_diff) + abs(y_diff))  # Convert to float
+
+            # Adjust the distance based on the direction
+            if x_diff < 0 and y_diff < 0:  # Top-right
+                manhattan_distance *= top_right_factor
+            elif x_diff > 0 and y_diff < 0:  # Down-right
+                manhattan_distance *= down_right_factor
+
+            relative_position[i, j] = manhattan_distance
+
+    return relative_position
 
 class VisionTransformer(nn.Module):
     """ Vision Transformer """
@@ -322,7 +743,7 @@ class VisionTransformer(nn.Module):
                  num_channels,
                  num_classes,
                  ):
-        
+
         super().__init__()
 
         self.model_config = model_config
@@ -337,11 +758,14 @@ class VisionTransformer(nn.Module):
 
         self.num_all_tokens = self.seq_len  # essentially seq_len + extra tokens; number of tokens/positions in a sequence (i.e., the extra tokens are also accounted for)
 
-        if base_config.data_env == 'REARC':
-            self.num_token_categories = self.num_classes + 1 + 3 # 10 symbols (0-9) + 1 pad token + 3 x,y,xy border tokens [+ 1 cls token] [+ 1 register token]
-
         self.embed_dim = network_config.embed_dim
         assert self.embed_dim % network_config.num_heads == 0, 'Embedding dimension must be divisible by the number of heads'
+
+        if base_config.data_env in ['REARC', 'BEFOREARC']:
+            if model_config.visual_tokens.enabled:
+                self.num_token_categories = self.num_classes + 1 + 4 # 10 symbols (0-9) + 1 pad token + 4 x,y,xy border tokens and newline tokens
+            else:
+                self.num_token_categories = self.num_classes + 1
 
 
         ## [Optional] Extra tokens
@@ -353,16 +777,16 @@ class VisionTransformer(nn.Module):
             self.cls_token = nn.Parameter(torch.zeros(1, 1, self.embed_dim)) # create the [cls] token
             self.num_all_tokens += 1
             self.num_extra_tokens += 1
-            if base_config.data_env == 'REARC':
-                self.num_token_categories += 1
+            if base_config.data_env in ['REARC', 'BEFOREARC']:
+                self.num_token_categories += 1  # + 1 cls token
 
         # Create register tokens
         if model_config.num_reg_tokens > 0:
             self.reg_tokens = nn.Parameter(torch.zeros(1, model_config.num_reg_tokens, self.embed_dim)) # create the register tokens
             self.num_all_tokens += model_config.num_reg_tokens
             self.num_extra_tokens += model_config.num_reg_tokens
-            if base_config.data_env == 'REARC':
-                self.num_token_categories += 1
+            if base_config.data_env in ['REARC', 'BEFOREARC']:
+                self.num_token_categories += 1  # + 1 register token
 
 
         ## Patch Embeddings
@@ -371,14 +795,14 @@ class VisionTransformer(nn.Module):
             # Using channels: input x is [B, C=3, H, W] and we should get [B, seq_len=num_patches, embed_dim]
             self.patch_embed = PatchEmbed(base_config, img_size=self.image_size, patch_size=self.patch_size, in_channels=self.num_channels, embed_dim=self.embed_dim)
         
-        elif base_config.data_env == 'REARC':
+        elif base_config.data_env in ['REARC', 'BEFOREARC']:
             # NOTE: When patch_size=1 (i.e., consider pixels), this is equivalent to flattening the input image and projecting it to the embedding dimension
             if model_config.use_ohe_repr:
-                # We are in REARC and we want to use OHE (resulting in channels) for the possible tokens and thus create artificial channels for the linear projection of patches/pixels/tokens
+                # We are in REARC/BEFOREARC and we want to use OHE (resulting in channels) for the possible tokens and thus create artificial channels for the linear projection of patches/pixels/tokens
                 # Using Channels: we create input x [B, C=num_token_categories, H, W] and we should get [B, seq_len=num_patches, embed_dim]
                 self.patch_embed = PatchEmbed(base_config, img_size=self.image_size, patch_size=self.patch_size, in_channels=self.num_channels, embed_dim=self.embed_dim, num_token_categories=self.num_token_categories)
             else:
-                # We are in REARC and we want to simply flatten the input image (resulting in a sequence of tokens) and thus create an artificial channel for the linear projection of patches/pixels/tokens
+                # We are in REARC/BEFOREARC and we want to simply flatten the input image (resulting in a sequence of tokens) and thus create an artificial channel for the linear projection of patches/pixels/tokens
                 # Using Seq2Seq: we create input x [B, C=1, H, W] and we should get [B, seq_len, embed_dim]
                 self.patch_embed = PatchEmbed(base_config, img_size=self.image_size, patch_size=self.patch_size, in_channels=self.num_channels, embed_dim=self.embed_dim)
 
@@ -390,23 +814,33 @@ class VisionTransformer(nn.Module):
         self.seq_len = self.patch_embed.num_patches
 
 
-        ## [Optional] Absolute Positional Embeddings (APE)
-        if model_config.ape.enabled:
-            # Create positional encoding
-            self.ape = create_absolute_positional_encoding(ape_type=model_config.ape.ape_type,
-                                                           seq_len=self.seq_len,
-                                                           embed_dim=self.embed_dim,
-                                                           patch_embed=self.patch_embed,
-                                                           num_extra_tokens=self.num_extra_tokens
-                                                           )    # [1, num_all_tokens, embed_dim]
-            
-            self.ape_drop = nn.Dropout(p=self.network_config.ape_dropout_rate)    # dropout right after the positional encoding and residual
+        ## [Optional] Absolute Positional Embedding (APE) Mixer
+        # APE is applied right after the Patch Embedding
+        if self.model_config.ape.enabled:
+            self.ape = AbsolutePositionalEncoding(model_config=model_config,
+                                                  network_config=network_config,
+                                                  image_size=self.image_size,
+                                                  seq_len=self.seq_len,
+                                                  patch_embed=self.patch_embed,
+                                                  embed_dim=self.embed_dim,
+                                                  num_extra_tokens=self.num_extra_tokens,
+                                                  ape_type=model_config.ape.ape_type,
+                                                  mixer_strategy=model_config.ape.mixer
+                                                  )
 
         ## [Optional] Relative Positional Embeddings (RPE)
+        # RPE is applied in the Attention layer
         if model_config.rpe.enabled:
             rpe_type = model_config.rpe.rpe_type
+
+            if rpe_type in ["Four-diag-slope-Alibi", "Two-slope-Alibi"]:
+                grid_2d_distance_matrix = calculate_2d_relative_positions(self.image_size, self.image_size, rpe_type)
+            else:
+                grid_2d_distance_matrix = None
+
         else:
             rpe_type = None
+            grid_2d_distance_matrix = None
 
         ## Transformer Encoder Layers
         self.transformer_layers = nn.ModuleList([
@@ -421,7 +855,8 @@ class VisionTransformer(nn.Module):
                 attn_proj_drop=network_config.attn_proj_dropout_rate,
                 ff_drop=network_config.ff_dropout_rate,
                 num_extra_tokens=self.num_extra_tokens,
-                rpe_type=rpe_type
+                rpe_type=rpe_type,
+                grid_2d_distance_matrix=grid_2d_distance_matrix
             )
             for _ in range(self.network_config.num_layers)
             ])
@@ -475,9 +910,9 @@ class VisionTransformer(nn.Module):
         # Transformer Encoder modules
         self.apply(self._init_weights)
 
-        # Absolute Positional Embedding
-        if hasattr(self, 'ape') and self.ape.requires_grad:  # check if the APE is learnable
-            nn.init.trunc_normal_(self.ape, std=0.02)
+        # TODO:
+        # I removed the initialization of the APE parameters here.
+        # See if OK and need to do it in the class AbsolutePositionalEncoding directly
 
         # Extra tokens
         if hasattr(self, 'reg_tokens'):
@@ -485,13 +920,11 @@ class VisionTransformer(nn.Module):
         if hasattr(self, 'cls_token'):
             nn.init.trunc_normal_(self.cls_token, std=0.02)
 
-
-    def forward_embed(self, x):
+    def forward_embed(self, x, x_grid_object_ids=None):
         x_shape = x.shape
-        
         B = x_shape[0]
 
-        x = self.patch_embed(x) # [B, num_patches, embed_dim]
+        x = self.patch_embed(x) # [B, num_patches, embed_dim]; embed the input
 
         # Concatenate the [cls] token and register tokens (if any) to the input embeddings
         # TODO: Depending on if we want to use PE for the extra tokens, we should add first the PE and then concatenate or concatenate first and then add the PE
@@ -502,11 +935,11 @@ class VisionTransformer(nn.Module):
             cls_tokens = self.cls_token.expand(B, -1, -1)   # [B, 1, embed_dim]; use expand to create and add the token for each sample in the batch instead of just one sample
             x = torch.cat((cls_tokens, x), dim=1)   # [B, num_all_tokens, embed_dim]
         
-        # Add the positional encoding
+        # Absolute Positional Encoding
         if self.model_config.ape.enabled:
-            x = x + self.ape  # [B, num_all_tokens, embed_dim], where num_all_tokens depends on the number of patches and extra tokens (if any) (e.g., cls ro register tokens)
-            x = self.ape_drop(x)    # [B, num_all_tokens, embed_dim]
-
+            # Apply APE
+            x = self.ape(x, x_grid_object_ids)  # [B, num_all_tokens, embed_dim], where num_all_tokens depends on the number of patches and extra tokens (if any) (e.g., cls ro register tokens)
+        
         return x
 
     def forward_encode(self, x):
@@ -530,10 +963,11 @@ class VisionTransformer(nn.Module):
         return x
     
     def forward_features(self, x):
-        # TODO: Here is it correct to get rid of the extra tokens (e.g., cls or register tokens) from the output? 
+        # TODO: Here see if correct to get rid of the extra tokens (e.g., cls or register tokens) from the output? 
 
         x_shape = x.shape    # [B, num_all_tokens, embed_dim]
         
+        # TODO: Simplify this? Only used for CVR.
         if self.model_config.use_cls_token and self.model_config.encoder_aggregation.enabled:
             if self.model_config.encoder_aggregation.method == "token":
                 # Aggregate features to the cls token
@@ -545,13 +979,12 @@ class VisionTransformer(nn.Module):
                 # Max pooling
                 x = x.max(dim=1).values    # [B, embed_dim]
         else:
-            # Output the features for each patch/token after having removed the extra tokens (e.g., cls and register tokens) if any
+            # Output the embeddings for each patch/token after having removed [those for] the extra tokens (e.g., cls, register tokens) if applicable
             x = x[:, self.num_extra_tokens:, :]    # [B, seq_len, embed_dim] <-- [B, num_all_tokens - num_extra_tokens, embed_dim]
 
         return x
 
-
-    def forward(self, src):
+    def forward(self, src, x_grid_object_ids=None):
         # NOTE: Masks for the forward() method
         # 1) [Not needed] (Self-)Attention mask. Use mask in forward() of nn.TransformerEncoder. It is used for custom attention masking. Use value 0 for allowed and -inf for masked positions.
         # 2) [Not needed] Padding mask. Use src_key_padding_mask in forward() of nn.TransformerEncoder. It is used to mask the padding (or other) tokens in the input sequence. Use value True for padding tokens and False for actual tokens.
@@ -559,7 +992,7 @@ class VisionTransformer(nn.Module):
         src_shape = src.shape
 
         # Embed the input image to an input sequence
-        x = self.forward_embed(src)  # [B, num_all_tokens, embed_dim] <-- [B, C, H, W]
+        x = self.forward_embed(src, x_grid_object_ids)  # [B, num_all_tokens, embed_dim] <-- [B, C, H, W]
 
         # Encode the sequence (i.e., the embedded input image)
         x = self.forward_encode(x)  # [B, num_all_tokens, embed_dim] <-- [B, num_all_tokens, embed_dim]

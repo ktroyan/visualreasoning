@@ -1,10 +1,10 @@
 head_network:
-  name: 'transformer'
+  name: 'mytransformer'
   embed_dim: 128  # 384 for small, 768 for base
   num_heads: 4  # 12
   mlp_ratio: 4  # used instead of explicit ff_dim
   qkv_bias: true
-  num_layers: 4  # 12
+  num_layers: 6  # 12
   ape_dropout_rate: 0.0
   attn_dropout_rate: 0.0
   attn_proj_dropout_rate: 0.0

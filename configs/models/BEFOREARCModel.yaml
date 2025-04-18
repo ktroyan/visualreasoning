@@ -1,5 +1,5 @@
 model:
-  backbone: 'llada'  # choices: 'vit', 'transformer', 'resnet', 'llada'
+  backbone: 'vit'  # choices: 'vit', 'transformer', 'resnet'
   head: 'mlp'  # choices: 'transformer', 'mlp', 'mytransformer', 'xtransformer'
   pretrained: null
   patch_size: 1
@@ -9,9 +9,9 @@ model:
   ape:
     enabled: true
     ape_type: '2dsincos'  # choices: 'learn', '2dsincos'; absolute positional encoding
-    mixer: 'weighted_sum'  # choices: 'default', 'weighted_sum'; how to mix the input embeddings and the positional embeddings
+    mixer: 'default'  # choices: 'default', 'weighted_sum'; how to mix the input embeddings and the positional embeddings
   ope:
-    enabled: true
+    enabled: false
   rpe:
     enabled: true
     rpe_type: 'rope'  # choices: 'rope', 'Two-slope-Alibi', 'Four-diag-slope-Alibi'; relative positional encoding
@@ -35,8 +35,8 @@ model:
       enabled: true
       type: 'linear' # choices: 'linear'
       num_steps: 200.0
-    lr: 0.0002
-    wd: 0.01
+    lr: 0.001
+    wd: 0.001
   attention_map:
     enabled: false
     layer: -1  # layer to use for the attention map (-1 for the last, 0 for the first layer, 1 for the second layer, etc.)

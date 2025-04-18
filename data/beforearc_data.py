@@ -15,6 +15,8 @@ def create_object_grid(input_grid, max_img_size, special_tokens_dic):
     Create a grid of object ids for the given input grid.
     The resulting grid is a 2D tensor of size (max_img_size, max_img_size) where each cell contains the object id for that cell.
     
+    TODO: See better what are all the values found within a grid. See the plots when visualize=True.
+
     TODO: What should be our approach? Moreover, discuss their rectangle bounding boxes approach vs. my thought of segmenting instead.
           The former may confuse the model I think.
     
@@ -49,7 +51,7 @@ def create_object_grid(input_grid, max_img_size, special_tokens_dic):
 
     return object_ids_grid
 
-class REARCDataset(Dataset):
+class BEFOREARCDataset(Dataset):
     def __init__(self, json_dataset_path, image_size, use_visual_tokens, use_grid_object_ids, transform=None):
         super().__init__()
 
@@ -62,10 +64,10 @@ class REARCDataset(Dataset):
         # Get the samples paths from the json dataset split
         self.data_samples_df = pd.read_json(json_dataset_path)
 
-        # Load the dictionary mapping the task name to the task id
-        task_name_to_id_json = "./REARC/final_datasets/REARC_task_name_to_id.json"
-        with open(task_name_to_id_json, 'r') as f:
-            self.task_name_to_id = json.load(f)
+        # Load the dictionary mapping the task id (str) to the actual task id (int)
+        # task_name_to_id_json = ...
+        # with open(task_name_to_id_json, 'r') as f:
+        #     self.task_name_to_id = json.load(f)
 
         self.n_samples = len(self.data_samples_df)
         self.transform = transform
@@ -137,7 +139,6 @@ class REARCDataset(Dataset):
             grid[row, col] = torch.randint(0, num_token_types, (1,)).item()
 
         return grid
-
 
     def pad_with_2d_visual_tokens(self, grid: torch.Tensor) -> torch.Tensor:
         """ 
@@ -223,10 +224,12 @@ class REARCDataset(Dataset):
         sample = self.data_samples_df.iloc[idx]
         x = sample['input']
         y = sample['output']
-        sample_task_name = sample['task']
 
         # Convert the task name to a task id tensor
-        sample_task_id = torch.tensor(self.task_name_to_id[sample_task_name], dtype=torch.long)
+        # TODO: We need to create a dictionary that maps a task_id (str) to an actual unique id (int)
+        sample_task_name = '-'.join(sample['transformations'])    # TODO: It seems that we should take 'transformations' instead of 'task_id'. See with Yassine
+        # sample_task_id = torch.tensor(self.task_name_to_id[sample_task_name], dtype=torch.long)
+        sample_task_id = torch.tensor(0, dtype=torch.long)  # placeholder line for now
 
         # Transform the input grid image x (which is a list of list of integers) to a 2D-tensor
         x = torch.tensor(x, dtype=torch.long)
@@ -325,7 +328,7 @@ def get_max_img_size_across_dataset_splits(data_splits_paths):
     
     return overall_max_img_size
 
-class REARCDataModule(DataModuleBase):
+class BEFOREARCDataModule(DataModuleBase):
 
     def __init__(self, data_config, model_config, **kwargs):
 
@@ -379,12 +382,12 @@ class REARCDataModule(DataModuleBase):
             transform = None
 
         # Create the torch Dataset objects that will then be used to create the dataloaders
-        self.train_set = REARCDataset(train_set_path, self.image_size, use_visual_tokens, use_grid_object_ids, transform=transform)
-        self.val_set = REARCDataset(val_set_path, self.image_size, use_visual_tokens, use_grid_object_ids, transform=transform)
-        self.test_set = REARCDataset(test_set_path, self.image_size, use_visual_tokens, use_grid_object_ids, transform=transform)
+        self.train_set = BEFOREARCDataset(train_set_path, self.image_size, use_visual_tokens, use_grid_object_ids, transform=transform)
+        self.val_set = BEFOREARCDataset(val_set_path, self.image_size, use_visual_tokens, use_grid_object_ids, transform=transform)
+        self.test_set = BEFOREARCDataset(test_set_path, self.image_size, use_visual_tokens, use_grid_object_ids, transform=transform)
 
         if data_config.use_gen_test_set:
-            self.gen_test_set = REARCDataset(gen_test_set_path, self.image_size, use_visual_tokens, use_grid_object_ids, transform=transform)
+            self.gen_test_set = BEFOREARCDataset(gen_test_set_path, self.image_size, use_visual_tokens, use_grid_object_ids, transform=transform)
 
     def _transforms(self):
         return None

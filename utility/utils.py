@@ -246,9 +246,12 @@ def plot_lr_schedule(lr_values: List) -> str:
 
 def plot_absolute_positional_embeddings(pos_embed, num_prefix_tokens=None, viz_as_heatmap=False):
     """ 
-    Plot the absolute positional embeddings (APE) used.
-    If needed, we can truncate the first num_prefix_tokens tokens from the embeddings plot.
-    TODO: Fix the labeling of the plot as currently the y-axis does not correspond to the sequence position but to the positional embedding value for each dimension.
+    Plot the absolute positional embeddings (APE).
+
+    Args:
+        pos_embed (torch.Tensor): Positional embedding tensor of shape [1, seq_len(+num_extra_tokens), embed_dim]
+        num_prefix_tokens (int): Number of extra/prefixed tokens (e.g., cls, register tokens)
+        viz_as_heatmap (bool): If True, plot a heatmap; otherwise, plot line plots per embedding dimension
     """
     import wandb
 
@@ -256,25 +259,34 @@ def plot_absolute_positional_embeddings(pos_embed, num_prefix_tokens=None, viz_a
     wandb_subfolder = "/" + wandb.run.id if wandb.run is not None else ""
     os.makedirs(f'./figs{wandb_subfolder}', exist_ok=True)
 
-    # Truncate the first num_prefix_tokens tokens from the embeddings plot if needed and convert embeddings to numpy
-    if num_prefix_tokens is not None:
-        embeddings = pos_embed[0, num_prefix_tokens:, :].detach().cpu().numpy()
+    # Remove extra/prefix tokens if needed
+    if num_prefix_tokens is not None and num_prefix_tokens > 0:
+        embeddings = pos_embed[0, num_prefix_tokens:, :].detach().cpu().numpy()  # [seq_len, embed_dim]
     else:
         embeddings = pos_embed[0, :, :].detach().cpu().numpy()
 
     plt.figure(figsize=(10, 5))
 
     if viz_as_heatmap:
-        ims = plt.imshow(embeddings, aspect='auto', label="Absolute Positional Embeddings")
+        # Each row is a position in the sequence, each column is a dimension in the embedding
+        ims = plt.imshow(embeddings, aspect='auto', cmap='viridis')
         plt.colorbar(ims)
+        plt.xlabel("Embedding dimension")
+        plt.ylabel("Sequence position")
+        plt.title("APE")
+
     else:
-        plt.plot(embeddings, label="Absolute Positional Embeddings")
-    
-    plt.xlabel("Embedding position")
-    plt.ylabel("Sequence position")
-    plt.title("Positional Embeddings")
-    plt.savefig(f'./figs{wandb_subfolder}/positional_embeddings.png')
-    # plt.show()
+        # Plot all embedding dimensions for each position in the sequence
+        for i in range(embeddings.shape[1]):  # for each embedding dim
+            plt.plot(embeddings[:, i], label=f"Dim {i}", alpha=0.5)  # dim-wise trace across sequence
+
+        plt.xlabel("Sequence position")
+        plt.ylabel("Embedding value")
+        plt.title("APE Line Plot (dim traces)")
+        plt.legend(loc='upper right', bbox_to_anchor=(1.15, 1), ncol=1, fontsize='small', frameon=False)
+
+    plt.tight_layout()
+    plt.savefig('./figs{wandb_subfolder}/positional_embeddings.png')
     plt.close()
 
 def timer_decorator(func):
@@ -379,7 +391,10 @@ def process_test_results(config, test_results, test_type="test", exp_logger=None
     """
     Process the test results and log them.
 
-    FIXME: 
+    FIXME:
+    Update code for it to work with REARC, BEFOREARC and CVR
+
+    FIXME:
     For this code to work currently, the batch size should yield a number of elements in each key of results so that it is a multiple of the number of tasks, otherwise the reshape will fail.
     Also see how to handle the case where the results are for multiple test dataloaders
     """
@@ -399,7 +414,15 @@ def process_test_results(config, test_results, test_type="test", exp_logger=None
         raise FileNotFoundError(f"Test set file not found in the dataset directory: {test_set_path}")
 
     # Processing of the results and wrap-up of the parameters used
-    tasks_considered = test_set['task'].unique()
+    if config.base.data_env == "REARC":
+        tasks_considered = test_set['task'].unique()
+
+    elif config.base.data_env == "BEFOREARC":
+        unique_transformations = test_set['transformations'].drop_duplicates().tolist() # TODO: the field 'transformations' contains a list of transformations applied to obtain the output grid form the input grid?
+        tasks_considered = ["-".join(transformation_list) for transformation_list in unique_transformations]
+
+    elif config.base.data_env == "CVR":
+        pass
 
     logger.debug(f"Post-processing results for tasks: {tasks_considered}")
 

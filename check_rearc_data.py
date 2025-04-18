@@ -32,7 +32,7 @@ if __name__ == "__main__":
 
     # Get the image size from the datamodule
     image_size = datamodule.image_size
-    print(f"Max. image size considered (with padding): {image_size}")
+    print(f"Image size considered (with padding): {image_size}")
 
     # Create train and test dataloader
     train_dataloader = datamodule.train_dataloader()    # dataloader with which the models are trained

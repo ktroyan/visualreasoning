@@ -26,6 +26,7 @@ dependencies = [
     "ipykernel",
     "seaborn>=0.13.2",
     "rotary-embedding-torch>=0.8.6",
+    "x-transformers>=2.2.8",
 ]
 
 [tool.uv.sources]
