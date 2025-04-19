@@ -5,6 +5,7 @@ import torch
 import pytorch_lightning as pl
 from pytorch_lightning.callbacks import Callback, TQDMProgressBar
 import numpy as np
+import json
 from typing import Any, Dict, List, Tuple
 
 # Personal codebase dependencies
@@ -28,48 +29,49 @@ torch.set_float32_matmul_precision('medium')    # 'high'
 
 
 class MetricsCallback(Callback):
-    """A PyTorch Lightning callback to handle and store metrics during the training process.
+    """
+    A PyTorch Lightning callback to handle and store metrics during the training process.
 
-    This callback allows to perform actions at key moments of the PyTorch Lightning `Trainer`
-    process, such as at the end of a training epoch or after validation. It inherits from the `Callback`
-    class provided by PyTorch Lightning.
-
-    Attributes:
-        verbose (bool): A flag to control the verbosity of the logging.
-        metrics (list): A list to store the (dict) metrics collected during training, validation, or testing epochs.
-        all_keys (list): A list to keep track of all the metric keys observed during the training process.        
-        train_loss_epoch (list): A list to store the training loss for each epoch.
-        val_loss_epoch (list): A list to store the validation loss for each epoch.
-        train_acc_epoch (list): A list to store the training accuracy for each epoch.
-        val_acc_epoch (list): A list to store the validation accuracy for each epoch.
-        train_grid_acc_epoch (list): A list to store the training grid accuracy for each epoch.
-        val_grid_acc_epoch (list): A list to store the validation grid accuracy for each epoch.
+    It allows us to perform actions at key moments of the PyTorch Lightning `Trainer`
+    process, such as at the end of a training epoch and more. 
+    
+    It inherits from the `Callback` class provided by PyTorch Lightning.
     """
 
-    def __init__(self, verbose=True):
+    def __init__(self, base_config, data_config, save_metrics_folder, verbose=True):
         super().__init__()
 
+        self.base_config = base_config
+        self.data_config = data_config
+        self.run_metrics_file = save_metrics_folder + "/run_metrics.jsonl"
         self.verbose = verbose
-        self.metrics = []  # store metrics for each epoch
-        self.all_keys = []  # keep track of all metric keys observed
+        
+        self.metrics = []   # store metrics for each epoch
+        self.all_keys = []  # keep track of all metric keys
 
         # Initialize the lists to store the metrics for all the epochs for local plotting
         self.train_loss_epoch = []
-        self.val_loss_epoch = []
         self.train_acc_epoch = []
-        self.val_acc_epoch = []
         self.train_grid_acc_epoch = []
+
+        self.val_loss_epoch = []
+        self.val_acc_epoch = []
         self.val_grid_acc_epoch = []
 
+        if data_config.validate_in_and_out_domain:
+            self.gen_val_loss_epoch = []
+            self.gen_val_acc_epoch = []
+            self.gen_val_grid_acc_epoch = []
 
-    def get_all_epoch_metrics(self):
+
+    def get_all_epoch_metrics(self) -> Dict[str, List[float]]:
         """
         This method is called after the training (and testing) processes to retrieve all the collected metrics. 
         It iterates over the stored metrics and organizes them into a dictionary where each key corresponds to a 
         metric name and the value is a list of metric values collected over the epochs.
 
         Returns:
-            dict: all the collected metrics during training for each epoch
+            Dict: all the collected metrics during training for each epoch
         """
 
         all_metrics = {}
@@ -85,25 +87,36 @@ class MetricsCallback(Callback):
 
     def get_all_local_plotting_metrics(self):
         """
-        This method is called after the training process to retrieve all the collected metrics for local plotting. 
-
-        Returns:
-            dict: all the collected metrics (train/val per token losses for all steps/epochs, train/val per token/grid accuracies for all steps/epochs) during training for each step and each epoch
+        This method is called after the training process to retrieve all the collected epoch metrics for local plotting. 
         """
 
         all_local_plotting_metrics = {
             'train_loss_epoch': self.train_loss_epoch,
-            'val_loss_epoch': self.val_loss_epoch,
             'train_acc_epoch': self.train_acc_epoch,
-            'val_acc_epoch': self.val_acc_epoch,
-            'train_grid_acc_epoch': self.train_grid_acc_epoch,
-            'val_grid_acc_epoch': self.val_grid_acc_epoch
+            'val_loss_epoch': self.val_loss_epoch,
+            'val_acc_epoch': self.val_acc_epoch
         }
+
+        if self.base_config.data_env in ["REARC", "BEFOREARC"]:
+            all_local_plotting_metrics.update({
+                'train_grid_acc_epoch': self.train_grid_acc_epoch,
+                'val_grid_acc_epoch': self.val_grid_acc_epoch
+            })
+
+        if self.data_config.validate_in_and_out_domain:
+            all_local_plotting_metrics.update({
+                'gen_val_loss_epoch': self.gen_val_loss_epoch,
+                'gen_val_acc_epoch': self.gen_val_acc_epoch,
+                'gen_val_grid_acc_epoch': self.gen_val_grid_acc_epoch
+            })
 
         return all_local_plotting_metrics
 
     def on_train_start(self, trainer, pl_model_module):
         logger.info("Training started!")
+
+    def tensor_list_to_python_list(self, lst):
+        return [x.item() if isinstance(x, torch.Tensor) else x for x in lst]
 
     def on_train_epoch_end(self, trainer, pl_model_module):
         """ 
@@ -132,11 +145,11 @@ class MetricsCallback(Callback):
 
         self.metrics.append(epoch_metrics)
 
-
+        # Log the epoch metrics
         if self.verbose >= 1:
             epoch_metrics = trainer.callback_metrics
 
-            logger.debug(f"Considering the metrics: {epoch_metrics.keys()}")
+            # logger.info(f"Considering the metrics: {epoch_metrics.keys()}")
             log_message = ""
 
             # TODO: 
@@ -154,19 +167,69 @@ class MetricsCallback(Callback):
             logger.info(log_message)
 
         if self.verbose >= 2:
+            log_message += f"[Epoch {trainer.current_epoch}] Current step metrics: \n"
+            for k, v in epoch_metrics.items():
+                if "step" in k:    # only log the metrics that are for a step of the epoch
+                    log_message += f"{k}: {v} \n"
+            
+            logger.info(log_message)
+
+        if self.verbose >= 3:
             # Log the predicted targets and the true targets for training and validation
             logger.info(f"Epoch train predictions for the first and last batch: \n{pl_model_module.train_preds}")
             logger.info(f"Epoch train targets for the first and last batch: \n{pl_model_module.train_targets}")
             logger.info(f"Epoch val predictions for the first and last batch: \n{pl_model_module.val_preds}")
             logger.info(f"Epoch val targets for the first and last batch: \n{pl_model_module.val_targets}")
 
+            if self.data_config.validate_in_and_out_domain:
+                logger.info(f"Epoch OOD val predictions for the first and last batch: \n{pl_model_module.gen_val_preds}")
+                logger.info(f"Epoch OOD val targets for the first and last batch: \n{pl_model_module.gen_val_targets}")
         
-        # Save to later plot locally
+        # Save epoch and steps metrics for plotting
         if len(pl_model_module.train_loss_step) != 0:
+            ## STEPS metrics for the epoch
+            # Save all the step metrics for this epoch in a file in case they are needed for later combined plotting
+            epoch_step_metrics = {
+                'epoch': trainer.current_epoch
+            }
+
+            epoch_step_metrics.update({
+                'train_loss_step': self.tensor_list_to_python_list(pl_model_module.train_loss_step),
+                'train_acc_step': self.tensor_list_to_python_list(pl_model_module.train_acc_step),
+                'val_loss_step': self.tensor_list_to_python_list(pl_model_module.val_loss_step),
+                'val_acc_step': self.tensor_list_to_python_list(pl_model_module.val_acc_step)
+            })
+
+            if self.data_config.validate_in_and_out_domain:
+                epoch_step_metrics.update({
+                    'gen_val_loss_step': self.tensor_list_to_python_list(pl_model_module.gen_val_loss_step),
+                    'gen_val_acc_step': self.tensor_list_to_python_list(pl_model_module.gen_val_acc_step)
+                })
+
+            if pl_model_module.base_config.data_env in ["REARC", "BEFOREARC"]:
+                epoch_step_metrics.update({
+                    'train_grid_acc_step': self.tensor_list_to_python_list(pl_model_module.train_grid_acc_step),
+                    'val_grid_acc_step': self.tensor_list_to_python_list(pl_model_module.val_grid_acc_step)
+                })
+
+                if self.data_config.validate_in_and_out_domain:
+                    epoch_step_metrics.update({
+                        'gen_val_grid_acc_step': self.tensor_list_to_python_list(pl_model_module.gen_val_grid_acc_step)
+                    })
+            
+            # Add all the step metrics for this epoch to the .jsonl file storing this run's steps metrics
+            with open(self.run_metrics_file, 'a') as f:
+                f.write(json.dumps(epoch_step_metrics) + "\n")
+
+            ## EPOCH metrics
             self.train_loss_epoch.append(torch.stack(pl_model_module.train_loss_step).mean())
             self.train_acc_epoch.append(torch.stack(pl_model_module.train_acc_step).mean())
             self.val_loss_epoch.append(torch.stack(pl_model_module.val_loss_step).mean())
             self.val_acc_epoch.append(torch.stack(pl_model_module.val_acc_step).mean())
+
+            if self.data_config.validate_in_and_out_domain and len(pl_model_module.gen_val_loss_step) != 0:
+                self.gen_val_loss_epoch.append(torch.stack(pl_model_module.gen_val_loss_step).mean())
+                self.gen_val_acc_epoch.append(torch.stack(pl_model_module.gen_val_acc_step).mean())
 
             # Reset the lists for the next epoch
             pl_model_module.train_loss_step = []
@@ -174,14 +237,24 @@ class MetricsCallback(Callback):
             pl_model_module.val_loss_step = []
             pl_model_module.val_acc_step = []
 
-        if pl_model_module.base_config.data_env == "REARC":
-            if len(pl_model_module.train_grid_acc_step) != 0:
-                self.train_grid_acc_epoch.append(torch.stack(pl_model_module.train_grid_acc_step).mean())
-                self.val_grid_acc_epoch.append(torch.stack(pl_model_module.val_grid_acc_step).mean())
+            if self.data_config.validate_in_and_out_domain:
+                pl_model_module.gen_val_loss_step = []
+                pl_model_module.gen_val_acc_step = []
 
-                # Reset the lists for the next epoch
-                pl_model_module.train_grid_acc_step = []
-                pl_model_module.val_grid_acc_step = []
+            if pl_model_module.base_config.data_env in ["REARC", "BEFOREARC"]:
+                if len(pl_model_module.train_grid_acc_step) != 0:
+                    self.train_grid_acc_epoch.append(torch.stack(pl_model_module.train_grid_acc_step).mean())
+                    self.val_grid_acc_epoch.append(torch.stack(pl_model_module.val_grid_acc_step).mean())
+
+                    if self.data_config.validate_in_and_out_domain:
+                        self.gen_val_grid_acc_epoch.append(torch.stack(pl_model_module.gen_val_grid_acc_step).mean())
+
+                    # Reset the lists for the next epoch
+                    pl_model_module.train_grid_acc_step = []
+                    pl_model_module.val_grid_acc_step = []
+
+                    if self.data_config.validate_in_and_out_domain:
+                        pl_model_module.gen_val_grid_acc_step = []
 
         # logger.debug(f"Class of the pl model module: {pl_model_module.__class__}")   # e.g.: CVRModel (which inherits from VisReasModel which inherits from pl.LightningModule)
         # logger.debug(f"Attributes of the instance of the pl model module: {pl_model_module.__dict__}")    
@@ -219,7 +292,13 @@ def init_callbacks(config, training_folder):
         else:
             raise ValueError(f"Unknown monitored metric for early stopping: {config.training.early_stopping.monitored_metric}")
         
-        early_stopping = pl.callbacks.EarlyStopping(monitor=f'metrics/{config.training.early_stopping.monitored_metric}', mode=mode, patience=config.training.early_stopping.es_patience, strict=True, verbose=True)   # we can use e.g. stopping_threshold=0.995 to stop when the accuracy metric reaches that value
+        early_stopping = pl.callbacks.EarlyStopping(monitor=f'metrics/{config.training.early_stopping.monitored_metric}', 
+                                                    mode=mode, 
+                                                    patience=config.training.early_stopping.es_patience, 
+                                                    strict=True, 
+                                                    verbose=True
+                                                    )   # we can use e.g. stopping_threshold=0.995 to stop when the accuracy metric reaches that value
+        
         callbacks['early_stopping'] = early_stopping
 
     # Progress bar callback
@@ -228,7 +307,12 @@ def init_callbacks(config, training_folder):
         callbacks['progress_bar'] = progress_bar
 
     # Metrics callback
-    metrics_callback = MetricsCallback(verbose=config.training.metrics_callback_verbose)
+    metrics_callback = MetricsCallback(base_config=config.base,
+                                       data_config=config.data, 
+                                       save_metrics_folder=training_folder, 
+                                       verbose=config.training.metrics_callback_verbose
+                                       )
+    
     callbacks['metrics_callback'] = metrics_callback
 
     return callbacks
@@ -325,39 +409,56 @@ def main(config, training_folder, datamodule, model, exp_logger=None):
     # Metrics results
     metrics = callbacks['metrics_callback'].get_all_epoch_metrics()
 
-    best_val_acc = np.nanmax(metrics['metrics/val_acc'] + [0])
-    best_val_epoch = (np.nanargmax(metrics['metrics/val_acc'] + [0]) + 1)
-
     log_message = "All epoch training metrics: \n"
     for k, v in metrics.items():
         if "epoch" in k:    # only log the metrics that are for an epoch
             log_message += f"{k}: {v}" + "\n"
     logger.info(log_message)
 
-    # Plot locally some training and validation metrics
-    all_local_plotting_metrics = callbacks['metrics_callback'].get_all_local_plotting_metrics()
-    if config.base.data_env == "REARC":
-        fig_paths = plot_rearc_metrics_locally(training_folder, all_local_plotting_metrics)
-        if exp_logger:
-            for fig_path in fig_paths:
-                exp_logger.log_image(key="figures_learning_curves/"+fig_path.replace("./", ""), images=[fig_path])
-    
-    elif config.base.data_env == "CVR":
-        fig_paths = plot_cvr_metrics_locally(training_folder, all_local_plotting_metrics)
-        if exp_logger:
-            for fig_path in fig_paths:
-                exp_logger.log_image(key="figures_learning_curves/"+fig_path.replace("./", ""), images=[fig_path])
-
-    # Access the wandb experiment and save the logs for the model hyperparameters and additional results (than those already logged with log_dict() in the model file)
-    if exp_logger:
-        exp_logger.log_hyperparams(model.hparams)   # TODO: See if need to rewrite the dict?
-        exp_logger.experiment.log({'best_val_epoch': best_val_epoch, 'best_val_acc': best_val_acc})
+    best_val_acc = np.nanmax(metrics['metrics/val_acc'] + [0])
+    val_acc_best_epoch = (np.nanargmax(metrics['metrics/val_acc'] + [0]) + 1)
+    logger.info(f"Best val accuracy: {best_val_acc} at epoch {val_acc_best_epoch}")
 
     train_results = {
         'metrics': metrics,
         'best_val_acc': best_val_acc,
-        'best_val_epoch': best_val_epoch
+        'val_acc_best_epoch': val_acc_best_epoch
     }
+
+    if config.data.validate_in_and_out_domain:
+        best_gen_val_acc = np.nanmax(metrics['metrics/gen_val_acc_epoch'] + [0])
+        gen_val_acc_best_epoch = (np.nanargmax(metrics['metrics/gen_val_acc_epoch'] + [0]) + 1)
+        logger.info(f"Best OOD val accuracy: {best_gen_val_acc} at epoch {gen_val_acc_best_epoch}")
+        train_results.update({
+            'best_gen_val_acc': best_gen_val_acc,
+            'gen_val_acc_best_epoch': gen_val_acc_best_epoch
+        })
+
+    if config.base.data_env in ["REARC", "BEFOREARC"]:
+        best_val_grid_acc = np.nanmax(metrics['metrics/val_acc_grid_epoch'] + [0])
+        val_grid_acc_best_epoch = (np.nanargmax(metrics['metrics/val_acc_grid_epoch'] + [0]) + 1)
+        logger.info(f"Best val grid accuracy: {best_val_grid_acc} at epoch {val_grid_acc_best_epoch}")
+        train_results.update({
+            'best_val_grid_acc': best_val_grid_acc,
+            'val_grid_acc_best_epoch': val_grid_acc_best_epoch
+        })
+
+    # Plot locally some training and validation metrics
+    all_local_plotting_metrics = callbacks['metrics_callback'].get_all_local_plotting_metrics()
+    
+    if config.base.data_env in ["REARC", "BEFOREARC"]:
+        fig_paths = plot_rearc_metrics_locally(training_folder, all_local_plotting_metrics)
+    
+    elif config.base.data_env == "CVR":
+        fig_paths = plot_cvr_metrics_locally(training_folder, all_local_plotting_metrics)
+    
+    if exp_logger:
+        for fig_path in fig_paths:
+            exp_logger.log_image(key="figures_learning_curves/"+fig_path.replace("./", ""), images=[fig_path])
+
+        # Access the wandb experiment and save the logs for the model hyperparameters and additional results (than those already logged with log_dict() in the model file)
+        exp_logger.log_hyperparams(model.hparams)   # TODO: See if need to rewrite the dict? We should only log relevant hyperparameters that we want to consult as a summary of the training performed
+        exp_logger.experiment.log(train_results)
 
     log_message = "*** Training ended ***\n"
     training_elapsed_time = time.time() - training_start_time
@@ -389,7 +490,7 @@ if __name__ == '__main__':
 
     # Model chosen
     model_module = vars(models)[config.base.model_module]
-    model = model_module(config.base, config.model, config.backbone_network, config.head_network, image_size)   # initialize the model with the model and network configs
+    model = model_module(config.base, config.model, config.data, config.backbone_network, config.head_network, image_size)   # initialize the model with the model and network configs
     logger.trace(f"Model chosen for training: {model}")
 
     # Create the training folder
