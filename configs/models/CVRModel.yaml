@@ -1,22 +1,25 @@
 model:
-  backbone: 'vit'  # choices: 'transformer', 'vit', 'vit_timm', 'resnet'
+  backbone: 'resnet'  # choices: 'transformer', 'vit', 'vit_timm', 'resnet'
   head: 'mlp'  # choices: 'mlp'
   pretrained: null
-  patch_size: 16
+  patch_size: 8  # originally 16
   ape:
     enabled: true
     ape_type: '2dsincos'  # choices: 'learn', '2dsincos'; absolute positional encoding
+    mixer: 'default'  # choices: 'default', 'weighted_sum', ...; how to mix the input embeddings and the positional embeddings
+  ope:
+    enabled: false # /!\ has to be false for CVR
   rpe:
-    enabled: false
+    enabled: true
     rpe_type: 'rope'  # choices: 'rope'; relative positional encoding
   use_cls_token: true # whether to use a cls token or not
   num_reg_tokens: 0
   encoder_aggregation:
-    enabled: true
+    enabled: true # /!\ has to be true for CVR
     method: 'token' # choices: '' (for no pooling and returning a sequence), 'mean', 'max', 'token' (for aggregating features and returning the cls token)
   n_tasks: 103    # NOTE: this is used for the task embedding (i.e., to inform the model through an embedding of which tasks to consider)
   task_embedding:
-    enabled: false
+    enabled: true
     task_embedding_dim: ${resolve_if_then_else:${model.task_embedding.enabled},128} # if task_embedding is enabled, then task_embedding_dim is 128, otherwise it is null
   dp_sim:
     enabled: true # TODO: we could add a field to specify the pooling technique for example
@@ -28,11 +31,15 @@ model:
       interval: 'epoch' # choices: 'step', 'epoch'
       frequency: 1
     lr_warmup:
-      enabled: false
+      enabled: true
       type: 'linear' # choices: 'linear'
       num_steps: 200.0
     lr: 0.001
     wd: 0.001
+  attention_map:
+    enabled: false  # /!\ has to be false for CVR (not implemented yet)
+    layer: -1  # layer to use for the attention map (-1 for the last, 0 for the first layer, 1 for the second layer, etc.)
+    n_samples: 2  # number of samples to consider for the attention map
   observe_preds:
     enabled: true
     n_samples: 4
