@@ -22,26 +22,18 @@ from utility.logging import logger
 class VisReasModel(pl.LightningModule):
     """
     Model module class that handles the training, validation and testing logic of the model.
-    It is based on PTL's LightningModule class.
     """
     
-    def __init__(self, base_config, model_config, backbone_network_config, image_size):
+    def __init__(self, base_config, model_config, data_config, backbone_network_config, image_size):
         super().__init__()
 
         self.base_config = base_config
         self.model_config = model_config
+        self.data_config = data_config
         self.backbone_network_config = backbone_network_config
         self.image_size = image_size
 
-        # Test inputs, targets and predictions for local observation
-        self.test_inputs = []
-        self.gen_test_inputs = []
-        self.test_preds = []
-        self.test_targets = []
-        self.gen_test_preds = []
-        self.gen_test_targets = []
-
-        # Train and val predictions and targets for local logging if verbose
+        # Train, val, test, OOD test (if applicable) and OOD val (if applicable) inputs, predictions and targets for local observation
         self.train_inputs = []
         self.train_preds = []
         self.train_targets = []
@@ -49,6 +41,20 @@ class VisReasModel(pl.LightningModule):
         self.val_inputs = []
         self.val_preds = []
         self.val_targets = []
+
+        if data_config.validate_in_and_out_domain:
+            self.gen_val_inputs = []
+            self.gen_val_preds = []
+            self.gen_val_targets = []
+
+        self.test_inputs = []
+        self.test_preds = []
+        self.test_targets = []
+
+        if data_config.use_gen_test_set:
+            self.gen_test_inputs = []
+            self.gen_test_preds = []
+            self.gen_test_targets = []
 
         # Metrics for local plotting
         self.train_loss_step = []
@@ -59,17 +65,26 @@ class VisReasModel(pl.LightningModule):
         self.val_acc_step = []
         self.val_grid_acc_step = []
 
-        # Test results for logging
+        if data_config.validate_in_and_out_domain:
+            self.gen_val_loss_step = []
+            self.gen_val_acc_step = []
+            self.gen_val_grid_acc_step = []
+
+        # Test and OOD test (if applicable) results for logging
         self.test_step_results = [] # NOTE: this is needed to store the results of the test step for each batch (i.e., at each step), and display the final results at the end of the epoch
-        self.gen_test_step_results = [] # NOTE: this is needed to store the results of the generalization test step for each batch (i.e., at each step), and display the final results at the end of the epoch
+        if data_config.use_gen_test_set:
+            self.gen_test_step_results = [] # NOTE: this is needed to store the results of the generalization test step for each batch (i.e., at each step), and display the final results at the end of the epoch
 
         # Learning rate values for plotting LR schedule
         self.lr_values = []
 
         # Store the attention scores
-        if self.model_config.attention_map.enabled:
+        if model_config.attention_map.enabled:
             self.train_attention_scores = []
             self.val_attention_scores = []
+
+            if data_config.validate_in_and_out_domain:
+                self.gen_val_attention_scores = []
 
 
     def load_backbone_weights(self, checkpoint_path):
@@ -108,7 +123,7 @@ class VisReasModel(pl.LightningModule):
         return mask
 
     def shared_step(self, batch):
-        """ 
+        """
         The same code is shared between training, validation and test steps. 
         In theory, we would not need to compute and return the loss for testing, hence we would only call shared_step() in the test_step() method. 
         However, we still do it, so the purpose of this shared_step() is lesser.
@@ -166,31 +181,28 @@ class VisReasModel(pl.LightningModule):
         preds = torch.argmax(y_hat, dim=1)  # [B, seq_len]; predictions for each token/symbol of the model for each sample of the batch
 
         # Accuracy per symbol (with padding) (i.e., the accuracy of the model in predicting the correct symbol for each pixel of the grid considering the whole max. padded grid, thus also the padding tokens)
-        # acc_symbol_with_pad = (torch.sum(y == preds).float() / (y.numel())).unsqueeze(0)    # same as line below
         acc_symbol_with_pad = (preds == y).float().mean().unsqueeze(0)
 
         # Accuracy per symbol (without padding) (i.e., the accuracy of the model in predicting the correct symbol for each pixel of the grid considering only the target grid, that is, without considering the padding tokens)
         acc_symbol_no_pad = (((preds == y) * mask).sum().float() / mask.sum()).unsqueeze(0)  # only consider non-padding elements
 
         # Grid accuracy (only count as correct if the entire padded grid is correct)
-        # grid_acc = (torch.sum(torch.all(y == preds, dim=1)).float() / B).unsqueeze(0)    # same as line below
         acc_grid_with_pad = torch.all(preds == y, dim=1).float().mean().unsqueeze(0)
 
         # Grid accuracy (only count as correct if entire non-padding grid is correct)
-        # acc_grid_no_pad = (torch.sum(torch.all((preds == y) | ~mask, dim=1)).float() / B).unsqueeze(0)    # same as line below
         acc_grid_no_pad = torch.all((preds == y) | ~mask, dim=1).float().mean().unsqueeze(0)   # | ~mask ensures automatically count as correct the padding tokens
 
         logs = {'loss': loss_symbol_with_pad, 
-                'acc': acc_symbol_with_pad, 
-                'acc_grid_with_pad': acc_grid_with_pad, 
                 'loss_no_pad': loss_symbol_no_pad, 
+                'acc': acc_symbol_with_pad,
                 'acc_no_pad': acc_symbol_no_pad, 
+                'acc_grid': acc_grid_with_pad, 
                 'acc_grid_no_pad': acc_grid_no_pad
                 }
         
         loss = loss_symbol_with_pad
 
-        return loss, logs, preds, y
+        return loss, logs, preds
 
     def training_step(self, batch, batch_idx):
         """
@@ -201,10 +213,16 @@ class VisReasModel(pl.LightningModule):
 
         B, H, W = x.shape
 
-        loss, logs, preds, y = self.step(batch, batch_idx)
+        loss, logs, preds = self.step(batch, batch_idx)
 
         # Logging
-        self.log_dict({f"metrics/train_{k}": v for k,v in logs.items()}, prog_bar=True, logger=True, on_step=True, on_epoch=True)    # NOTE: this is monitored for best checkpoint and early stopping
+        self.log_dict({f"metrics/train_{k}": v for k,v in logs.items()}, 
+                      prog_bar=True, 
+                      logger=True, 
+                      on_step=True, 
+                      on_epoch=True, 
+                      add_dataloader_idx=False
+                      )
         
         # For the first and last training batch of the epoch
         if (batch_idx == 0) or (batch_idx == self.trainer.num_training_batches - 1):
@@ -225,47 +243,95 @@ class VisReasModel(pl.LightningModule):
         # Store to plot locally
         self.train_loss_step.append(logs['loss'])
         self.train_acc_step.append(logs['acc'])
-        self.train_grid_acc_step.append(logs['acc_grid_with_pad'])
+        self.train_grid_acc_step.append(logs['acc_grid'])
+
+        # Log the current learning rate
+        self.log_dict({"learning_rate": self.lr_schedulers().get_last_lr()[-1]}, 
+                    prog_bar=True, 
+                    logger=True, 
+                    on_step=True, 
+                    on_epoch=True, 
+                    )
 
         return loss
 
-    def validation_step(self, batch, batch_idx):
+    def validation_step(self, batch, batch_idx, dataloader_idx=0):
         """
         This method is called for each batch during the validation phase.
         This is a default PyTorch Lightning method that we override to define the validation logic.
+
+        NOTE: Currently val_loss is the monitored metric during training
         """
 
         x, y, samples_task_id, y_true_size, x_grid_object_ids, special_tokens_dict = batch
 
         B, H, W = x.shape
 
-        # NOTE: val_loss is the monitored metric during training
-        loss, logs, preds, y = self.step(batch, batch_idx)
+        loss, logs, preds = self.step(batch, batch_idx)
 
-        # Logging
-        self.log_dict({f"metrics/val_{k}": v for k, v in logs.items()}, prog_bar=True, logger=True, on_step=True, on_epoch=True)    # NOTE: this is monitored for best checkpoint and early stopping
-        self.log_dict({"learning_rate": self.lr_schedulers().get_last_lr()[-1]}, prog_bar=True, logger=True, on_step=True, on_epoch=True)    # NOTE: this is monitored for best checkpoint and early stopping. This yields learning_rate in the logs
+        if dataloader_idx == 0:
+            # Logging
+            self.log_dict({f"metrics/val_{k}": v for k, v in logs.items()}, 
+                          prog_bar=True, 
+                          logger=True, 
+                          on_step=True, 
+                          on_epoch=True,
+                          add_dataloader_idx=False
+                          )    # NOTE: this is monitored for best checkpoint and early stopping
 
-        # For the first and last validation batch of the epoch
-        if (batch_idx == 0) or (batch_idx == self.trainer.num_val_batches[0] - 1):
-            # Save batch (of inputs, preds, targets) for current epoch for plotting
-            self.val_inputs.append(x)
-            self.val_preds.append(preds)
-            self.val_targets.append(y)
+            # Save to plot locally
+            self.val_loss_step.append(logs['loss'])
+            self.val_acc_step.append(logs['acc'])
+            self.val_grid_acc_step.append(logs['acc_grid'])
 
-            if self.model_config.attention_map.enabled:
-                # Store attention scores
-                if hasattr(self.encoder, 'get_attention_scores'):
-                    attn_scores = self.encoder.get_attention_scores()
-                    if attn_scores is not None:
-                        self.val_attention_scores.append(attn_scores)
-                    else:
-                        logger.warning(f"Attention scores were None for val epoch {self.current_epoch} and batch {batch_idx}.")
+            # For the first and last validation batch of the epoch
+            if (batch_idx == 0) or (batch_idx == self.trainer.num_val_batches[0] - 1):
+                
+                # Store batch (of inputs, preds, targets) for current epoch for plotting
+                self.val_inputs.append(x)
+                self.val_preds.append(preds)
+                self.val_targets.append(y)
 
-        # Save to plot locally
-        self.val_loss_step.append(logs['loss'])
-        self.val_acc_step.append(logs['acc'])
-        self.val_grid_acc_step.append(logs['acc_grid_with_pad'])
+                if self.model_config.attention_map.enabled:
+                    # Store attention scores
+                    if hasattr(self.encoder, 'get_attention_scores'):
+                        attn_scores = self.encoder.get_attention_scores()
+                        if attn_scores is not None:
+                            self.val_attention_scores.append(attn_scores)
+                        else:
+                            logger.warning(f"Attention scores were None for val epoch {self.current_epoch} and batch {batch_idx}.")
+            
+        elif dataloader_idx == 1:
+            # Logging
+            self.log_dict({f"metrics/gen_val_{k}": v for k, v in logs.items()}, 
+                          prog_bar=True, 
+                          logger=True, 
+                          on_step=True, 
+                          on_epoch=True,
+                          add_dataloader_idx=False
+                          )
+
+            # Save to plot locally
+            self.gen_val_loss_step.append(logs['loss'])
+            self.gen_val_acc_step.append(logs['acc'])
+            self.gen_val_grid_acc_step.append(logs['acc_grid'])
+
+            # For the first and last validation batch of the epoch
+            if (batch_idx == 0) or (batch_idx == self.trainer.num_val_batches[1] - 1):
+                
+                # Store batch (of inputs, preds, targets) for current epoch for plotting
+                self.gen_val_inputs.append(x)
+                self.gen_val_preds.append(preds)
+                self.gen_val_targets.append(y)
+
+                if self.model_config.attention_map.enabled:
+                    # Store attention scores
+                    if hasattr(self.encoder, 'get_attention_scores'):
+                        attn_scores = self.encoder.get_attention_scores()
+                        if attn_scores is not None:
+                            self.gen_val_attention_scores.append(attn_scores)
+                        else:
+                            logger.warning(f"Attention scores were None for gen val epoch {self.current_epoch} and batch {batch_idx}.")
 
         return loss
 
@@ -280,71 +346,25 @@ class VisReasModel(pl.LightningModule):
 
         # Plot attention maps if attention maps are enabled and exist
         if self.model_config.attention_map.enabled and hasattr(self.encoder, 'get_attention_scores'):
-            # Plot attention maps of some training samples of the first and last batch seen during the epoch
-            fig_paths = plot_attention_scores("train", 
-                                  self.train_inputs,
-                                  self.train_targets, 
-                                  self.train_attention_scores, 
-                                  self.model_config.attention_map.layer, 
-                                  self.backbone_network_config.num_heads, 
-                                  self.image_size, 
-                                  self.encoder.num_extra_tokens, 
-                                  self.encoder.seq_len, 
-                                  n_samples=self.model_config.attention_map.n_samples, 
-                                  epoch=self.current_epoch, 
-                                  batch_index=0
-                                  )
+            # Plot attention maps of some training and validation samples of the first and last batch seen during the epoch
             
-            figs_to_log.append(fig_paths)
-            
-            fig_paths = plot_attention_scores("train",
-                                  self.train_inputs,
-                                  self.train_targets,
-                                  self.train_attention_scores,
-                                  self.model_config.attention_map.layer,
-                                  self.backbone_network_config.num_heads,
-                                  self.image_size,
-                                  self.encoder.num_extra_tokens,
-                                  self.encoder.seq_len,
-                                  n_samples=self.model_config.attention_map.n_samples,
-                                  epoch=self.current_epoch,
-                                  batch_index=-1
-                                  )
-            
-            figs_to_log.append(fig_paths)
-            
-            # Plot attention maps of some validation samples of the first and last batch seen during the epoch
-            fig_paths = plot_attention_scores("val", 
-                                  self.val_inputs,
-                                  self.val_targets,
-                                  self.val_attention_scores, 
-                                  self.model_config.attention_map.layer,
-                                  self.backbone_network_config.num_heads,
-                                  self.image_size,
-                                  self.encoder.num_extra_tokens,
-                                  self.encoder.seq_len,
-                                  n_samples=self.model_config.attention_map.n_samples,
-                                  epoch=self.current_epoch,
-                                  batch_index=0
-                                  )
-            
-            figs_to_log.append(fig_paths)
-            
-            fig_paths = plot_attention_scores("val", 
-                                  self.val_inputs,
-                                  self.val_targets,
-                                  self.val_attention_scores, 
-                                  self.model_config.attention_map.layer, 
-                                  self.backbone_network_config.num_heads,
-                                  self.image_size,
-                                  self.encoder.num_extra_tokens,
-                                  self.encoder.seq_len,
-                                  n_samples=self.model_config.attention_map.n_samples,
-                                  epoch=self.current_epoch,
-                                  batch_index=-1
-                                  )
-            
-            figs_to_log.append(fig_paths)
+            for batch_index, split in zip([0, -1], ["train", "val"]):
+                # Plot attention maps of some training samples of the first and last batch seen during the epoch
+                fig_paths = plot_attention_scores(split, 
+                                      self.train_inputs,
+                                      self.train_targets, 
+                                      self.train_attention_scores, 
+                                      self.model_config.attention_map.layer, 
+                                      self.backbone_network_config.num_heads, 
+                                      self.image_size, 
+                                      self.encoder.num_extra_tokens, 
+                                      self.encoder.seq_len, 
+                                      n_samples=self.model_config.attention_map.n_samples, 
+                                      epoch=self.current_epoch, 
+                                      batch_index=batch_index
+                                      )
+                
+                figs_to_log.append(fig_paths)
 
             # Log the figures to wandb
             for fig_paths in figs_to_log:
@@ -355,73 +375,54 @@ class VisReasModel(pl.LightningModule):
 
         # Plot model predictions
         if self.model_config.observe_preds.enabled:
-            # Plot a few training samples (inputs, predictions, targets) of the first and last batch seen during the epoch
-            fig_paths = plot_image_predictions("train",
+            # Plot a few training and validation samples (inputs, predictions, targets) of the first and last batch seen during the epoch
+            
+            for batch_index, split in zip([0, -1], ["train", "val"]):
+                # Plot a few training samples of the first and last batch seen during the epoch
+                fig_paths = plot_image_predictions(split,
                                       self.train_inputs, 
                                       self.train_preds, 
                                       self.train_targets, 
                                       self.image_size, 
                                       n_samples=self.model_config.observe_preds.n_samples,
-                                      batch_index=0,
+                                      batch_index=batch_index,
                                       epoch=self.current_epoch
                                       )
-            
-            figs_to_log.append(fig_paths)
-            
-            fig_paths = plot_image_predictions("train",
-                                      self.train_inputs, 
-                                      self.train_preds, 
-                                      self.train_targets, 
-                                      self.image_size, 
-                                      n_samples=self.model_config.observe_preds.n_samples, 
-                                      batch_index=-1,
-                                      epoch=self.current_epoch
-                                      )
-            
-            figs_to_log.append(fig_paths)
-            
-            # Plot a few validation samples (inputs, predictions, targets) of the first and last batch seen during the epoch
-            fig_paths = plot_image_predictions("val", 
-                                      self.val_inputs, 
-                                      self.val_preds, 
-                                      self.val_targets, 
-                                      self.image_size, 
-                                      n_samples=self.model_config.observe_preds.n_samples, 
-                                      batch_index=0, 
-                                      epoch=self.current_epoch
-                                      )
-            
-            figs_to_log.append(fig_paths)
-            
-            fig_paths = plot_image_predictions("val", 
-                                      self.val_inputs, 
-                                      self.val_preds, 
-                                      self.val_targets, 
-                                      self.image_size, 
-                                      n_samples=self.model_config.observe_preds.n_samples, 
-                                      batch_index=-1, 
-                                      epoch=self.current_epoch
-                                      )
-            
-            figs_to_log.append(fig_paths)
+                
+                figs_to_log.append(fig_paths)
 
             # Log the figures to wandb
             for fig_paths in figs_to_log:
                 for fig_path in fig_paths:
-                    self.logger.log_image(key="figures_image_predictions/"+fig_path.replace("./", ""),
-                                          images=[fig_path]
-                                          )
+                    try:
+                        self.logger.log_image(key="figures_image_predictions/"+fig_path.replace("./", ""),
+                                              images=[fig_path]
+                                              )
+                    except Exception as e:
+                        log_message = f"Error logging image predictions to wandb: {e}"
+                        log_message += f"Issue for figure path: {fig_path}"
+                        log_message += f"This image logging was skipped."
+                        logger.warning(log_message)
 
         # Reset the lists for the next epoch
         self.train_inputs = []
         self.train_preds = []
         self.train_targets = []
+
         self.val_inputs = []
         self.val_preds = []
         self.val_targets = []
 
+        if self.data_config.validate_in_and_out_domain:
+            self.gen_val_inputs = []
+            self.gen_val_preds = []
+            self.gen_val_targets = []
+
         self.train_attention_scores = []
         self.val_attention_scores = []
+
+        if self.data_config.validate_in_and_out_domain:
+            self.gen_val_attention_scores = []
 
     def test_step(self, batch, batch_idx, dataloader_idx=0):
         """
@@ -451,49 +452,44 @@ class VisReasModel(pl.LightningModule):
         preds = torch.argmax(y_hat, dim=1)  # [B, seq_len]; predictions for each token/symbol of the model for each sample of the batch
 
         # Accuracy per symbol (with padding) (i.e., the accuracy of the model in predicting the correct symbol for each pixel of the grid considering the whole max. padded grid, thus also the padding tokens)
-        # acc_symbol_with_pad = (torch.sum(y == preds).float() / (y.numel())).unsqueeze(0)    # same as line below
         acc_symbol_with_pad = (preds == y).float().mean().unsqueeze(0)
 
         # Accuracy per symbol (without padding) (i.e., the accuracy of the model in predicting the correct symbol for each pixel of the grid considering only the target grid, that is, without considering the padding tokens)
         acc_symbol_no_pad = (((preds == y) * mask).sum().float() / mask.sum()).unsqueeze(0)  # only consider non-padding elements
 
         # Grid accuracy with pad (only count as correct if the entire padded grid is correct)
-        # grid_acc = (torch.sum(torch.all(y == preds, dim=1)).float() / B).unsqueeze(0)    # same as line below
         acc_grid_with_pad = torch.all(preds == y, dim=1).float().mean().unsqueeze(0)
 
         # Grid accuracy without pad (only count as correct if entire non-padding grid is correct)
-        # acc_grid_no_pad = (torch.sum(torch.all((preds == y) | ~mask, dim=1)).float() / B).unsqueeze(0)    # same as line below
         acc_grid_no_pad = torch.all((preds == y) | ~mask, dim=1).float().mean().unsqueeze(0)   # | ~mask ensures automatically count as correct the padding tokens
 
-        logs = {'loss': loss_symbol_with_pad, 
+        logs = {'loss': loss_symbol_with_pad,
+                'loss_no_pad': loss_symbol_no_pad,
                 'acc': acc_symbol_with_pad, 
-                'acc_grid_with_pad': acc_grid_with_pad, 
-                'loss_no_pad': loss_symbol_no_pad, 
                 'acc_no_pad': acc_symbol_no_pad, 
+                'acc_grid': acc_grid_with_pad, 
                 'acc_grid_no_pad': acc_grid_no_pad
                 }
 
         if dataloader_idx == 0:
+            # Logging
+            results = {f"test_{k}": v for k, v in logs.items()}
+            self.log_dict(results, logger=True, on_step=True, prog_bar=True, add_dataloader_idx=False)
+            self.test_step_results.append(results)
+
             self.test_inputs.append(x)
             self.test_preds.append(preds)
             self.test_targets.append(y)
 
-            results = {f"test_{k}": v for k, v in logs.items()}
-            self.log_dict(results, logger=True, on_step=True, prog_bar=True)
-            self.test_step_results.append(results)
-
         elif dataloader_idx == 1:
+            # Logging
+            results = {f"gen_test_{k}": v for k, v in logs.items()}
+            self.log_dict(results, logger=True, on_step=True, prog_bar=True, add_dataloader_idx=False)
+            self.gen_test_step_results.append(results)
+
             self.gen_test_inputs.append(x)
             self.gen_test_preds.append(preds)
             self.gen_test_targets.append(y)
-
-            # TODO: Currently in the code we assume that if there is only one dataloader, it will be considered as a test dataloader and not a gen test dataloader even though the data may be of systematic generalization. Fix this to be better maybe?
-            results = {f"gen_test_{k}": v for k, v in logs.items()}
-            self.log_dict(results, logger=True, on_step=True, prog_bar=True)
-            self.gen_test_step_results.append(results)
-        
-        else:
-            raise ValueError(f"Unknown dataloader index given: {dataloader_idx}")
         
         return results
     
@@ -546,9 +542,9 @@ class VisReasModel(pl.LightningModule):
 
             # Plot a few test samples (inputs, predictions, targets) of the first and last batch of testing (single epoch)
             if self.model_config.observe_preds.enabled:
-                fig_paths = plot_image_predictions("test_gen", self.gen_test_inputs, self.gen_test_preds, self.gen_test_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=0)
+                fig_paths = plot_image_predictions("gen_test", self.gen_test_inputs, self.gen_test_preds, self.gen_test_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=0)
                 figs_to_log.append(fig_paths)
-                fig_paths = plot_image_predictions("test_gen", self.gen_test_inputs, self.gen_test_preds, self.gen_test_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=self.trainer.num_test_batches[1]-1)
+                fig_paths = plot_image_predictions("gen_test", self.gen_test_inputs, self.gen_test_preds, self.gen_test_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=self.trainer.num_test_batches[1]-1)
                 figs_to_log.append(fig_paths)
 
         if len(figs_to_log) != 0:
@@ -648,7 +644,7 @@ class VisReasModel(pl.LightningModule):
 
 
 class BEFOREARCModel(VisReasModel):
-    def __init__(self, base_config, model_config, backbone_network_config, head_network_config, image_size, **kwargs):
+    def __init__(self, base_config, model_config, data_config, backbone_network_config, head_network_config, image_size, **kwargs):
 
         # Save the hyperparameters to self.hparams so that they can be stored in the model checkpoint when using torch.save()
         self.save_hyperparameters()
@@ -663,7 +659,8 @@ class BEFOREARCModel(VisReasModel):
         
 
         super().__init__(base_config=base_config, 
-                         model_config=model_config, 
+                         model_config=model_config,
+                         data_config=data_config,
                          backbone_network_config=backbone_network_config, 
                          image_size=self.image_size
                          )
@@ -825,11 +822,11 @@ class BEFOREARCModel(VisReasModel):
         else:
             x_encoded = self.encoder(x)  # [B, seq_len, backbone_input_embed_dim]; NOTE: the extra tokens will have been truncated so the encoded sequence will also have a dim seq_len 
 
-        # Handle the task embedding if needed
+        # Handle the task embedding if applicable
         if self.model_config.task_embedding.enabled and (samples_task_id is not None):
             task_embedding = self.task_embedding(samples_task_id)   # [B, task_embedding_dim]
             task_embedding = task_embedding.unsqueeze(1).repeat(1, x_encoded.shape[1], 1) # [B, seq_len, task_embedding_dim]
-            x_encoded = torch.cat([x_encoded, task_embedding], 2)  # [B, seq_len, backbone_input_embed_dim + task_embedding_dim]
+            x_encoded = torch.cat([x_encoded, task_embedding], dim=2)  # [B, seq_len, backbone_input_embed_dim + task_embedding_dim]
 
         # Decode the encoded input sequence
         if self.model_config.head in ["transformer", "xtransformer", "mytransformer"]:
