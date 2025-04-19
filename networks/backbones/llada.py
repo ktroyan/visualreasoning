@@ -1729,8 +1729,9 @@ class LLaDAModel(nn.Module):
     @torch.no_grad()
     def generate_masked_sequence(
             self,
-            forward_f: Callable[[Optional[int], torch.Tensor, torch.Tensor], torch.Tensor],
+            forward_f: Callable[[Optional[int], Optional[List[int]], torch.Tensor, torch.Tensor], torch.Tensor],
             samples_task_id: [Optional[int]],
+            x_grid_object_ids: Optional[List[int]],
             input_ids: torch.LongTensor,
             target_ids: torch.LongTensor,
     ):
@@ -1806,11 +1807,11 @@ class LLaDAModel(nn.Module):
                     un_x = x.clone()
                     un_x[prompt_index] = mask_id
                     x_ = torch.cat([x, un_x], dim=0)
-                    logits = forward_f(samples_task_id, x_, target_ids)
+                    logits = forward_f(samples_task_id, x_grid_object_ids, x_, target_ids)
                     logits, un_logits = torch.chunk(logits, 2, dim=0)
                     logits = un_logits + (cfg_scale + 1) * (logits - un_logits)
                 else:
-                    logits = forward_f(samples_task_id, x, target_ids)
+                    logits = forward_f(samples_task_id, x_grid_object_ids, x, target_ids)
 
                 logits_with_noise = add_gumbel_noise(logits, temperature=temperature)
                 x0 = torch.argmax(logits_with_noise, dim=-1)  # b, l

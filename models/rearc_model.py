@@ -131,7 +131,7 @@ class VisReasModel(pl.LightningModule):
             samples_task_id = None
 
         # Forward pass through the whole model
-        y_hat, prediction_mask = self(x, y, samples_task_id, x_grid_object_ids)   # computed logits
+        y_hat, prediction_mask = self(x, y, samples_task_id, x_grid_object_ids)  # computed logits
 
         if len(y_hat.shape) > 2:
             # Permute the dimensions of y_hat to be [B, num_classes, seq_len] instead of [B, seq_len, num_classes] to match PyTorch's cross_entropy function format
@@ -144,11 +144,11 @@ class VisReasModel(pl.LightningModule):
 
     def step(self, batch, batch_idx):
 
-        x, y_hat, y, true_size_mask, prediction_mask, special_tokens_dict = self.shared_step(batch)    # [B, num_classes, seq_len], [B, seq_len], [B, seq_len]
-        y_orig =  y.clone()  # store the original inputs and targets for logging
+        x, y_hat, y, true_size_mask, prediction_mask, special_tokens_dict = self.shared_step(batch)  # [B, num_classes, seq_len], [B, seq_len], [B, seq_len]
+        y_orig = y.clone()  # store the original inputs and targets for logging
         y_hat_orig = y_hat.clone()
 
-        if prediction_mask is not None: # TODO; Set to false for debugging
+        if prediction_mask is not None:
             # LLaDA is trained in an autoregressive manner, so we have only some tokens of the target masked
             # we ignore all tokens that have not been masked, as the masked ones must only be copied
 
@@ -156,7 +156,6 @@ class VisReasModel(pl.LightningModule):
             y = y[prediction_mask]  # [#masked_tokens]
             y_hat = y_hat.permute(0, 2, 1)[prediction_mask]  # permute to [B, seq_len, num_classes] then mask => [#masked_tokens, num_classes]
             true_size_mask = true_size_mask[prediction_mask]  # [#masked_tokens]
-
 
         # probabilities = F.softmax(y_hat, dim=1)  # compute the probabilities (normalized logits) of the model for each sample of the batch
 
@@ -174,6 +173,7 @@ class VisReasModel(pl.LightningModule):
             # Loss per symbol (without padding): compute the loss per token/symbol and then apply the mask to ignore the padding tokens
             per_sample_loss = F.cross_entropy(y_hat, y.long(), reduction='none').float()  # [B, seq_len]
             loss_symbol_no_pad = ((per_sample_loss * true_size_mask).sum() / true_size_mask.sum()).unsqueeze(0)  # only consider non-padding elements
+
             # Compute predictions
             preds = torch.argmax(y_hat, dim=1)  # [B, seq_len]; predictions for each token/symbol of the model for each sample of the batch
             preds_orig = torch.argmax(y_hat_orig, dim=1)  # [B, seq_len]; predictions for each token/symbol of the model for each sample of the batch
@@ -184,7 +184,6 @@ class VisReasModel(pl.LightningModule):
             loss_symbol_no_pad = torch.tensor([0.0], device=y_hat.device)
             preds = y_hat
             preds_orig = y_hat_orig
-
 
 
         # Accuracy per symbol (with padding) (i.e., the accuracy of the model in predicting the correct symbol for each pixel of the grid considering the whole max. padded grid, thus also the padding tokens)
@@ -765,6 +764,7 @@ class REARCModel(VisReasModel):
                                              )
             self.backbone_input_embed_dim = backbone_network_config.d_model  # embedding dimension backbone model
 
+
         elif model_config.backbone == "looped_vit":
             raise NotImplementedError("Looped ViT not implemented yet")
         
@@ -904,6 +904,7 @@ class REARCModel(VisReasModel):
         B, H, W = x.shape
         B, seq_len = y.shape
 
+        # Encode the input sequence
         if self.model_config.ope.enabled and (x_grid_object_ids is not None) and self.model_config.backbone in ["vit", "transformer"]:
             # Encode the input grid image grid and use grid object ids for the OPE (which is used within the APE)
             x_encoded = self.encoder(x, x_grid_object_ids)  # [B, seq_len, backbone_input_embed_dim]; NOTE: the extra tokens will have been truncated so the encoded sequence will also have a dim seq_len
@@ -920,6 +921,7 @@ class REARCModel(VisReasModel):
         # Decode the encoded input sequence
         if self.model_config.head in ["transformer", "xtransformer", "mytransformer"]:
             # Transformer Decoder
+
             if self.head_input_dim != self.head_input_embed_dim:
                 # Map the encoded input sequence to the same embedding dimension as the decoder's
                 x_encoded = self.enc_to_dec_proj(x_encoded)  # [B, seq_len, head_input_embed_dim]
@@ -932,6 +934,6 @@ class REARCModel(VisReasModel):
             # Forward pass through the model head
             # We can treat each pixel/token independently as part of a sequence, so we can directly apply a Linear layer
             # where the last dimension is the features dimension, instead of reshaping the tensor
-            logits = self.decoder(x_encoded)  # [B, seq_len, num_classes] <-- [B, seq_len=H*W, C=self.network_config.embed_dim]
+            logits = self.decoder(x_encoded)   # [B, seq_len, num_classes] <-- [B, seq_len=H*W, C=self.network_config.embed_dim]
 
         return logits

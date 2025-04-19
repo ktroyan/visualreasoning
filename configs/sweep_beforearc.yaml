@@ -12,8 +12,8 @@ method: grid
 
 # Metric to optimize
 metric:
-  goal: minimize
-  name: metrics/val_loss_epoch  # TODO: see why metrics/val_loss does not exist in the Sweep section on WandB
+  goal: maximize
+  name: metrics/val_acc_grid_no_pad  # TODO: see why metrics/val_loss does not exist in the Sweep section on WandB
 
 ##### Experiment sweep #####
 parameters:

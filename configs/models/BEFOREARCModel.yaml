@@ -1,5 +1,5 @@
 model:
-  backbone: 'vit'  # choices: 'vit', 'transformer', 'resnet'
+  backbone: 'llada'  # choices: 'vit', 'transformer', 'resnet', 'llada'
   head: 'mlp'  # choices: 'transformer', 'mlp', 'mytransformer', 'xtransformer'
   pretrained: null
   patch_size: 1
@@ -35,8 +35,8 @@ model:
       enabled: true
       type: 'linear' # choices: 'linear'
       num_steps: 200.0
-    lr: 0.001
-    wd: 0.001
+    lr: 0.0002
+    wd: 0.01
   attention_map:
     enabled: false
     layer: -1  # layer to use for the attention map (-1 for the last, 0 for the first layer, 1 for the second layer, etc.)
