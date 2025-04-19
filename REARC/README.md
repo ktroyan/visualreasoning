@@ -5,7 +5,7 @@ The file ```generate_rearc_data.py``` can be used to generate REARC data. Those 
 Note that there should be a folder ```external/arc_original``` containing the original training and evaluation ARC tasks. Hence, the file ```arc_original.zip``` is included and unzipping it yields the aforementioned folder. Examples of how the original ARC tasks look can be visualized [here]([here](https://kts.github.io/arc-viewer/)).
 
 ## Datasets Creation
-The file ```create_rearc_datasets.ipynb``` can be used to generate the datasets (train, val, test and test_gen if applicable) for the experiments to perform, as specified in the REARC.md file. The result of a run essentially creates the study folders, experiment settings folders, and experiments folders, in which the dataset splits can be found.
+The file ```create_rearc_datasets.ipynb``` can be used to generate the datasets (train, val, test and gen_test if applicable) for the experiments to perform, as specified in the REARC.md file. The result of a run essentially creates the study folders, experiment settings folders, and experiments folders, in which the dataset splits can be found.
 
 ## Note
 Run the scripts from the REARC folder.
