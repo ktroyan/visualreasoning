@@ -24,6 +24,8 @@ class ResNet(nn.Module):
 
         self.image_size = image_size
 
+        self.original_num_out_features = resnet.fc.in_features   # get the original number of output features of the backbone
+
         if self.base_config.data_env =='REARC':
             patch_size = 1
             if self.model_config.use_ohe_repr:
@@ -34,7 +36,6 @@ class ResNet(nn.Module):
             self.input_projection = nn.Conv2d(in_channels=self.num_channels, out_channels=3, kernel_size=patch_size, stride=patch_size)  # 10 channels (from the one-hot encoding) to 3 channels
             
             # Modify the original Resnet network from torchvision in order to output the required dimensions
-            self.original_num_out_features = resnet.fc.in_features   # get the original number of output features of the backbone
             resnet.avgpool = nn.Identity()  # remove spatial pooling of the original resnet as we do not want the last downsampling (followed by flattening if downsampling occurs) since we want to get one embedding per position (H,W) in the grid image
         
             # TODO: See if upsampling correctly? Maybe we have to use dynamic upsampling (see below in forward()) as we do not know the number of feature maps after the layer4?
