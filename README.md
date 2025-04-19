@@ -120,7 +120,7 @@ The model experiments can now be run using those datasets. See the section [Scri
 #### Data
 To be able to execute the different programs, correctly prepared data must be available. Such data are contained in a folder with dataset splits (of either JSON or CSV format depending on the data environment considered).
 
-More specifically, experiment folders containing data splits (i.e., train, val, test, and optionally test_gen) must exist in some folder of path ```./<data_env>/final_datasets/<study>/exp_setting_<index>/<experiment_name>```. 
+More specifically, experiment folders containing data splits (i.e., train, val, test, and optionally gen_test) must exist in some folder of path ```./<data_env>/final_datasets/<study>/exp_setting_<index>/<experiment_name>```. 
 
 For example:  
 ```./REARC/final_datasets/sample-efficiency/exp_setting_1/experiment_2```
