@@ -901,8 +901,6 @@ class REARCModel(VisReasModel):
         return logits, mask
 
     def forward_sample(self, samples_task_id, x_grid_object_ids, x, y):
-        B, H, W = x.shape
-        B, seq_len = y.shape
 
         # Encode the input sequence
         if self.model_config.ope.enabled and (x_grid_object_ids is not None) and self.model_config.backbone in ["vit", "transformer"]:
