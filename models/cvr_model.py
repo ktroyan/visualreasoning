@@ -10,19 +10,25 @@ from networks.backbones.vit import get_vit
 from networks.backbones.transformer import get_transformer_encoder
 from networks.backbones.resnet import get_resnet
 from networks.heads.mlp import get_mlp_head
-from utility.cvr.utils import observe_image_predictions
+from utility.cvr.utils import plot_image_predictions
 from utility.utils import plot_lr_schedule  # noqa: F401
 from utility.logging import logger
 
 
 class VisReasModel(pl.LightningModule):
-    def __init__(self, base_config, model_config, image_size):
+    """
+    Model module class that handles the training, validation and testing logic of the model.
+    """
+
+    def __init__(self, base_config, model_config, data_config, image_size):
         super().__init__()
 
         self.base_config = base_config
         self.model_config = model_config
+        self.data_config = data_config
         self.image_size = image_size
 
+        # Train, val, test, OOD test (if applicable) and OOD val (if applicable) inputs, predictions and targets for local observation
         self.train_inputs = []
         self.train_preds = []
         self.train_targets = []
@@ -31,23 +37,35 @@ class VisReasModel(pl.LightningModule):
         self.val_preds = []
         self.val_targets = []
 
+        if data_config.validate_in_and_out_domain:
+            self.gen_val_inputs = []
+            self.gen_val_preds = []
+            self.gen_val_targets = []
+
         self.test_inputs = []
         self.test_preds = []
         self.test_targets = []
 
-        self.gen_test_inputs = []
-        self.gen_test_preds = []
-        self.gen_test_targets = []
+        if data_config.use_gen_test_set:
+            self.gen_test_inputs = []
+            self.gen_test_preds = []
+            self.gen_test_targets = []
 
         # Metrics for local plotting
         self.train_loss_step = []
         self.train_acc_step = []
+        
         self.val_loss_step = []
         self.val_acc_step = []
 
-        # Test results for logging
+        if data_config.validate_in_and_out_domain:
+            self.gen_val_loss_step = []
+            self.gen_val_acc_step = []
+
+        # Test and OOD test (if applicable) results for logging
         self.test_step_results = [] # NOTE: this is needed to store the results of the test step for each batch (i.e., at each step), and display the final results at the end of the epoch
-        self.gen_test_step_results = [] # NOTE: this is needed to store the results of the generalization test step for each batch (i.e., at each step), and display the final results at the end of the epoch
+        if data_config.use_gen_test_set:
+            self.gen_test_step_results = [] # NOTE: this is needed to store the results of the generalization test step for each batch (i.e., at each step), and display the final results at the end of the epoch
 
         # Learning rate values for plotting LR schedule
         self.lr_values = []
@@ -60,38 +78,23 @@ class VisReasModel(pl.LightningModule):
         for param in self.model_backbone.parameters():
             param.requires_grad = False
 
-    def mix_input_and_create_artificial_labels(self, x):
-        """
-        Mix the images within each input sample of the batch and create the associated ground-truth (artificial) labels. 
-        That is, randomly permute the images in each sample so that the odd image is not always the last one (which we don't want the model to learn).
-        """
-        x_shape = x.shape
-        nb_images_in_one_sample = 4
-        perms = torch.stack([torch.randperm(nb_images_in_one_sample, device=self.device) for _ in range(x_shape[0])], 0)     # for each sample in the batch, we randomly permute the four images contained in a sample
-        y = perms.argmax(1)   # get the new index of the odd image in the sample for each sample of the batch
-        perms = perms + torch.arange(x_shape[0], device=self.device)[:, None]*nb_images_in_one_sample
-        perms = perms.flatten()
-        x = x.reshape([x_shape[0]*nb_images_in_one_sample, x_shape[2], x_shape[3], x_shape[4]])[perms].reshape([x_shape[0], nb_images_in_one_sample, x_shape[2], x_shape[3], x_shape[4]])
-        return x, y
-
     def shared_step(self, batch):
-        # The input batch is a tuple of 2 elements (samples, labels), where a label is the task name
-        x, samples_task_id = batch  # ([B, nb_images_in_one_sample, C, H, W], [B])
+        x, y, samples_task_id = batch  # ([B, nb_images_in_one_sample, C, H, W], [B], [B])
 
         x_shape = x.shape    # B x nb_images in the sample (4) x C (3) x H (128) x W (128)
 
-        x, y = self.mix_input_and_create_artificial_labels(x)
-
-        if self.model_config.task_embedding.enabled:
-            # Forward pass (with the task embeddings)
-            y_hat = self(x, samples_task_id)
-        else:
-            # Forward pass
-            y_hat = self(x)
+        # Handle task embedding
+        if not self.model_config.task_embedding.enabled:
+            samples_task_id = None
+        
+        # Forward pass through the whole model
+        y_hat = self(x, samples_task_id)
 
         return x, y_hat, y
 
     def step(self, batch, batch_idx):
+
+        x, y, samples_task_id = batch  # ([B, nb_images_in_one_sample, C, H, W], [B], [B])
 
         x, y_hat, y = self.shared_step(batch)
 
@@ -102,11 +105,9 @@ class VisReasModel(pl.LightningModule):
 
         acc = (torch.sum((y == preds)).float() / len(y))  # compute the accuracy (averaged over the batch)
 
-        logs = {"loss": loss, 
-                "acc": acc, 
-                }
+        logs = {"loss": loss, "acc": acc}
 
-        return loss, logs, preds, y, x
+        return loss, logs, preds
 
     def training_step(self, batch, batch_idx):
         """
@@ -114,12 +115,20 @@ class VisReasModel(pl.LightningModule):
         This is a default PyTorch Lightning method that we override to define the training logic.
         """
 
-        loss, logs, preds, y, x = self.step(batch, batch_idx)
+        x, y, samples_task_id = batch  # ([B, nb_images_in_one_sample, C, H, W], [B], [B])
+
+        loss, logs, preds = self.step(batch, batch_idx)
 
         self.train_preds.append(preds)
         self.train_targets.append(y)
 
-        self.log_dict({f"metrics/train_{k}": v for k,v in logs.items()}, prog_bar=True, logger=True, on_step=True, on_epoch=True)    # NOTE: this is monitored for best checkpoint and early stopping
+        self.log_dict({f"metrics/train_{k}": v for k,v in logs.items()}, 
+                      prog_bar=True, 
+                      logger=True, 
+                      on_step=True, 
+                      on_epoch=True, 
+                      add_dataloader_idx=False
+                      )
 
         # Save two batches (of inputs, preds, targets) per epoch for plotting of images at each epoch
         if (batch_idx == 0) or (batch_idx == self.trainer.num_training_batches - 1):
@@ -131,31 +140,69 @@ class VisReasModel(pl.LightningModule):
         self.train_loss_step.append(logs['loss'])
         self.train_acc_step.append(logs['acc'])
 
+        # Log the current learning rate
+        self.log_dict({"learning_rate": self.lr_schedulers().get_last_lr()[-1]}, 
+                    prog_bar=True, 
+                    logger=True, 
+                    on_step=True, 
+                    on_epoch=True
+                    )
+
         return loss
 
-    def validation_step(self, batch, batch_idx):
+    def validation_step(self, batch, batch_idx, dataloader_idx=0):
         """
         This method is called for each batch during the validation phase.
         This is a default PyTorch Lightning method that we override to define the validation logic.
+        
+        NOTE: Currently val_loss is the monitored metric during training
         """
 
-        loss, logs, preds, y, x = self.step(batch, batch_idx)
+        x, y, samples_task_id = batch  # ([B, nb_images_in_one_sample, C, H, W], [B], [B])
 
-        self.val_preds.append(preds)
-        self.val_targets.append(y)
+        loss, logs, preds = self.step(batch, batch_idx)
 
-        self.log_dict({f"metrics/val_{k}": v for k, v in logs.items()}, prog_bar=True, logger=True, on_step=True, on_epoch=True)    # NOTE: this is monitored for best checkpoint and early stopping
-        self.log_dict({"learning_rate": self.lr_schedulers().get_last_lr()[-1]}, prog_bar=True, logger=True, on_step=True, on_epoch=True)    # NOTE: this is monitored for best checkpoint and early stopping. This yields learning_rate in the logs
+        if dataloader_idx == 0:
+            # Logging
+            self.log_dict({f"metrics/val_{k}": v for k, v in logs.items()}, 
+                          prog_bar=True, 
+                          logger=True, 
+                          on_step=True, 
+                          on_epoch=True,
+                          add_dataloader_idx=False
+                          )
 
-        # Save two batches (of inputs, preds, targets) per epoch for plotting of images at each epoch
-        if (batch_idx == 0) or (batch_idx == self.trainer.num_val_batches[0] - 1):
-            self.val_inputs.append(x)
-            self.val_preds.append(preds)
-            self.val_targets.append(y)
+            # Save to plot locally
+            self.val_loss_step.append(logs['loss'])
+            self.val_acc_step.append(logs['acc'])
 
-        # Save to plot locally
-        self.val_loss_step.append(logs['loss'])
-        self.val_acc_step.append(logs['acc'])
+            # For the first and last batch validation batch of the epoch
+            if (batch_idx == 0) or (batch_idx == self.trainer.num_val_batches[0] - 1):
+                # Store batch (of inputs, preds, targets) for current epoch for plotting
+                self.val_inputs.append(x)
+                self.val_preds.append(preds)
+                self.val_targets.append(y)
+
+        elif dataloader_idx == 1:
+            # Logging
+            self.log_dict({f"metrics/gen_val_{k}": v for k, v in logs.items()}, 
+                          prog_bar=True, 
+                          logger=True, 
+                          on_step=True, 
+                          on_epoch=True,
+                          add_dataloader_idx=False
+                          )
+
+            # Save to plot locally
+            self.gen_val_loss_step.append(logs['loss'])
+            self.gen_val_acc_step.append(logs['acc'])
+
+            # For the first and last batch validation batch of the epoch
+            if (batch_idx == 0) or (batch_idx == self.trainer.num_val_batches[0] - 1):
+                # Store batch (of inputs, preds, targets) for current epoch for plotting
+                self.gen_val_preds.append(preds)
+                self.gen_val_targets.append(y)
+
 
         return loss
 
@@ -168,20 +215,26 @@ class VisReasModel(pl.LightningModule):
 
         if self.model_config.observe_preds.enabled:
             # Plot a few training samples (inputs, predictions, targets) of the first and last batch seen during the epoch
-            observe_image_predictions("train", self.train_inputs, self.train_preds, self.train_targets, n_samples=self.model_config.observe_preds.n_samples, batch_index=0, epoch=self.current_epoch)
-            observe_image_predictions("train", self.train_inputs, self.train_preds, self.train_targets, n_samples=self.model_config.observe_preds.n_samples, batch_index=-1, epoch=self.current_epoch)
+            plot_image_predictions("train", self.train_inputs, self.train_preds, self.train_targets, n_samples=self.model_config.observe_preds.n_samples, batch_index=0, epoch=self.current_epoch)
+            plot_image_predictions("train", self.train_inputs, self.train_preds, self.train_targets, n_samples=self.model_config.observe_preds.n_samples, batch_index=-1, epoch=self.current_epoch)
             
             # Plot a few validation samples (inputs, predictions, targets) of the first and last batch seen during the epoch
-            observe_image_predictions("val", self.val_inputs, self.val_preds, self.val_targets, n_samples=self.model_config.observe_preds.n_samples, batch_index=0, epoch=self.current_epoch)
-            observe_image_predictions("val", self.val_inputs, self.val_preds, self.val_targets, n_samples=self.model_config.observe_preds.n_samples, batch_index=-1, epoch=self.current_epoch)
+            plot_image_predictions("val", self.val_inputs, self.val_preds, self.val_targets, n_samples=self.model_config.observe_preds.n_samples, batch_index=0, epoch=self.current_epoch)
+            plot_image_predictions("val", self.val_inputs, self.val_preds, self.val_targets, n_samples=self.model_config.observe_preds.n_samples, batch_index=-1, epoch=self.current_epoch)
 
         # Reset the lists for the next epoch
         self.train_inputs = []
         self.train_preds = []
         self.train_targets = []
+
         self.val_inputs = []
         self.val_preds = []
         self.val_targets = []
+
+        if self.data_config.validate_in_and_out_domain:
+            self.gen_val_inputs = []
+            self.gen_val_preds = []
+            self.gen_val_targets = []
 
     def test_step(self, batch, batch_idx, dataloader_idx=0):
         """
@@ -189,37 +242,41 @@ class VisReasModel(pl.LightningModule):
         This is a default PyTorch Lightning method that we override to define the testing logic.
         """
 
+        x, y, samples_task_id = batch  # ([B, nb_images_in_one_sample, C, H, W], [B], [B])
+
         x, y_hat, y = self.shared_step(batch)
+        
+        # Loss
         per_sample_loss = F.cross_entropy(y_hat, y, reduction='none').float()   # loss for each sample of the batch
         loss = per_sample_loss.mean().unsqueeze(0)
+        
+        # Compute predictions
         preds = torch.argmax(y_hat, dim=1)
+        
+        # Accuracy
         acc = (y == preds).float().mean().unsqueeze(0)
 
-        logs = {"loss": loss, 
-                "acc": acc
-                }
+        logs = {"loss": loss, "acc": acc}
 
         if dataloader_idx == 0:
+            # Logging
+            results = {f"test_{k}": v for k, v in logs.items()}
+            self.log_dict(results, logger=True, prog_bar=True, add_dataloader_idx=False)
+            self.test_step_results.append(results)
+
             self.test_inputs.append(x)
             self.test_preds.append(preds)
             self.test_targets.append(y)
 
-            results = {f"test_{k}": v for k, v in logs.items()}
-            self.log_dict(results, logger=True, prog_bar=True)  # log metrics for progress bar visualization
-            self.test_step_results.append(results)
-
         elif dataloader_idx == 1:
+            # Logging
+            results = {f"gen_test_{k}": v for k, v in logs.items()}
+            self.log_dict(results, logger=True, prog_bar=True, add_dataloader_idx=False)
+            self.gen_test_step_results.append(results)
+
             self.gen_test_inputs.append(x)
             self.gen_test_preds.append(preds)
             self.gen_test_targets.append(y)
-
-            # TODO: currently in the code we assume that if there is only one dataloader, it will be considered as a test dataloader and not a gen test dataloader even though the data may be of systematic generalization. Fix this to be better maybe?
-            results = {f"gen_test_{k}": v for k, v in logs.items()}
-            self.log_dict(results, logger=True, prog_bar=True)  # log metrics for progress bar visualization
-            self.gen_test_step_results.append(results)
-        
-        else:
-            raise ValueError(f"Unknown dataloader index given: {dataloader_idx}")
         
         return results
 
@@ -247,30 +304,30 @@ class VisReasModel(pl.LightningModule):
 
             # Plot a few test samples (inputs, predictions, targets) of the first and last batch of testing (single epoch)
             if self.model_config.observe_preds.enabled:
-                observe_image_predictions("test", self.test_inputs, self.test_preds, self.test_targets, n_samples=self.model_config.observe_preds.n_samples, batch_index=0)
-                observe_image_predictions("test", self.test_inputs, self.test_preds, self.test_targets, n_samples=self.model_config.observe_preds.n_samples, batch_index=self.trainer.num_test_batches[0]-1)
+                plot_image_predictions("test", self.test_inputs, self.test_preds, self.test_targets, n_samples=self.model_config.observe_preds.n_samples, batch_index=0)
+                plot_image_predictions("test", self.test_inputs, self.test_preds, self.test_targets, n_samples=self.model_config.observe_preds.n_samples, batch_index=self.trainer.num_test_batches[0]-1)
 
-        if len(self.gen_test_step_results) != 0:
-            gen_test_step_results = self.gen_test_step_results
+        if self.data_config.use_gen_test_set:
+            if len(self.gen_test_step_results) != 0:
+                gen_test_step_results = self.gen_test_step_results
 
-            gen_test_keys = list(gen_test_step_results[0].keys())  # we take the first element (i.e., for the first epoch) of the list since all elements have the same keys
+                gen_test_keys = list(gen_test_step_results[0].keys())  # we take the first element (i.e., for the first epoch) of the list since all elements have the same keys
 
-            # Results should contain a key for each metric (e.g., loss, acc) and the corresponding values for the single epoch seen during testing
-            gen_test_results = {k: torch.cat([x[k] for x in gen_test_step_results]).cpu().numpy() for k in gen_test_keys}
+                # Results should contain a key for each metric (e.g., loss, acc) and the corresponding values for the single epoch seen during testing
+                gen_test_results = {k: torch.cat([x[k] for x in gen_test_step_results]).cpu().numpy() for k in gen_test_keys}
 
-            log_message += f"[Test systematic generalization epoch {self.current_epoch}] Metrics per batch: \n"
-            for k, v in gen_test_results.items():
-                log_message += f"{k}: {v} \n"
+                log_message += f"[Test systematic generalization epoch {self.current_epoch}] Metrics per batch: \n"
+                for k, v in gen_test_results.items():
+                    log_message += f"{k}: {v} \n"
 
-            logger.info(log_message)
-            
-            self.gen_test_results = gen_test_results
+                logger.info(log_message)
+                
+                self.gen_test_results = gen_test_results
 
-            # Plot a few test samples (inputs, predictions, targets) of the first and last batch of testing (single epoch)
-            if self.model_config.observe_preds.enabled:
-                observe_image_predictions("test_gen", self.gen_test_inputs, self.gen_test_preds, self.gen_test_targets, n_samples=self.model_config.observe_preds.n_samples, batch_index=0)
-                observe_image_predictions("test_gen", self.gen_test_inputs, self.gen_test_preds, self.gen_test_targets, n_samples=self.model_config.observe_preds.n_samples, batch_index=self.trainer.num_test_batches[1]-1)
-
+                # Plot a few test samples (inputs, predictions, targets) of the first and last batch of testing (single epoch)
+                if self.model_config.observe_preds.enabled:
+                    plot_image_predictions("gen_test", self.gen_test_inputs, self.gen_test_preds, self.gen_test_targets, n_samples=self.model_config.observe_preds.n_samples, batch_index=0)
+                    plot_image_predictions("gen_test", self.gen_test_inputs, self.gen_test_preds, self.gen_test_targets, n_samples=self.model_config.observe_preds.n_samples, batch_index=self.trainer.num_test_batches[1]-1)
 
     def on_train_end(self):
         """
@@ -358,15 +415,14 @@ class VisReasModel(pl.LightningModule):
 
         return optimizer_config
 
-# Vision approach
 class CVRModel(VisReasModel):
 
-    def __init__(self, base_config, model_config, backbone_network_config, head_network_config, image_size):
+    def __init__(self, base_config, model_config, data_config, backbone_network_config, head_network_config, image_size):
 
         # Save the hyperparameters to self.hparams so that they can be stored in the model checkpoint when using torch.save()
         self.save_hyperparameters()
 
-        super().__init__(base_config=base_config, model_config=model_config, image_size=image_size)
+        super().__init__(base_config, model_config, data_config, image_size)
 
         self.model_config = model_config
 
@@ -465,10 +521,10 @@ class CVRModel(VisReasModel):
         # Forward pass through the model backbone
         x_encoded = self.encoder(x)  # [B*4, nb_features_backbone]
 
-        # Handle the task embedding if needed
+        # Handle the task embedding if applicable
         if samples_task_id is not None:
             task_embedding = self.task_embedding(samples_task_id.repeat_interleave(self.nb_images_in_one_sample))     # [B*4, embed_dim] <-- .repeat_interleave(4) is used to repeat 4 times the element in the tensor samples_task_id. This allows to associate the same embedding with each of the four images within a sample and then allow to concatenate it with the features obtained from the backbone model, as the batch dimension is B*4
-            x_encoded = torch.cat([x_encoded, task_embedding], 1)  # [B*4, nb_features_backbone + embed_dim]; Note that dimensions other than the one along which it is concatenated must be the same between encoded x and the task_embedding
+            x_encoded = torch.cat([x_encoded, task_embedding], dim=1)  # [B*4, nb_features_backbone + embed_dim]; Note that dimensions other than the one along which it is concatenated must be the same between encoded x and the task_embedding
 
         if self.model_config.dp_sim.enabled:
 
