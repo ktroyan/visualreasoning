@@ -121,7 +121,7 @@ ALL_TASKS_ID_TO_NAME = {
 # Create the dict task name to task id
 ALL_TASKS_NAME_TO_ID = {v: k for k, v in ALL_TASKS_ID_TO_NAME.items()}
 
-def main(data_dir, tasks, train_size, val_size, test_size, test_gen_size, image_size, seed):
+def main(data_dir, tasks, train_size, val_size, test_size, gen_test_size, image_size, seed):
     """
     Generate CVR data.
 
@@ -131,7 +131,7 @@ def main(data_dir, tasks, train_size, val_size, test_size, test_gen_size, image_
         train_size (int): number of training examples to generate per task
         val_size (int): number of validation examples to generate per task
         test_size (int): number of test examples to generate per task
-        test_gen_size (int): number of sys-gen test examples to generate per task
+        gen_test_size (int): number of sys-gen test examples to generate per task
         image_size (int): size of the images
         seed (int): random seed
     """
@@ -141,7 +141,7 @@ def main(data_dir, tasks, train_size, val_size, test_size, test_gen_size, image_
           train_size {train_size},
           val_size {val_size},
           test_size {test_size},
-          test_gen_size {test_gen_size}
+          gen_test_size {gen_test_size}
           image_size {image_size}
         """)
 
@@ -164,10 +164,11 @@ def main(data_dir, tasks, train_size, val_size, test_size, test_gen_size, image_
                              train_size=train_size, 
                              val_size=val_size, 
                              test_size=test_size, 
-                             test_gen_size=test_gen_size)
+                             test_gen_size=gen_test_size)
 
             print(f"Generated {i+1}/103 tasks")
 
+    # To generate a specific set of tasks
     elif isinstance(tasks, list):
         num_tasks = len(tasks)
         for i, task_id in enumerate(tasks):
@@ -183,7 +184,7 @@ def main(data_dir, tasks, train_size, val_size, test_size, test_gen_size, image_
                              train_size=train_size, 
                              val_size=val_size, 
                              test_size=test_size, 
-                             test_gen_size=test_gen_size)
+                             test_gen_size=gen_test_size)
 
             print(f"Generated {i+1}/{num_tasks} tasks\n")
     
@@ -201,7 +202,7 @@ def main(data_dir, tasks, train_size, val_size, test_size, test_gen_size, image_
                          train_size=train_size, 
                          val_size=val_size, 
                          test_size=test_size, 
-                         test_gen_size=test_gen_size)
+                         test_gen_size=gen_test_size)
 
         print(f"Generated task with task id: {tasks}")
 
@@ -216,7 +217,7 @@ if __name__ == '__main__':
     train_size = 1000  # originally: 10000
     val_size = 500  # originally: 500
     test_size = 1000    # originally: 1000
-    test_gen_size = 1000    # originally: 500
+    gen_test_size = 1000    # originally: 500
     image_size = 64 # originally: 128
     seed = 1997
     data_dir = f"./generated_data_{image_size}x{image_size}"
@@ -233,4 +234,4 @@ if __name__ == '__main__':
     # tasks = 0 # single task
 
     # Generate data
-    main(data_dir, tasks, train_size, val_size, test_size, test_gen_size, image_size, seed)
+    main(data_dir, tasks, train_size, val_size, test_size, gen_test_size, image_size, seed)
