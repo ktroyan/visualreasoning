@@ -24,7 +24,7 @@ class VisReasModel(pl.LightningModule):
     Model module class that handles the training, validation and testing logic of the model.
     """
     
-    def __init__(self, base_config, model_config, data_config, backbone_network_config, image_size):
+    def __init__(self, base_config, model_config, data_config, backbone_network_config, image_size, save_folder):
         super().__init__()
 
         self.base_config = base_config
@@ -32,6 +32,7 @@ class VisReasModel(pl.LightningModule):
         self.data_config = data_config
         self.backbone_network_config = backbone_network_config
         self.image_size = image_size
+        self.save_folder = save_folder
 
         # Train, val, test, OOD test (if applicable) and OOD val (if applicable) inputs, predictions and targets for local observation
         self.train_inputs = []
@@ -350,19 +351,19 @@ class VisReasModel(pl.LightningModule):
             
             for batch_index, split in zip([0, -1], ["train", "val"]):
                 # Plot attention maps of some training samples of the first and last batch seen during the epoch
-                fig_paths = plot_attention_scores(split, 
-                                      self.train_inputs,
-                                      self.train_targets, 
-                                      self.train_attention_scores, 
-                                      self.model_config.attention_map.layer, 
-                                      self.backbone_network_config.num_heads, 
-                                      self.image_size, 
-                                      self.encoder.num_extra_tokens, 
-                                      self.encoder.seq_len, 
-                                      n_samples=self.model_config.attention_map.n_samples, 
-                                      epoch=self.current_epoch, 
-                                      batch_index=batch_index
-                                      )
+                fig_paths = plot_attention_scores(self.save_folder,
+                                                  split, 
+                                                  self.train_inputs,
+                                                  self.train_targets, 
+                                                  self.train_attention_scores, 
+                                                  self.model_config.attention_map.layer, 
+                                                  self.backbone_network_config.num_heads, 
+                                                  self.image_size, self.encoder.num_extra_tokens, 
+                                                  self.encoder.seq_len, 
+                                                  n_samples=self.model_config.attention_map.n_samples, 
+                                                  epoch=self.current_epoch, 
+                                                  batch_index=batch_index
+                                                  )
                 
                 figs_to_log.append(fig_paths)
 
@@ -378,16 +379,17 @@ class VisReasModel(pl.LightningModule):
             # Plot a few training and validation samples (inputs, predictions, targets) of the first and last batch seen during the epoch
             
             for batch_index, split in zip([0, -1], ["train", "val"]):
-                # Plot a few training samples of the first and last batch seen during the epoch
-                fig_paths = plot_image_predictions(split,
-                                      self.train_inputs, 
-                                      self.train_preds, 
-                                      self.train_targets, 
-                                      self.image_size, 
-                                      n_samples=self.model_config.observe_preds.n_samples,
-                                      batch_index=batch_index,
-                                      epoch=self.current_epoch
-                                      )
+                # Plot a few training and validation samples of the first and last batch seen during the epoch
+                fig_paths = plot_image_predictions(self.save_folder,
+                                                   split,
+                                                   self.train_inputs,
+                                                   self.train_preds,
+                                                   self.train_targets,
+                                                   self.image_size,
+                                                   n_samples=self.model_config.observe_preds.n_samples,
+                                                   batch_index=batch_index,
+                                                   epoch=self.current_epoch
+                                                   )
                 
                 figs_to_log.append(fig_paths)
 
@@ -520,33 +522,34 @@ class VisReasModel(pl.LightningModule):
 
             # Plot a few test samples (inputs, predictions, targets) of the first and last batch of testing (single epoch)
             if self.model_config.observe_preds.enabled:
-                fig_paths = plot_image_predictions("test", self.test_inputs, self.test_preds, self.test_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=0)
+                fig_paths = plot_image_predictions(self.save_folder, "test", self.test_inputs, self.test_preds, self.test_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=0)
                 figs_to_log.append(fig_paths)
-                fig_paths = plot_image_predictions("test", self.test_inputs, self.test_preds, self.test_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=self.trainer.num_test_batches[0]-1)
+                fig_paths = plot_image_predictions(self.save_folder, "test", self.test_inputs, self.test_preds, self.test_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=self.trainer.num_test_batches[0]-1)
                 figs_to_log.append(fig_paths)
+
+        if self.data_config.use_gen_test_set:
+            if len(self.gen_test_step_results) != 0:
+                gen_test_step_results = self.gen_test_step_results
+
+                gen_test_keys = list(gen_test_step_results[0].keys())  # we take the first element (i.e., for the first epoch) of the list since all elements have the same keys
+
+                # Results should contain a key for each metric (e.g., loss, acc) and the corresponding values for the single epoch seen during testing
+                gen_test_results = {k: torch.cat([x[k] for x in gen_test_step_results]).cpu().numpy() for k in gen_test_keys}
+
+                log_message += f"[Test systematic generalization epoch {self.current_epoch}] Metrics per batch: \n"
+                for k, v in gen_test_results.items():
+                    log_message += f"{k}: {v} \n"
+
+                logger.info(log_message)
                 
-        if len(self.gen_test_step_results) != 0:
-            gen_test_step_results = self.gen_test_step_results
+                self.gen_test_results = gen_test_results
 
-            gen_test_keys = list(gen_test_step_results[0].keys())  # we take the first element (i.e., for the first epoch) of the list since all elements have the same keys
-
-            # Results should contain a key for each metric (e.g., loss, acc) and the corresponding values for the single epoch seen during testing
-            gen_test_results = {k: torch.cat([x[k] for x in gen_test_step_results]).cpu().numpy() for k in gen_test_keys}
-
-            log_message += f"[Test systematic generalization epoch {self.current_epoch}] Metrics per batch: \n"
-            for k, v in gen_test_results.items():
-                log_message += f"{k}: {v} \n"
-
-            logger.info(log_message)
-            
-            self.gen_test_results = gen_test_results
-
-            # Plot a few test samples (inputs, predictions, targets) of the first and last batch of testing (single epoch)
-            if self.model_config.observe_preds.enabled:
-                fig_paths = plot_image_predictions("gen_test", self.gen_test_inputs, self.gen_test_preds, self.gen_test_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=0)
-                figs_to_log.append(fig_paths)
-                fig_paths = plot_image_predictions("gen_test", self.gen_test_inputs, self.gen_test_preds, self.gen_test_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=self.trainer.num_test_batches[1]-1)
-                figs_to_log.append(fig_paths)
+                # Plot a few test samples (inputs, predictions, targets) of the first and last batch of testing (single epoch)
+                if self.model_config.observe_preds.enabled:
+                    fig_paths = plot_image_predictions(self.save_folder, "gen_test", self.gen_test_inputs, self.gen_test_preds, self.gen_test_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=0)
+                    figs_to_log.append(fig_paths)
+                    fig_paths = plot_image_predictions(self.save_folder, "gen_test", self.gen_test_inputs, self.gen_test_preds, self.gen_test_targets, self.image_size, n_samples=self.model_config.observe_preds.n_samples, batch_index=self.trainer.num_test_batches[1]-1)
+                    figs_to_log.append(fig_paths)
 
         if len(figs_to_log) != 0:
             # Log the figures to wandb
@@ -563,7 +566,7 @@ class VisReasModel(pl.LightningModule):
         """
 
         # Plot learning rate values used during training
-        fig_path = plot_lr_schedule(self.lr_values)
+        fig_path = plot_lr_schedule(self.save_folder, self.lr_values)
 
         # Log the learning rate schedule to wandb
         self.logger.log_image(key="figures_lr_schedule/"+fig_path.replace("./", ""),

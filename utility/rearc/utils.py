@@ -94,7 +94,8 @@ def one_hot_encode(x: torch.Tensor, num_token_categories: int) -> torch.Tensor:
 
     return x_ohe
 
-def plot_attention_scores(split: str, 
+def plot_attention_scores(save_folder_path: str,
+                          split: str, 
                           inputs: List, 
                           targets: List,
                           attn_scores: List,
@@ -112,6 +113,7 @@ def plot_attention_scores(split: str,
     It handles extra tokens and reshapes the sequence to a 2D grid for better visualization of attentions w.r.t. input and target grids.
 
     Args:
+        save_folder_path (str): Path to save the plots.
         split (str): Split of the dataset (train, val, test).
         inputs (List): List of input grid images of shape [B, H, W].
         targets (List): List of target grid images of shape [B, H, W].
@@ -262,8 +264,12 @@ def plot_attention_scores(split: str,
             ax_target.set_title("Target Grid", fontdict={'fontsize': 12, 'fontweight': 'bold', 'family': 'serif'})
 
         plt.tight_layout()
-        os.makedirs("./figs", exist_ok=True)
-        fig_path = f"./figs/{split}_attention_layer{layer_index}_sample{sample_index}_epoch{epoch}_batch{batch_index}.png"
+
+        # Create the /figs folder
+        figs_folder_path = os.path.join(save_folder_path, "figs")
+        os.makedirs(figs_folder_path, exist_ok=True)
+
+        fig_path = f"{figs_folder_path}/{split}_attention_layer{layer_index}_sample{sample_index}_epoch{epoch}_batch{batch_index}.png"
         plt.savefig(fig_path)
         plt.close(fig)
         fig_paths.append(fig_path)
@@ -271,12 +277,12 @@ def plot_attention_scores(split: str,
 
     return fig_paths
 
-def plot_metrics_locally(training_folder: str, metrics: Dict) -> List[str]:
+def plot_metrics_locally(save_folder_path: str, metrics: Dict) -> List[str]:
     """
     Generate and save plots for training and validation epoch metrics.
 
     Args:
-        training_folder (str): Path to save the plots.
+        save_folder_path (str): Path to save the plots.
         metrics (dict): Dictionary containing metric lists.
     """
 
@@ -284,7 +290,7 @@ def plot_metrics_locally(training_folder: str, metrics: Dict) -> List[str]:
     fig_paths = []
 
     # Create the /figs folder in the folder for training if it does not exist
-    figs_folder_path = os.path.join(training_folder, "figs")
+    figs_folder_path = os.path.join(save_folder_path, "figs")
     os.makedirs(figs_folder_path, exist_ok=True)
 
     # Make sure all elements in the values of the dictionary are on cpu
@@ -303,7 +309,7 @@ def plot_metrics_locally(training_folder: str, metrics: Dict) -> List[str]:
         plt.title(title)
         plt.legend()
         plt.tight_layout()
-        fig_path = os.path.join(training_folder, "figs", filename)
+        fig_path = os.path.join(figs_folder_path, filename)
         plt.savefig(fig_path)
         plt.close()
         return fig_path
@@ -356,27 +362,18 @@ def plot_metrics_locally(training_folder: str, metrics: Dict) -> List[str]:
 
     return fig_paths
 
-def plot_image_predictions(split: str, 
-                              inputs: torch.Tensor | list, 
-                              preds: torch.Tensor | list, 
-                              targets: torch.Tensor | list, 
-                              image_size: int, 
-                              n_samples: int = 4, 
-                              batch_index: int = 0,
-                              epoch: int = None
-                              ) -> List[str]:
+def plot_image_predictions(save_folder_path: str,
+                           split: str,
+                           inputs: torch.Tensor | list,
+                           preds: torch.Tensor | list,
+                           targets: torch.Tensor | list,
+                           image_size: int,
+                           n_samples: int = 4,
+                           batch_index: int = 0,
+                           epoch: int = None
+                           ) -> List[str]:
     """ 
     Observe the inputs, predictions and labels of a subset of a batch.
-
-    Args:
-    - split: str: the split of the data (train, val, test, gen_test)
-    - inputs: torch.Tensor or list: the input grid images that were fed to the model
-    - preds: torch.Tensor or list: the flattened grid image predictions of the model
-    - targets: torch.Tensor or list: the flattened grid image targets
-    - image_size: int: the H=W size of the image
-    - batch_index: int: the index in the list of the batch to observe
-    - n_samples: int: the number of samples to observe from the batch
-
     """
 
     # Store the paths of the figures created
@@ -402,9 +399,9 @@ def plot_image_predictions(split: str,
     n_samples = min(n_samples, len(preds))
 
     if batch_index is not None:
-        logger.debug(f"Observing {n_samples} samples from the batch {batch_index} (of the list of batches given) at {split} time. See /figs folder.")
+        logger.debug(f"Observing {n_samples} samples from the batch {batch_index} (of the list of batches given) at {split} time.")
     else:
-        logger.debug(f"Observing {n_samples} samples from a batch at {split} time. See /figs folder.")
+        logger.debug(f"Observing {n_samples} samples from a batch at {split} time.")
 
     # Explicit the symbols chosen for the tokens
     PAD_TOKEN = 10
@@ -620,19 +617,21 @@ def plot_image_predictions(split: str,
     # plt.show()
 
     # Save the figure
-    os.makedirs("./figs", exist_ok=True)   # create the /figs folder if it does not exist
+    figs_folder = os.path.join(save_folder_path, "figs")
+    os.makedirs(figs_folder, exist_ok=True)   # create the /figs folder if it does not exist
+    
     # NOTE: "_of_saved_batches" indicates that the index of the batch here is that of the list given
     # as argument where we saved batches, not that of the batch in the dataloader. 
     # Hence, we can refer to the code in rearc_model.py to see what batches are saved to the list. 
     # Most likely we only save the first and the last batch of the epoch.
     if epoch is not None:
         # Training or Validation
-        fig_path = f"./figs/{split}_image_predictions_epoch{epoch}_batch{batch_index}_of_saved_batches.png"
+        fig_path = f"{figs_folder}/{split}_image_predictions_epoch{epoch}_batch{batch_index}_of_saved_batches.png"
         fig.savefig(fig_path)
         fig_paths.append(fig_path)
     else:
         # Testing
-        fig_path = f"./figs/{split}_image_predictions_batch{batch_index}_of_saved_batches.png"
+        fig_path = f"{figs_folder}/{split}_image_predictions_batch{batch_index}_of_saved_batches.png"
         fig.savefig(fig_path)
         fig_paths.append(fig_path)
 
@@ -640,7 +639,7 @@ def plot_image_predictions(split: str,
 
     return fig_paths
 
-def plot_grid_image(grid_image):
+def plot_grid_image(figs_folder, grid_image):
     """ 
     Plot a grid image from REARC.
     """
@@ -799,9 +798,10 @@ def plot_grid_image(grid_image):
     # plt.show()
 
     # Save the figure
-    os.makedirs("./figs", exist_ok=True)   # create the /figs folder if it does not exist
+    figs_folder = os.path.join(figs_folder, "figs")
+    os.makedirs(figs_folder, exist_ok=True)
 
-    fig_path = f"./figs/grid_image.png"
+    fig_path = f"{figs_folder}/grid_image.png"
     fig.savefig(fig_path)
 
     plt.close(fig)

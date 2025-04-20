@@ -29,11 +29,6 @@ def main() -> None:
     logger.info("*** Experiment started ***")
     exp_start_time = time.time()
 
-    # Empty the /figs folder to avoid the later copying of old figures from previous experiments
-    figs_folder = "./figs"
-    os.makedirs(figs_folder, exist_ok=True)
-    delete_folder_content("./figs")
-
     # Get all the config arguments for a regular experiment run
     config, config_dict = get_complete_config()
 
@@ -45,7 +40,7 @@ def main() -> None:
     # Initialize WandB project run tracking
     run = wandb.init(
         project=config.wandb.wandb_project_name,    # ignored if using sweeps
-        entity=config.wandb.wandb_entity_name,    # ignored if using sweeps
+        entity=config.wandb.wandb_entity_name,      # ignored if using sweeps
         dir=experiment_folder,
         name=experiment_name_timestamped,
         )
@@ -77,7 +72,7 @@ def main() -> None:
 
     # Model chosen
     model_module = vars(models)[config.base.model_module]
-    model = model_module(config.base, config.model, config.data, config.backbone_network, config.head_network, image_size)   # initialize the model module
+    model = model_module(config.base, config.model, config.data, config.backbone_network, config.head_network, image_size, experiment_folder)   # initialize the model module
     logger.trace(f"Model chosen for training: {model}")
     
     # Save the model metadata for future checkpoint use
@@ -92,19 +87,22 @@ def main() -> None:
 
 
     # Training
-    trainer, best_model, best_model_ckpt, train_results = training.main(config, 
-                                                                         experiment_folder, 
-                                                                         datamodule, 
-                                                                         model, 
-                                                                         exp_logger)
+    trainer, best_model, best_model_ckpt, train_results = training.main(config,
+                                                                        experiment_folder,
+                                                                        datamodule,
+                                                                        model,
+                                                                        exp_logger
+                                                                        )
 
 
     # Testing
-    all_test_results = inference.main(config, 
-                                  datamodule, 
-                                  model=best_model,
-                                  model_ckpt_path=None, # we use the best model found during training, so no need to specify a checkpoint path
-                                  exp_logger=exp_logger)
+    all_test_results = inference.main(config,
+                                      experiment_folder,
+                                      datamodule,
+                                      model=best_model,
+                                      model_ckpt_path=None, # we use the best model obtained during training, so no need to specify a checkpoint path
+                                      exp_logger=exp_logger
+                                      )
     
 
     # End the wandb run
@@ -115,11 +113,6 @@ def main() -> None:
     exp_elapsed_time = time.time() - exp_start_time
     log_message += f"\nTotal experiment time: \n{exp_elapsed_time} seconds ~=\n{exp_elapsed_time/60} minutes ~=\n{exp_elapsed_time/(60*60)} hours"
     logger.info(log_message)
-
-    # Save the figures produced in the /figs folder during the experiment to the experiment folder
-    experiment_figs_folder = f"{experiment_folder}/figs"
-    os.makedirs(experiment_figs_folder, exist_ok=True)
-    copy_folder("./figs", experiment_figs_folder)   # copy everything in the /figs folder to the current experiment folder
 
     # Save the results and config arguments that we are the most interested to check quickly when experimenting
     exp_results_dict = {

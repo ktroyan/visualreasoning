@@ -18,7 +18,7 @@ torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.deterministic = True
 
 
-def main(config, datamodule, model=None, model_ckpt_path=None, exp_logger=None):
+def main(config, inference_folder, datamodule, model=None, model_ckpt_path=None, exp_logger=None):
 
     logger.info("*** Inference started ***")
     inference_start_time = time.time()
@@ -58,7 +58,7 @@ def main(config, datamodule, model=None, model_ckpt_path=None, exp_logger=None):
 
 
     # Testing
-    trainer.test(model=model, datamodule=datamodule, verbose=True)  # NOTE: if more than one test dataloader was created in the datamodule, all the test dataloaders will be used for testing
+    trainer.test(model=model, datamodule=datamodule, verbose=True)  # NOTE: if more than one val/test dataloader was created in the datamodule, all the val/test dataloaders will be used for testing
    
 
     # Additional logging and plotting if needed
@@ -67,21 +67,21 @@ def main(config, datamodule, model=None, model_ckpt_path=None, exp_logger=None):
         logger.debug(f"Test targets: {model.test_targets}")
 
         test_dataloader = datamodule.test_dataloader()[0] if isinstance(datamodule.test_dataloader(), list) else datamodule.test_dataloader()
-        observe_input_output_images(dataloader=test_dataloader, batch_id=0, n_samples=4, split="test")
+        observe_input_output_images(save_folder_path=inference_folder, dataloader=test_dataloader, batch_id=0, n_samples=4, split="test")
 
         if config.data.use_gen_test_set:
             logger.debug(f"OOD test predictions: {model.gen_test_preds}")
             logger.debug(f"OOD test targets: {model.gen_test_targets}")
 
             gen_test_dataloader = datamodule.test_dataloader()[1]
-            observe_input_output_images(dataloader=gen_test_dataloader, batch_id=0, n_samples=4, split="gen_test")
+            observe_input_output_images(save_folder_path=inference_folder, dataloader=gen_test_dataloader, batch_id=0, n_samples=4, split="gen_test")
 
             if config.data.validate_gen_test_set:
                 logger.debug(f"OOD val predictions: {model.gen_val_preds}")
                 logger.debug(f"OOD val targets: {model.gen_val_targets}")
 
                 gen_val_dataloader = datamodule.val_dataloader()[0] if isinstance(datamodule.val_dataloader(), list) else datamodule.val_dataloader()
-                observe_input_output_images(dataloader=gen_val_dataloader, batch_id=0, n_samples=4, split="gen_val")        
+                observe_input_output_images(save_folder_path=inference_folder, dataloader=gen_val_dataloader, batch_id=0, n_samples=4, split="gen_val")        
 
     # Process the test results for better logging
     test_results = model.test_results
@@ -113,6 +113,10 @@ if __name__ == '__main__':
     if config.base.seed is not None:
         pl.seed_everything(config.base.seed)
 
+    # Create the inference folder
+    inference_folder = f"./{config.data.data_env}/inference"
+    os.makedirs(inference_folder, exist_ok=True)
+
     # Data chosen
     data_module = vars(data)[config.base.data_module]
     datamodule = data_module(config.data)   # initialize the data with the data config
@@ -129,8 +133,7 @@ if __name__ == '__main__':
         model = None
     else:
         model_module = vars(models)[config.base.model_module]
-        model = model_module(config.base, config.model, config.data, config.backbone_network, config.head_network, image_size)   # initialize the model with the model and network configs
+        model = model_module(config.base, config.model, config.data, config.backbone_network, config.head_network, image_size, inference_folder)   # initialize the model with the model and network configs
         logger.info(f"Model chosen for inference w.r.t. the current config files: {model}")
-    
 
-    test_results = main(config, datamodule, model, model_ckpt, exp_logger=None)
+    test_results = main(config, inference_folder, datamodule, model, model_ckpt, exp_logger=None)

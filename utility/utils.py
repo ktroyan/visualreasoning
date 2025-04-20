@@ -167,13 +167,13 @@ def generate_timestamped_experiment_name(exp_basename):
     experiment_name = f"{exp_basename}_{timestamp}"
     return experiment_name
 
-def save_model_metadata_for_ckpt(save_folder, model):
+def save_model_metadata_for_ckpt(save_folder_path, model):
     """
     Save the model class and all the config arguments used to create the model and save it in the current (timestamped) experiment folder.
     This allows us to load the model module/class and config arguments in order to be able to easily load a model from a checkpoint only.
 
     Args:
-        save_folder (str): the folder in which to save the metadata .pth (dict) file
+        save_folder_path (str): the folder in which to save the metadata .pth (dict) file
         model (pl.LightningModule): the model to save metadata for
     """
 
@@ -182,7 +182,7 @@ def save_model_metadata_for_ckpt(save_folder, model):
     "hparams": model.hparams    # in fact not necessary to load the hparams as they are already saved in the checkpoint
     }
 
-    torch.save(metadata_for_ckpt, os.path.join(save_folder, "metadata_for_ckpt.pth"))
+    torch.save(metadata_for_ckpt, os.path.join(save_folder_path, "metadata_for_ckpt.pth"))
     logger.info("Model metadata saved for future checkpoint use.")
 
 def find_most_recent_experiment_folder(directory):
@@ -234,7 +234,10 @@ def get_model_from_ckpt(model_ckpt_path):
 
     return model
 
-def plot_lr_schedule(lr_values: List) -> str:
+def plot_lr_schedule(save_folder_path: str, lr_values: List) -> str:
+    fig_path = os.path.join(save_folder_path, "figs", "learning_rate_schedule.png")
+    os.makedirs(fig_path, exist_ok=True)
+
     plt.figure(figsize=(10, 5))
     plt.plot(lr_values, label="Learning Rate")
     plt.xlabel("Training Steps")
@@ -242,13 +245,12 @@ def plot_lr_schedule(lr_values: List) -> str:
     plt.title("Learning Rate Schedule")
     plt.legend()
     plt.grid()
-    fig_path = "./figs/learning_rate_schedule.png"
     plt.savefig(fig_path)
     # plt.show()
     plt.close()
     return fig_path
 
-def plot_absolute_positional_embeddings(pos_embed, num_prefix_tokens=None, viz_as_heatmap=False):
+def plot_absolute_positional_embeddings(save_folder_path, pos_embed, num_prefix_tokens=None, viz_as_heatmap=False):
     """ 
     Plot the absolute positional embeddings (APE).
 
@@ -257,7 +259,6 @@ def plot_absolute_positional_embeddings(pos_embed, num_prefix_tokens=None, viz_a
         num_prefix_tokens (int): Number of extra/prefixed tokens (e.g., cls, register tokens)
         viz_as_heatmap (bool): If True, plot a heatmap; otherwise, plot line plots per embedding dimension
     """
-    os.makedirs('./figs', exist_ok=True)
 
     # Remove extra/prefix tokens if needed
     if num_prefix_tokens is not None and num_prefix_tokens > 0:
@@ -286,7 +287,7 @@ def plot_absolute_positional_embeddings(pos_embed, num_prefix_tokens=None, viz_a
         plt.legend(loc='upper right', bbox_to_anchor=(1.15, 1), ncol=1, fontsize='small', frameon=False)
 
     # plt.tight_layout()
-    plt.savefig('./figs/positional_embeddings.png')
+    plt.savefig(f'{save_folder_path}/positional_embeddings.png')
     plt.close()
 
 def timer_decorator(func):
@@ -324,7 +325,7 @@ def copy_folder(source_folder, destination_folder):
             shutil.copy2(source_path, destination_path)
 
 
-def observe_input_output_images(dataloader, batch_id=0, n_samples=4, split="test"):
+def observe_input_output_images(save_folder_path, dataloader, batch_id=0, n_samples=4, split="test"):
     """ 
     Observe the input and output images of a batch from the dataloader.
     
@@ -342,7 +343,7 @@ def observe_input_output_images(dataloader, batch_id=0, n_samples=4, split="test
     # Number of samples to observe
     n_samples = min(n_samples, len(inputs))
 
-    logger.debug(f"Observing {n_samples} samples from {split} batch {batch_id}. See /figs folder.")
+    logger.debug(f"Observing {n_samples} samples from {split} batch {batch_id}.")
 
     # Handle padding tokens. Replace the symbols for pad tokens with the background color
     pad_token = 10
@@ -380,8 +381,7 @@ def observe_input_output_images(dataloader, batch_id=0, n_samples=4, split="test
     # plt.show()
 
     # Save the figure
-    os.makedirs("./figs", exist_ok=True)   # create the /figs folder if it does not exist
-    fig.savefig(f"./figs/{split}_image_input_output_batch{batch_id}.png")
+    fig.savefig(f"{save_folder_path}/{split}_image_input_output_batch{batch_id}.png")
 
     plt.close(fig)
 

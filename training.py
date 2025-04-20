@@ -479,6 +479,10 @@ if __name__ == '__main__':
     if config.base.seed is not None:
         pl.seed_everything(config.base.seed)
 
+    # Create the training folder
+    training_folder = f"./{config.data.data_env}/training"
+    os.makedirs(training_folder, exist_ok=True)
+
     # Data chosen
     data_module = vars(data)[config.base.data_module]
     datamodule = data_module(config.data)   # initialize the data with the data config
@@ -490,11 +494,7 @@ if __name__ == '__main__':
 
     # Model chosen
     model_module = vars(models)[config.base.model_module]
-    model = model_module(config.base, config.model, config.data, config.backbone_network, config.head_network, image_size)   # initialize the model with the model and network configs
+    model = model_module(config.base, config.model, config.data, config.backbone_network, config.head_network, image_size, training_folder)   # initialize the model with the model and network configs
     logger.trace(f"Model chosen for training: {model}")
-
-    # Create the training folder
-    training_folder = f"./{config.data.data_env}/training"
-    os.makedirs(training_folder, exist_ok=True)
 
     trainer, best_model, best_model_ckpt_path, train_results = main(config, training_folder, datamodule, model, exp_logger=None)
