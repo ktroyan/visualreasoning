@@ -8,6 +8,7 @@ import pytorch_lightning as pl
 from networks.backbones.resnet import get_resnet
 from networks.backbones.transformer import get_transformer_encoder
 from networks.backbones.vit import get_vit
+from networks.backbones.looped_vit import get_looped_vit
 from networks.heads.mlp import get_mlp_head
 from networks.heads.transformer import get_transformer_decoder
 from networks.heads.xtransformer import get_xtransformer_decoder
@@ -146,7 +147,7 @@ class VisReasModel(pl.LightningModule):
             samples_task_id = None
         
         # Forward pass through the whole model
-        y_hat = self(x, y, samples_task_id, x_grid_object_ids)  # computed logits
+        y_hat = self(x, y, samples_task_id=samples_task_id, x_grid_object_ids=x_grid_object_ids)  # computed logits
 
         # Permute the dimensions of y_hat to be [B, num_classes, seq_len] instead of [B, seq_len, num_classes] to match PyTorch's cross_entropy function format
         y_hat = y_hat.permute(0, 2, 1)  # [B, num_classes, seq_len] <-- [B, seq_len, num_classes]
@@ -689,7 +690,7 @@ class BEFOREARCModel(VisReasModel):
                                                            model_config=model_config,
                                                            network_config=backbone_network_config,
                                                            image_size=self.image_size,
-                                                           num_classes=self.num_classes,
+                                                           num_classes=self.num_classes
                                                            )
             self.backbone_input_embed_dim = bb_num_out_features   # embedding dimension backbone model
 
@@ -700,7 +701,7 @@ class BEFOREARCModel(VisReasModel):
                                                    network_config=backbone_network_config, 
                                                    image_size=self.image_size,
                                                    num_channels=self.num_channels,
-                                                   num_classes=self.num_classes, 
+                                                   num_classes=self.num_classes 
                                                    )
             self.backbone_input_embed_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
             
@@ -711,12 +712,19 @@ class BEFOREARCModel(VisReasModel):
                                    network_config=backbone_network_config,
                                    image_size=self.image_size,
                                    num_channels=self.num_channels,
-                                   num_classes=self.num_classes,
+                                   num_classes=self.num_classes
                                    )
             self.backbone_input_embed_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
 
         elif model_config.backbone == "looped_vit":
-            raise NotImplementedError("Looped ViT not implemented yet")
+            self.encoder = get_looped_vit(base_config=base_config,
+                                          model_config=model_config,
+                                          network_config=backbone_network_config,
+                                          image_size=self.image_size,
+                                          num_channels=self.num_channels,
+                                          num_classes=self.num_classes
+                                          )
+            self.backbone_input_embed_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
         
         else:
             raise ValueError(f"Unknown model backbone given: {model_config.backbone}")
@@ -819,7 +827,7 @@ class BEFOREARCModel(VisReasModel):
         B, seq_len = y.shape
 
         # Encode the input sequence
-        if self.model_config.ope.enabled and (x_grid_object_ids is not None) and self.model_config.backbone in ["vit", "transformer"]:
+        if self.model_config.ope.enabled and (x_grid_object_ids is not None) and self.model_config.backbone in ["vit", "looped_vit", "transformer"]:
             # Encode the input grid image grid and use grid object ids for the OPE (which is used within the APE)
             x_encoded = self.encoder(x, x_grid_object_ids)  # [B, seq_len, backbone_input_embed_dim]; NOTE: the extra tokens will have been truncated so the encoded sequence will also have a dim seq_len 
 

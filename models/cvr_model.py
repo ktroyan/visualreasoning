@@ -7,6 +7,7 @@ import pytorch_lightning as pl
 # Personal codebase dependencies
 from networks.backbones.vit_timm import get_vit_timm
 from networks.backbones.vit import get_vit
+from networks.backbones.looped_vit import get_looped_vit
 from networks.backbones.transformer import get_transformer_encoder
 from networks.backbones.resnet import get_resnet
 from networks.heads.mlp import get_mlp_head
@@ -89,7 +90,7 @@ class VisReasModel(pl.LightningModule):
             samples_task_id = None
         
         # Forward pass through the whole model
-        y_hat = self(x, samples_task_id)
+        y_hat = self(x, samples_task_id=samples_task_id)
 
         return x, y_hat, y
 
@@ -458,6 +459,16 @@ class CVRModel(VisReasModel):
                                                              )
             self.head_input_dim = bb_num_out_features
 
+        elif model_config.backbone == "transformer":
+            self.encoder = get_transformer_encoder(base_config=base_config,
+                                                   model_config=model_config,
+                                                   network_config=backbone_network_config,
+                                                   image_size=self.image_size,
+                                                   num_channels=self.num_channels,
+                                                   num_classes=self.num_classes,
+                                                   )
+            self.head_input_dim = backbone_network_config.embed_dim   # embedding dimension backbone model 
+            
         elif model_config.backbone == "vit":
             self.encoder = get_vit(base_config=base_config,
                                    model_config=model_config,
@@ -468,18 +479,15 @@ class CVRModel(VisReasModel):
                                    )
             self.head_input_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
 
-        elif model_config.backbone == "transformer":
-            self.encoder = get_transformer_encoder(base_config=base_config,
-                                                   model_config=model_config,
-                                                   network_config=backbone_network_config,
-                                                   image_size=self.image_size,
-                                                   num_channels=self.num_channels,
-                                                   num_classes=self.num_classes,
-                                                   )
-            self.head_input_dim = backbone_network_config.embed_dim   # embedding dimension backbone model 
-
         elif model_config.backbone == "looped_vit":
-            raise NotImplementedError("Looped ViT not implemented yet")
+            self.encoder = get_looped_vit(base_config=base_config,
+                                   model_config=model_config,
+                                   network_config=backbone_network_config,
+                                   image_size=self.image_size,
+                                   num_channels=self.num_channels,
+                                   num_classes=self.num_classes,
+                                   )
+            self.backbone_input_embed_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
         
         else:
             raise ValueError(f"Unknown model backbone given: {model_config.backbone}")
