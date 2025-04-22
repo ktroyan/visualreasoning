@@ -663,7 +663,7 @@ class VisReasModel(pl.LightningModule):
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10)
         
         elif self.model_config.training_hparams.scheduler.type == 'CosineAnnealingLR':
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=10, eta_min=1e-6)
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=20, eta_min=1e-6)
 
         elif self.model_config.training_hparams.scheduler.type == 'StepLR':
             scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
