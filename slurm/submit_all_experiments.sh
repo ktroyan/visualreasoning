@@ -8,4 +8,5 @@ declare -a configs=(
 
 for config in "${configs[@]}"; do
   sbatch run_experiment.submit wandb.sweep.enabled=false experiment.name=experiment_4 $config
+  sleep 2 # avoid folders/runs to have same name (as it is based on timestamp)
 done

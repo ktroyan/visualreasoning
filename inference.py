@@ -1,8 +1,12 @@
 import os
 import time
+
+import matplotlib
 import pandas as pd
 import torch
 import pytorch_lightning as pl
+import yaml
+
 import wandb
 from pytorch_lightning.loggers.wandb import WandbLogger
 
@@ -10,7 +14,7 @@ from pytorch_lightning.loggers.wandb import WandbLogger
 import data
 import models
 from utility.utils import get_complete_config, log_config_dict, get_model_from_ckpt, observe_input_output_images, \
-    process_test_results, generate_timestamped_experiment_name
+    process_test_results, generate_timestamped_experiment_name, copy_folder
 from utility.rearc.utils import check_train_test_contamination as check_rearc_train_test_contamination
 from utility.logging import logger
 
@@ -101,12 +105,14 @@ def main(config, datamodule, model=None, model_ckpt_path=None, exp_logger=None):
     return all_test_results
 
 
-if __name__ == '__main__':
-    logger.info(f"inference.py process ID: {os.getpid()}")
+def run_inference_from_main():
 
     # Get and log all the config arguments
     config, _ = get_complete_config()
     log_config_dict(config)
+
+    logger.info("*** Experiment started ***")
+    exp_start_time = time.time()
 
     # Setup experiment folders
     experiment_name_timestamped = generate_timestamped_experiment_name("experiment")
@@ -120,6 +126,7 @@ if __name__ == '__main__':
         dir=experiment_folder,
         name=experiment_name_timestamped,
     )
+    wandb_subfolder = "/" + wandb.run.id if wandb.run is not None else ""
 
     # Seed everything for reproducibility
     if config.base.seed is not None:
@@ -127,7 +134,7 @@ if __name__ == '__main__':
 
     # Data chosen
     data_module = vars(data)[config.base.data_module]
-    datamodule = data_module(config.data, config.model)   # initialize the data with the data config
+    datamodule = data_module(config.data, config.model)  # initialize the data with the data config
     logger.info(f"Data module instantiated. Now showing the total number of samples per dataloader:\n{datamodule}\n")
 
     # Get the image size from the datamodule. Useful for the model backbone
@@ -141,7 +148,8 @@ if __name__ == '__main__':
         model = None
     else:
         model_module = vars(models)[config.base.model_module]
-        model = model_module(config.base, config.model, config.backbone_network, config.head_network, image_size)   # initialize the model with the model and network configs
+        model = model_module(config.base, config.model, config.backbone_network, config.head_network,
+                             image_size)  # initialize the model with the model and network configs
         logger.info(f"Model chosen for inference w.r.t. the current config files: {model}")
 
     # Initialize the experiment logger
@@ -152,9 +160,106 @@ if __name__ == '__main__':
         logger.warning(
             f"Experiment logger {config.experiment.exp_logger} not recognized. The experiment logger is set to Null. Otherwise, choose 'wandb'.")
         exp_logger = None
-    
 
-    test_results = main(config, datamodule, model, model_ckpt, exp_logger=exp_logger)
+    all_test_results = main(config, datamodule, model, model_ckpt, exp_logger=exp_logger)
 
     # End the wandb run
     run.finish()
+
+    # Time taken for the experiment
+    log_message = "*** Experiment ended ***\n"
+    exp_elapsed_time = time.time() - exp_start_time
+    log_message += f"\nTotal experiment time: \n{exp_elapsed_time} seconds ~=\n{exp_elapsed_time / 60} minutes ~=\n{exp_elapsed_time / (60 * 60)} hours"
+    logger.info(log_message)
+
+    # Save the figures produced in the /figs folder during the experiment to the experiment folder
+    experiment_figs_folder = f"{experiment_folder}/figs"
+    os.makedirs(experiment_figs_folder, exist_ok=True)
+    copy_folder(f"./figs{wandb_subfolder}",
+                experiment_figs_folder)  # copy everything in the /figs folder to the current experiment folder
+
+    # Save the results and config arguments that we are the most interested to check quickly when experimenting
+    exp_results_dict = {
+        'experiments_dir': config.experiment.experiments_dir,
+        'exp_name': experiment_name_timestamped,
+        'dataset_dir': config.data.dataset_dir,
+        'exp_duration': exp_elapsed_time,
+        'exp_logger': config.experiment.exp_logger,
+        'data_module': config.base.data_module,
+        'model_module': config.base.model_module,
+        'network_backbone': config.model.backbone,
+        'network_head': config.model.head,
+        'model_ckpt': config.training.model_ckpt_path,
+        'backbone_ckpt': config.training.backbone_ckpt_path,
+        'freeze_backbone': config.training.freeze_backbone,
+        'best_val_acc': None,
+        'best_epoch': None,
+        'max_epochs': config.training.max_epochs,
+        'train_batch_size': config.data.train_batch_size,
+        'val_batch_size': config.data.val_batch_size,
+        'test_batch_size': config.data.test_batch_size,
+        'task_embedding': config.model.task_embedding,
+        'lr': config.model.training_hparams.lr,
+        'optimizer': config.model.training_hparams.optimizer,
+        'scheduler_type': config.model.training_hparams.scheduler.type,
+        'scheduler_interval': config.model.training_hparams.scheduler.interval,
+        'scheduler_frequency': config.model.training_hparams.scheduler.frequency,
+        'seed': config.base.seed,
+    }
+
+    exp_results_dict.update({k: v for k, v in all_test_results['test_results']['test_results_global_avg'].items()})
+    exp_results_dict.update({k: v for k, v in all_test_results['test_results']['test_results_per_task_avg'].items()})
+    # exp_results_dict.update({k:v for k,v in all_test_results['test_results_per_task'].items()})
+
+    if config.data.use_gen_test_set:
+        exp_results_dict.update(
+            {k: v for k, v in all_test_results['gen_test_results']['gen_test_results_global_avg'].items()})
+        exp_results_dict.update(
+            {k: v for k, v in all_test_results['gen_test_results']['gen_test_results_per_task_avg'].items()})
+        # exp_results_dict.update({k:v for k,v in all_test_results['gen_test_results_per_task'].items()})
+
+    output_dict_df = pd.DataFrame([exp_results_dict])
+    os.makedirs(config.experiment.exp_summary_results_dir, exist_ok=True)
+    csv_path = os.path.join(config.experiment.exp_summary_results_dir, 'all_results_summary.csv')
+    write_header = not os.path.exists(csv_path)
+    output_dict_df.to_csv(csv_path, sep=';', mode='a', index=False, header=write_header)
+
+
+if __name__ == '__main__':
+    logger.info(f"inference.py process ID: {os.getpid()}")
+
+    matplotlib.use('Agg')  # prevent the matplotlib GUI pop-ups from stealing focus
+
+    # Get all the config arguments. This is needed to get the arguments that decide on whether to run sweeps or not and for how many sweeps
+    config, _ = get_complete_config()
+
+    if config.wandb.sweep.enabled:
+
+        # Start sweep time
+        sweep_start_time = time.time()
+        logger.info(f"*** Sweep started ***")
+
+        # Get the sweep yaml file for the data environment specified in the base config
+        sweep_yaml_file = f"./configs/sweep_{(config.base.data_env).lower()}.yaml"
+
+        # Load the sweep config yaml file
+        with open(sweep_yaml_file, 'r') as f:
+            sweep_config = yaml.safe_load(f)
+
+        # Setup WandB sweep
+        sweep_id = wandb.sweep(sweep=sweep_config,
+                               project=config.wandb.wandb_project_name)
+
+        # Start sweep job
+        wandb.agent(sweep_id,
+                    function=run_inference_from_main,
+                    count=config.wandb.sweep.num_sweeps)
+
+        # End sweep time
+        sweep_elapsed_time = time.time() - sweep_start_time
+        logger.info(
+            f"*** Sweep ended ***\nTotal sweep time: \n{sweep_elapsed_time} seconds ~=\n{sweep_elapsed_time / 60} minutes ~=\n{sweep_elapsed_time / (60 * 60)} hours")
+
+    else:
+        run_inference_from_main()
+
