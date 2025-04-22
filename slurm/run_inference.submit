@@ -1,14 +1,14 @@
 #!/bin/bash
 #SBATCH --time=1440
-#SBATCH --job-name=vr_experiment
+#SBATCH --job-name=vr_inference
 #SBATCH --ntasks=1
 #SBATCH --nodes=1
 #SBATCH --gres=gpu:1
 #SBATCH --mem=100G
 #SBATCH --account=cai_cv
 #SBATCH --partition=gpu
-#SBATCH --output=/cluster/home/sage/temp/vr/experiment/%j_%N.out
-#SBATCH --error=/cluster/home/sage/temp/vr/experiment/%j_%N.err
+#SBATCH --output=/cluster/home/sage/temp/vr/inference/%j_%N.out
+#SBATCH --error=/cluster/home/sage/temp/vr/inference/%j_%N.err
 
 EXPORT WANDB_CACHE_DIR=/scratch/wandb/.cache
 EXPORT WANDB_DATA_DIR=/scratch/wandb/data
