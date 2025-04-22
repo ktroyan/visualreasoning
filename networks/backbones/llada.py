@@ -1497,7 +1497,19 @@ class LLaDAModel(nn.Module):
         torch.backends.cuda.enable_mem_efficient_sdp(False)  # this is super slow so make sure torch won't use it
 
         if base_config.data_env == "REARC":
-            # TODO: @Klim: Please check these values
+            # TODO: This is pretty ugly and should probably be stored in the dataset config, not set here
+            special_tokens = 1  # MASK
+            self.config.vocab_size = num_classes + special_tokens
+            self.config.pad_token_id = 10
+            self.config.nlgrid_token_id = 14
+            self.config.mask_token_id = self.config.vocab_size - 1
+            self.config.thinking_token_id = self.config.vocab_size - 2
+            self.config.eos_token_id = None  # there is no BOS and EOS tokens in REARC
+            self.config.embedding_size = self.config.vocab_size
+
+            self.ignored_tokens = [self.config.pad_token_id, self.config.nlgrid_token_id]
+
+        if base_config.data_env == "BEFOREARC":
             # TODO: This is pretty ugly and should probably be stored in the dataset config, not set here
             special_tokens = 1 #  MASK
             self.config.vocab_size = num_classes + special_tokens
