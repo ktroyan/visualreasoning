@@ -867,6 +867,9 @@ class LoopedVisionTransformer(nn.Module):
         self.last_layer_norm = nn.LayerNorm(self.embed_dim)
 
         # Create Step Embeddings (to encode depth/time)
+        # TODO: 
+        # Here we make them learnable, however in the UT paper they use fixed sinusoid embeddings.
+        # The sinusoid embeddings UT uses are (considered) 2D because there is the spatial and temporal dimension/coordinate, so in our case it should be made 3D as we have a 2D spatial dimension.
         self.step_embeddings = nn.Parameter(torch.zeros(self.num_loops, 1, self.embed_dim)) # [num_loops, 1, embed_dim] to allow broadcasting across batch and sequence length, and with zeros as place holders before init
 
         ## Weights initialization of all the learnable components
@@ -929,7 +932,7 @@ class LoopedVisionTransformer(nn.Module):
         if hasattr(self, 'step_embeddings'):
             nn.init.trunc_normal_(self.step_embeddings, std=0.02)
 
-    def forward_embed(self, x, x_grid_object_ids=None):
+    def forward_embed(self, x):
         x_shape = x.shape
         B = x_shape[0]
 
@@ -944,25 +947,34 @@ class LoopedVisionTransformer(nn.Module):
             cls_tokens = self.cls_token.expand(B, -1, -1)   # [B, 1, embed_dim]; use expand to create and add the token for each sample in the batch instead of just one sample
             x = torch.cat((cls_tokens, x), dim=1)   # [B, num_all_tokens, embed_dim]
         
-        # Absolute Positional Encoding
-        if self.model_config.ape.enabled:
-            # Apply APE
-            x = self.ape(x, x_grid_object_ids)  # [B, num_all_tokens, embed_dim], where num_all_tokens depends on the number of patches and extra tokens (if any) (e.g., cls ro register tokens)
-        
+        # NOTE: (Spatial) Absolute Positional Encoding (APE)
+        # As per the Universal Transformer paper, the APE should be applied at each time step.
+        # See forward_encode() for the looped transformer pass.
+
         return x
 
-    def forward_encode(self, x):
+    def forward_encode(self, x, x_grid_object_ids):
 
         x_shape = x.shape   # [B, N, embed_dim]
 
         if self.model_config.attention_map.enabled:
             self.attn_scores = []
 
+        # TODO: Check if correct.
+        # From the UT paper, it seems that the spatial position should also be added at each step instead of once at the beginning
+
+        # TODO: If we implement ACT, we need to simply copy/propagate the embeddings of the positions that reached the end of their iterative refinement process.
+
         # Looped Transformer pass
         for i in range(self.num_loops):
+            
+            # Add (spatial) absolute positional encoding (APE) for this loop iteration
+            if self.model_config.ape.enabled:
+                x = self.ape(x, x_grid_object_ids)  # [B, num_all_tokens, embed_dim], where num_all_tokens depends on the number of patches and extra tokens (if any) (e.g., cls ro register tokens)
+        
             # Add step embedding for this loop iteration
             step_emb = self.step_embeddings[i]  # [1, embed_dim]
-            x = x + step_emb.unsqueeze(1) # [B, N, embed_dim]; add step embedding broadcasted (because dim with 1) over sequence length to [B, N, embed_dim]
+            x = x + step_emb.unsqueeze(1)       # [B, N, embed_dim]; add step embedding broadcasted (because dim with 1) over sequence length to [B, N, embed_dim]
 
             # Pass through the layer(s) for this loop/step
             current_layer = self.transformer_layers[i % self.num_layers]
@@ -1006,10 +1018,10 @@ class LoopedVisionTransformer(nn.Module):
         src_shape = src.shape
 
         # Embed the input image to an input sequence
-        x = self.forward_embed(src, x_grid_object_ids)  # [B, num_all_tokens, embed_dim] <-- [B, C, H, W]
+        x = self.forward_embed(src)  # [B, num_all_tokens, embed_dim] <-- [B, C, H, W]
 
         # Encode the sequence (i.e., the embedded input image)
-        x = self.forward_encode(x)  # [B, num_all_tokens, embed_dim] <-- [B, num_all_tokens, embed_dim]
+        x = self.forward_encode(x, x_grid_object_ids)  # [B, num_all_tokens, embed_dim] <-- [B, num_all_tokens, embed_dim]
 
         # Output feature embeddings from the encoded input sequence
         x = self.forward_features(x)    # [B, embed_dim] <-- [B, num_all_tokens, embed_dim]
