@@ -3,12 +3,14 @@ import time
 import pandas as pd
 import torch
 import pytorch_lightning as pl
-
+import wandb
+from pytorch_lightning.loggers.wandb import WandbLogger
 
 # Personal codebase dependencies
 import data
 import models
-from utility.utils import get_complete_config, log_config_dict, get_model_from_ckpt, observe_input_output_images, process_test_results
+from utility.utils import get_complete_config, log_config_dict, get_model_from_ckpt, observe_input_output_images, \
+    process_test_results, generate_timestamped_experiment_name
 from utility.rearc.utils import check_train_test_contamination as check_rearc_train_test_contamination
 from utility.logging import logger
 
@@ -106,6 +108,19 @@ if __name__ == '__main__':
     config, _ = get_complete_config()
     log_config_dict(config)
 
+    # Setup experiment folders
+    experiment_name_timestamped = generate_timestamped_experiment_name("experiment")
+    experiment_folder = config.experiment.experiments_dir + f"/{experiment_name_timestamped}"
+    os.makedirs(experiment_folder, exist_ok=True)
+
+    # Initialize WandB project run tracking
+    run = wandb.init(
+        project=config.wandb.wandb_project_name,  # ignored if using sweeps
+        entity=config.wandb.wandb_entity_name,  # ignored if using sweeps
+        dir=experiment_folder,
+        name=experiment_name_timestamped,
+    )
+
     # Seed everything for reproducibility
     if config.base.seed is not None:
         pl.seed_everything(config.base.seed)
@@ -128,6 +143,18 @@ if __name__ == '__main__':
         model_module = vars(models)[config.base.model_module]
         model = model_module(config.base, config.model, config.backbone_network, config.head_network, image_size)   # initialize the model with the model and network configs
         logger.info(f"Model chosen for inference w.r.t. the current config files: {model}")
+
+    # Initialize the experiment logger
+    if config.experiment.exp_logger == 'wandb':
+        exp_logger = WandbLogger(project=config.wandb.wandb_project_name, name=experiment_name_timestamped,
+                                 save_dir=experiment_folder, log_model=config.wandb.log_model)
+    else:
+        logger.warning(
+            f"Experiment logger {config.experiment.exp_logger} not recognized. The experiment logger is set to Null. Otherwise, choose 'wandb'.")
+        exp_logger = None
     
 
-    test_results = main(config, datamodule, model, model_ckpt, exp_logger=None)
+    test_results = main(config, datamodule, model, model_ckpt, exp_logger=exp_logger)
+
+    # End the wandb run
+    run.finish()
