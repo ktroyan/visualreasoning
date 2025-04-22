@@ -235,8 +235,9 @@ def get_model_from_ckpt(model_ckpt_path):
     return model
 
 def plot_lr_schedule(save_folder_path: str, lr_values: List) -> str:
-    fig_path = os.path.join(save_folder_path, "figs", "learning_rate_schedule.png")
-    os.makedirs(fig_path, exist_ok=True)
+    figs_path = os.path.join(save_folder_path, "figs")
+    os.makedirs(figs_path, exist_ok=True)
+    fig_path = os.path.join(figs_path, "learning_rate_schedule.png")
 
     plt.figure(figsize=(10, 5))
     plt.plot(lr_values, label="Learning Rate")
@@ -250,7 +251,7 @@ def plot_lr_schedule(save_folder_path: str, lr_values: List) -> str:
     plt.close()
     return fig_path
 
-def plot_absolute_positional_embeddings(save_folder_path, pos_embed, num_prefix_tokens=None, viz_as_heatmap=False):
+def plot_absolute_positional_embeddings(pos_embed, num_prefix_tokens=None, viz_as_heatmap=False):
     """ 
     Plot the absolute positional embeddings (APE).
 
@@ -287,6 +288,8 @@ def plot_absolute_positional_embeddings(save_folder_path, pos_embed, num_prefix_
         plt.legend(loc='upper right', bbox_to_anchor=(1.15, 1), ncol=1, fontsize='small', frameon=False)
 
     # plt.tight_layout()
+    save_folder_path = "./figs"
+    os.makedirs(save_folder_path, exist_ok=True)
     plt.savefig(f'{save_folder_path}/positional_embeddings.png')
     plt.close()
 
