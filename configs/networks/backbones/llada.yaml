@@ -9,7 +9,7 @@ backbone_network:
   bias_for_layer_norm: false
   block_group_size: 1
   block_type: llama
-  d_model: 384 # 4096
+  d_model: 128 # 384 # 4096
   embedding_dropout: 0.0
   embedding_size: 126464
   eos_token_id: 126081
@@ -29,9 +29,9 @@ backbone_network:
   mlp_ratio: 4
   model_type: llada
   multi_query_attention: null
-  n_heads: 8 # 32
-  n_kv_heads: 8 # 32
-  n_layers: 8 # 32
+  n_heads: 4 # 8 # 32
+  n_kv_heads: 4 # 8 # 32
+  n_layers: 6 # 8 # 32
   pad_token_id: 126081
   precision: amp_bf16
   residual_dropout: 0.0
