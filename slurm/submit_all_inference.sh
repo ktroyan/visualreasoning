@@ -10,5 +10,5 @@ declare -a configs=(
 )
 
 for config in "${configs[@]}"; do
-  sbatch run_inference.submit wandb.sweep.enabled=true wandb.wandb_project_name=VisReas-project-inference $config
+  sbatch run_inference_as_exp.submit wandb.sweep.enabled=true wandb.wandb_project_name=VisReas-project-inference training.max_epochs=0 $config
 done

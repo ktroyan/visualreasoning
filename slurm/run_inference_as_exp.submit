@@ -21,4 +21,4 @@ module load python/3.12
 VENV=$env_name module load uv/0.6.12
 
 cd ../
-uv run inference.py "$@"
+uv run experiment.py "$@"
