@@ -131,7 +131,7 @@ class VisReasModel(pl.LightningModule):
         However, we still do it, so the purpose of this shared_step() is lesser.
         """
 
-        x, y, samples_task_id, y_true_size, x_grid_object_ids, special_tokens_dict = batch   # [B, H, W], [B, H, W], [B], [B, 2], [B, seq_len], Dict
+        x, y, task_tokens_seq, example_in_context, y_true_size, x_grid_object_ids, special_grid_tokens_dict = batch   # [B, H, W], [B, H, W], [B], [B, 2], [B, seq_len], Dict
 
         B, H, W = x.shape
 
@@ -144,10 +144,18 @@ class VisReasModel(pl.LightningModule):
 
         # Handle task embedding
         if not self.model_config.task_embedding.enabled:
-            samples_task_id = None
+            task_tokens_seq = None
+            example_in_context = None
+        
+        elif self.model_config.task_embedding.approach == 'example_in_context':
+            task_tokens_seq = None
+        
+        elif self.model_config.task_embedding.approach == 'task_tokens':
+            example_in_context = None
+
         
         # Forward pass through the whole model
-        y_hat = self(x, y, samples_task_id=samples_task_id, x_grid_object_ids=x_grid_object_ids)  # computed logits
+        y_hat = self(x, y, task_tokens_seq=task_tokens_seq, example_in_context=example_in_context, x_grid_object_ids=x_grid_object_ids)  # computed logits
 
         # Permute the dimensions of y_hat to be [B, num_classes, seq_len] instead of [B, seq_len, num_classes] to match PyTorch's cross_entropy function format
         y_hat = y_hat.permute(0, 2, 1)  # [B, num_classes, seq_len] <-- [B, seq_len, num_classes]
@@ -155,11 +163,11 @@ class VisReasModel(pl.LightningModule):
         # Create the multiplicative mask based on the true sizes of y to only compute the metrics w.r.t. the actual tokens to predict in the target
         true_size_mask = self.create_true_size_mask(B, H, W, y_true_size)
 
-        return x, y_hat, y, true_size_mask, special_tokens_dict
+        return x, y_hat, y, true_size_mask, special_grid_tokens_dict
 
     def step(self, batch, batch_idx):
 
-        x, y_hat, y, mask, special_tokens_dict = self.shared_step(batch)    # [B, num_classes, seq_len], [B, seq_len], [B, seq_len]
+        x, y_hat, y, mask, special_grid_tokens_dict = self.shared_step(batch)    # [B, num_classes, seq_len], [B, seq_len], [B, seq_len]
 
         B, H, W = x.shape
         B, seq_len = y.shape
@@ -211,7 +219,7 @@ class VisReasModel(pl.LightningModule):
         This method is called for each batch during the training phase.
         This is a default PyTorch Lightning method that we override to define the training logic.
         """
-        x, y, samples_task_id, y_true_size, x_grid_object_ids, special_tokens_dict = batch
+        x, y, task_tokens_seq, example_in_context, y_true_size, x_grid_object_ids, special_grid_tokens_dict = batch
 
         B, H, W = x.shape
 
@@ -265,7 +273,7 @@ class VisReasModel(pl.LightningModule):
         NOTE: Currently val_loss is the monitored metric during training
         """
 
-        x, y, samples_task_id, y_true_size, x_grid_object_ids, special_tokens_dict = batch
+        x, y, task_tokens_seq, example_in_context, y_true_size, x_grid_object_ids, special_grid_tokens_dict = batch
 
         B, H, W = x.shape
 
@@ -433,9 +441,9 @@ class VisReasModel(pl.LightningModule):
         This is a default PyTorch Lightning method that we override to define the testing logic.
         """
 
-        x, y, samples_task_id, y_true_size, x_grid_object_ids, special_tokens_dict = batch
+        x, y, task_tokens_seq, example_in_context, y_true_size, x_grid_object_ids, special_grid_tokens_dict = batch
 
-        x, y_hat, y, mask, special_tokens_dict = self.shared_step(batch)
+        x, y_hat, y, mask, special_grid_tokens_dict = self.shared_step(batch)
 
         B, H, W = x.shape
         B, seq_len = y.shape
@@ -692,7 +700,7 @@ class BEFOREARCModel(VisReasModel):
                                                            image_size=self.image_size,
                                                            num_classes=self.num_classes
                                                            )
-            self.backbone_input_embed_dim = bb_num_out_features   # embedding dimension backbone model
+            self.bb_embed_dim = bb_num_out_features   # embedding dimension backbone model
 
 
         elif model_config.backbone == "transformer":
@@ -703,7 +711,7 @@ class BEFOREARCModel(VisReasModel):
                                                    num_channels=self.num_channels,
                                                    num_classes=self.num_classes 
                                                    )
-            self.backbone_input_embed_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
+            self.bb_embed_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
             
 
         elif model_config.backbone == "vit":
@@ -714,7 +722,7 @@ class BEFOREARCModel(VisReasModel):
                                    num_channels=self.num_channels,
                                    num_classes=self.num_classes
                                    )
-            self.backbone_input_embed_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
+            self.bb_embed_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
 
         elif model_config.backbone == "looped_vit":
             self.encoder = get_looped_vit(base_config=base_config,
@@ -724,23 +732,18 @@ class BEFOREARCModel(VisReasModel):
                                           num_channels=self.num_channels,
                                           num_classes=self.num_classes
                                           )
-            self.backbone_input_embed_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
+            self.bb_embed_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
         
         else:
             raise ValueError(f"Unknown model backbone given: {model_config.backbone}")
         
-        self.head_input_dim = self.backbone_input_embed_dim   # embedding dimension of the backbone model, usually the same as its input embedding dimension
+        self.head_input_dim = self.bb_embed_dim   # embedding dimension of the backbone model, usually the same as its input embedding dimension
         self.head_input_embed_dim = head_network_config.embed_dim   # dimension of the actual input that will be passed to the head network; initially assumed to be of dimension equal to the embedding dimension of the head model
 
 
         ## Task embedding
-        if model_config.task_embedding.enabled:
-            task_embedding_dim = model_config.task_embedding.task_embedding_dim
-            self.task_embedding = nn.Embedding(model_config.n_tasks, embedding_dim=task_embedding_dim, device=self.device)   # NOTE: 103 is the total number of tasks because the input is a task id (i.e., a number between 0 and 102)
-            self.head_input_dim += task_embedding_dim
-        else:
-            task_embedding_dim = 0
-            self.task_embedding = None
+        if model_config.task_embedding.enabled and model_config.task_embedding.approach == "task_tokens":
+            self.embed_task_tokens_seq = nn.Embedding(self.num_classes + model_config.num_elementary_tasks, embedding_dim=backbone_network_config.embed_dim, device=self.device)
 
 
         ## Encoder to Decoder projection layer; useful to handle the task embedding that is concatenated
@@ -822,23 +825,24 @@ class BEFOREARCModel(VisReasModel):
         logger.warning(log_message)
 
 
-    def forward(self, x, y, samples_task_id=None, x_grid_object_ids=None):
+    def forward(self, x, y, task_tokens_seq=None, example_in_context=None, x_grid_object_ids=None):
         B, H, W = x.shape
         B, seq_len = y.shape
 
-        # Encode the input sequence
-        if self.model_config.ope.enabled and (x_grid_object_ids is not None) and self.model_config.backbone in ["vit", "looped_vit", "transformer"]:
-            # Encode the input grid image grid and use grid object ids for the OPE (which is used within the APE)
-            x_encoded = self.encoder(x, x_grid_object_ids)  # [B, seq_len, backbone_input_embed_dim]; NOTE: the extra tokens will have been truncated so the encoded sequence will also have a dim seq_len 
-
-        else:
-            x_encoded = self.encoder(x)  # [B, seq_len, backbone_input_embed_dim]; NOTE: the extra tokens will have been truncated so the encoded sequence will also have a dim seq_len 
+        device = x.device
 
         # Handle the task embedding if applicable
-        if self.model_config.task_embedding.enabled and (samples_task_id is not None):
-            task_embedding = self.task_embedding(samples_task_id)   # [B, task_embedding_dim]
-            task_embedding = task_embedding.unsqueeze(1).repeat(1, x_encoded.shape[1], 1) # [B, seq_len, task_embedding_dim]
-            x_encoded = torch.cat([x_encoded, task_embedding], dim=2)  # [B, seq_len, backbone_input_embed_dim + task_embedding_dim]
+        if self.model_config.task_embedding.enabled and (task_tokens_seq is not None):
+            task_embedding = self.embed_task_tokens_seq(task_tokens_seq.to(device))  # [B, num_tasks, embed_dim]
+        else:
+            task_embedding = None
+        
+        # Use grid object ids for the OPE (which is used within the APE)
+        if not(self.model_config.ope.enabled and (x_grid_object_ids is not None) and self.model_config.backbone in ["vit", "looped_vit", "transformer"]):
+            x_grid_object_ids = None
+
+        # Encode the input sequence
+        x_encoded = self.encoder(x, task_embedding, example_in_context, x_grid_object_ids)  # [B, seq_len, embed_dim]; NOTE: the extra tokens will have been truncated so the encoded sequence will also have a dim seq_len
 
         # Decode the encoded input sequence
         if self.model_config.head in ["transformer", "xtransformer", "mytransformer"]:
