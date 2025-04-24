@@ -1852,12 +1852,47 @@ class LLaDAModel(nn.Module):
         return x
 
 
+    def build_object_positional_encoding(self, x_grid_object_ids):
+        """
+        Builds a fixed Object Positional Encoding (OPE) tensor from object IDs.
+
+        Args:
+            x_grid_object_ids (Tensor): [B, seq_len] — flattened object IDs per patch.
+
+        Returns:
+            Tensor: [B, seq_len, embed_dim] OPE tensor (non-learnable, sinusoidal).
+        """
+        embed_dim = self.config.d_model
+
+        assert embed_dim % 2 == 0, "embed_dim must be divisible by 2"
+        assert x_grid_object_ids.ndim == 2, "Expected shape [B, seq_len]"
+
+        B, seq_len = x_grid_object_ids.shape
+        device = x_grid_object_ids.device
+
+        # Half the embedding is sine, half cosine
+        dim_half = embed_dim // 2
+        omega = 1. / (10000 ** (torch.arange(dim_half, dtype=torch.float32) / dim_half)).to(device)  # [dim_half]
+
+        # Expand object IDs
+        x_obj = x_grid_object_ids.to(torch.float32).unsqueeze(-1)  # [B, seq_len, 1]
+        out = x_obj * omega  # [B, seq_len, dim_half]
+
+        ope_sin = torch.sin(out)
+        ope_cos = torch.cos(out)
+        ope = torch.cat([ope_sin, ope_cos], dim=-1)  # [B, seq_len, embed_dim]
+
+        # we need to for the input and target sequence
+        ope = ope.repeat(1, 2, 1)
+
+        return ope  # To be added to the token embeddings
 
 
 
     def forward(
         self,
         input_ids: torch.LongTensor,
+        x_grid_object_ids: Optional[List[int]] = None,
         input_embeddings: Optional[torch.FloatTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         attention_bias: Optional[torch.Tensor] = None,
@@ -1930,6 +1965,10 @@ class LLaDAModel(nn.Module):
             # shape: (1, seq_len, d_model)
             pos_emb = self.transformer.wpe(pos)  # type: ignore
             x = pos_emb + x
+
+        if x_grid_object_ids is not None:
+            # Custom implementation of adding OPE
+            x = x + self.build_object_positional_encoding(x_grid_object_ids)
 
         # Add input + positional embeddings and apply dropout.
         # shape: (batch_size, seq_len, d_model)

@@ -1,7 +1,7 @@
 experiment:
   experiments_dir: './${base.data_env}/experiments'
-  study: 'sample-efficiency'  # choices: 'sample-efficiency', 'sys-gen', 'compositionality'
+  study: 'compositionality'  # choices: 'sample-efficiency', 'sys-gen', 'compositionality'
   setting: 'exp_setting_1'  # depends on the study
-  name: 'experiment_2'  # depends on the study and setting
+  name: 'experiment_1'  # depends on the study and setting
   exp_summary_results_dir: '${experiment.experiments_dir}/exp_summary_results'
   exp_logger: 'wandb'

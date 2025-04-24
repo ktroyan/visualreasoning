@@ -903,7 +903,7 @@ class REARCModel(VisReasModel):
     def forward_sample(self, samples_task_id, x_grid_object_ids, x, y):
 
         # Encode the input sequence
-        if self.model_config.ope.enabled and (x_grid_object_ids is not None) and self.model_config.backbone in ["vit", "transformer"]:
+        if self.model_config.ope.enabled and (x_grid_object_ids is not None) and self.model_config.backbone in ["vit", "transformer", "llada"]:
             # Encode the input grid image grid and use grid object ids for the OPE (which is used within the APE)
             x_encoded = self.encoder(x, x_grid_object_ids)  # [B, seq_len, backbone_input_embed_dim]; NOTE: the extra tokens will have been truncated so the encoded sequence will also have a dim seq_len
 
