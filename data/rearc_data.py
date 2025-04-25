@@ -333,8 +333,9 @@ class REARCDataModule(DataModuleBase):
                          data_config.shuffle_train_dl,
                          data_config.train_batch_size, 
                          data_config.val_batch_size, 
-                         data_config.test_batch_size, 
-                         data_config.test_in_and_out_domain
+                         data_config.test_batch_size,
+                         data_config.use_gen_test_set,
+                         data_config.validate_in_and_out_domain
                          )
 
         _unmatched_args = kwargs
@@ -347,10 +348,14 @@ class REARCDataModule(DataModuleBase):
         data_splits_paths = [train_set_path, val_set_path, test_set_path]
 
         if data_config.use_gen_test_set:
-            gen_test_set_path = data_config.dataset_dir + '/test_gen.json'
+            gen_test_set_path = data_config.dataset_dir + '/gen_test.json'
             data_splits_paths.append(gen_test_set_path)
+            
+            if data_config.validate_in_and_out_domain:
+                gen_val_set_path = data_config.dataset_dir + '/gen_test.json'   # NOTE: We make the choice to use gen_test_set to monitor the OOD validation performance during training because the official final results are reported on a new OOD test set
+                data_splits_paths.append(gen_val_set_path)
 
-        # Max. image size (without considering any sort of special tokens such as padding or other visual tokens)
+        # Max. image size (without considering any sort of special tokens such as padding or other visual tokens) across all the dataset splits
         if self.image_size is None:
             self.image_size = get_max_img_size_across_dataset_splits(data_splits_paths)
             if self.image_size == 0:
@@ -385,6 +390,9 @@ class REARCDataModule(DataModuleBase):
 
         if data_config.use_gen_test_set:
             self.gen_test_set = REARCDataset(gen_test_set_path, self.image_size, use_visual_tokens, use_grid_object_ids, transform=transform)
+
+            if data_config.validate_in_and_out_domain:
+                self.gen_val_set = REARCDataset(gen_val_set_path, self.image_size, use_visual_tokens, use_grid_object_ids, transform=transform)
 
     def _transforms(self):
         return None

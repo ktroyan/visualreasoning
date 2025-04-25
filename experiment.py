@@ -40,16 +40,10 @@ def main() -> None:
     # Initialize WandB project run tracking
     run = wandb.init(
         project=config.wandb.wandb_project_name,    # ignored if using sweeps
-        entity=config.wandb.wandb_entity_name,    # ignored if using sweeps
+        entity=config.wandb.wandb_entity_name,      # ignored if using sweeps
         dir=experiment_folder,
         name=experiment_name_timestamped,
         )
-
-    # Empty the /figs folder to avoid the later copying of old figures from previous experiments
-    wandb_subfolder = "/" + wandb.run.id if wandb.run is not None else ""
-    figs_folder = f"./figs{wandb_subfolder}"
-    os.makedirs(figs_folder, exist_ok=True)
-    delete_folder_content(f"./figs{wandb_subfolder}")
     
     if config.wandb.sweep.enabled:
         # Merge the current sweep config arguments with the complete default config arguments
@@ -69,7 +63,7 @@ def main() -> None:
 
     # Data chosen
     data_module = vars(data)[config.base.data_module]
-    datamodule = data_module(config.data, config.model)   # initialize the data with the data config
+    datamodule = data_module(config.data, config.model)   # initialize the data module
     logger.info(f"Data module instantiated. Now showing the total number of samples per dataloader:\n{datamodule}\n")
 
     # Get the image size from the datamodule. Useful for the model backbone
@@ -78,7 +72,7 @@ def main() -> None:
 
     # Model chosen
     model_module = vars(models)[config.base.model_module]
-    model = model_module(config.base, config.model, config.backbone_network, config.head_network, image_size)   # initialize the model with the model and network configs
+    model = model_module(config.base, config.model, config.data, config.backbone_network, config.head_network, image_size, experiment_folder)   # initialize the model module
     logger.trace(f"Model chosen for training: {model}")
     
     # Save the model metadata for future checkpoint use
@@ -93,19 +87,22 @@ def main() -> None:
 
 
     # Training
-    trainer, best_model, best_model_ckpt, train_results = training.main(config, 
-                                                                         experiment_folder, 
-                                                                         datamodule, 
-                                                                         model, 
-                                                                         exp_logger)
+    trainer, best_model, best_model_ckpt, train_results = training.main(config,
+                                                                        experiment_folder,
+                                                                        datamodule,
+                                                                        model,
+                                                                        exp_logger
+                                                                        )
 
 
     # Testing
-    all_test_results = inference.main(config, 
-                                  datamodule, 
-                                  model=best_model,
-                                  model_ckpt_path=None, # we use the best model found during training, so no need to specify a checkpoint path
-                                  exp_logger=exp_logger)
+    all_test_results = inference.main(config,
+                                      experiment_folder,
+                                      datamodule,
+                                      model=best_model,
+                                      model_ckpt_path=None, # we use the best model obtained during training, so no need to specify a checkpoint path
+                                      exp_logger=exp_logger
+                                      )
     
 
     # End the wandb run
@@ -116,11 +113,6 @@ def main() -> None:
     exp_elapsed_time = time.time() - exp_start_time
     log_message += f"\nTotal experiment time: \n{exp_elapsed_time} seconds ~=\n{exp_elapsed_time/60} minutes ~=\n{exp_elapsed_time/(60*60)} hours"
     logger.info(log_message)
-
-    # Save the figures produced in the /figs folder during the experiment to the experiment folder
-    experiment_figs_folder = f"{experiment_folder}/figs"
-    os.makedirs(experiment_figs_folder, exist_ok=True)
-    copy_folder(f"./figs{wandb_subfolder}", experiment_figs_folder)   # copy everything in the /figs folder to the current experiment folder
 
     # Save the results and config arguments that we are the most interested to check quickly when experimenting
     exp_results_dict = {
@@ -136,8 +128,6 @@ def main() -> None:
         'model_ckpt': config.training.model_ckpt_path,
         'backbone_ckpt': config.training.backbone_ckpt_path,
         'freeze_backbone': config.training.freeze_backbone,
-        'best_val_acc': train_results['best_val_acc'],
-        'best_epoch': train_results['best_val_epoch'],
         'max_epochs': config.training.max_epochs,
         'train_batch_size': config.data.train_batch_size,
         'val_batch_size': config.data.val_batch_size,
@@ -150,15 +140,17 @@ def main() -> None:
         'scheduler_frequency': config.model.training_hparams.scheduler.frequency,
         'seed': config.base.seed,
     }
-    
+
+    # Update the experiment results dict with the training results
+    exp_results_dict.update({k:v for k,v in train_results.items()})
+
+    # Update the experiment results dict with the test results
     exp_results_dict.update({k:v for k,v in all_test_results['test_results']['test_results_global_avg'].items()})
     exp_results_dict.update({k:v for k,v in all_test_results['test_results']['test_results_per_task_avg'].items()})
-    # exp_results_dict.update({k:v for k,v in all_test_results['test_results_per_task'].items()})
 
     if config.data.use_gen_test_set:
         exp_results_dict.update({k:v for k,v in all_test_results['gen_test_results']['gen_test_results_global_avg'].items()})
         exp_results_dict.update({k:v for k,v in all_test_results['gen_test_results']['gen_test_results_per_task_avg'].items()})
-        # exp_results_dict.update({k:v for k,v in all_test_results['gen_test_results_per_task'].items()})
     
     output_dict_df = pd.DataFrame([exp_results_dict])
     os.makedirs(config.experiment.exp_summary_results_dir, exist_ok=True)

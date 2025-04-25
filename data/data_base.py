@@ -6,7 +6,7 @@ from utility.logging import logger
 
 class DataModuleBase(LightningDataModule):
 
-    def __init__(self, num_workers, shuffle_train_dl, train_batch_size, val_batch_size, test_batch_size, test_in_and_out_domain=False):
+    def __init__(self, num_workers, shuffle_train_dl, train_batch_size, val_batch_size, test_batch_size, use_gen_test_set=False, validate_in_and_out_domain=False):
         super().__init__()
 
         self.shuffle_train_dl = shuffle_train_dl
@@ -14,10 +14,14 @@ class DataModuleBase(LightningDataModule):
         self.train_batch_size = train_batch_size
         self.val_batch_size = val_batch_size
         self.test_batch_size = test_batch_size
-        self.test_in_and_out_domain = test_in_and_out_domain
 
+        self.use_gen_test_set = use_gen_test_set
+        self.validate_in_and_out_domain = validate_in_and_out_domain
+
+        # The torch dataset splits are created in the data environment's respective data module (e.g., BEFOREARCDataModule) 
         self.train_set = None
         self.val_set = None
+        self.gen_val_set = None # NOTE: We make the choice to use gen_test_set to monitor the OOD validation performance during training because the official final results are reported on a new OOD test set
         self.test_set = None
         self.gen_test_set = None
 
@@ -43,27 +47,55 @@ class DataModuleBase(LightningDataModule):
         return train_loader
 
     def val_dataloader(self):
-            
-        logger.info("Preparing validation dataloader.")
-        
-        val_loader = DataLoader(
-            self.val_set,
-            batch_size=self.val_batch_size,
-            shuffle=False,
-            num_workers=self.num_workers,
-            persistent_workers=True,
-            pin_memory=True,
-        )
+        """ We handle the in-domain validation set as well as the OOD validation set if applicable. """
 
-        logger.info("Done with validation dataloader.")
+        if not self.validate_in_and_out_domain:
+            logger.info("Preparing validation dataloader.")
+            
+            val_loader = DataLoader(
+                self.val_set,
+                batch_size=self.val_batch_size,
+                shuffle=False,
+                num_workers=self.num_workers,
+                persistent_workers=True,
+                pin_memory=True,
+            )
+
+            logger.info("Done with validation dataloader.")
+        
+        else:
+            
+            logger.info("Preparing in-domain validation dataloader and OOD validation dataloader.")
+
+            val_loader = DataLoader(
+                self.val_set,
+                batch_size=self.val_batch_size,
+                shuffle=False,
+                num_workers=self.num_workers,
+                persistent_workers=True,
+                pin_memory=True,
+            )
+
+            gen_val_loader = DataLoader(
+                self.gen_val_set,
+                batch_size=self.val_batch_size,
+                shuffle=False,
+                num_workers=self.num_workers,
+                persistent_workers=True,
+                pin_memory=True,
+            )
+
+            logger.info("Done with in-domain validation dataloader and OOD validation dataloader.")
+
+            return [val_loader, gen_val_loader]
 
         return val_loader
 
-    # Here we handle the test AND gen_test dataloaders
     def test_dataloader(self):
+        """ We handle the in-domain test set as well as the OOD test set if applicable. """
 
-        if self.test_in_and_out_domain:
-            logger.info("Preparing test dataloader and sys-gen dataloader for testing.")
+        if not self.use_gen_test_set:
+            logger.info("Preparing test dataloader.")
 
             test_dataloader = DataLoader(
                 self.test_set,
@@ -74,54 +106,36 @@ class DataModuleBase(LightningDataModule):
                 pin_memory=True,
             )
 
-            if self.gen_test_set is not None:
-                gen_test_dataloader = DataLoader(
-                    self.gen_test_set,
-                    batch_size=self.test_batch_size,
-                    shuffle=False,
-                    num_workers=self.num_workers,
-                    persistent_workers=True,
-                    pin_memory=True,
-                )
-            else:
-                raise ValueError("The torch Dataset gen_test_set is None, so it cannot be used for testing.")
+            logger.info("Done with test dataloader.")
 
-            logger.info("Done with test dataloader and sys-gen test dataloader.")
+        else:
+            
+            logger.info("Preparing in-domain test dataloader and OOD test dataloader for testing.")
 
+            test_dataloader = DataLoader(
+                self.test_set,
+                batch_size=self.test_batch_size,
+                shuffle=False,
+                num_workers=self.num_workers,
+                persistent_workers=True,
+                pin_memory=True,
+            )
+
+            gen_test_dataloader = DataLoader(
+                self.gen_test_set,
+                batch_size=self.test_batch_size,
+                shuffle=False,
+                num_workers=self.num_workers,
+                persistent_workers=True,
+                pin_memory=True,
+            )
+
+            logger.info("Done with in-domain test dataloader and OOD test dataloader for testing.")
+            
             return [test_dataloader, gen_test_dataloader]
         
-        else:
-            if self.gen_test_set is not None:
-                logger.info("Preparing sys-gen test dataloader for testing.")
+        return test_dataloader
 
-                gen_test_dataloader = DataLoader(
-                    self.gen_test_set,
-                    batch_size=self.test_batch_size,
-                    shuffle=False,
-                    num_workers=self.num_workers,
-                    persistent_workers=True,
-                    pin_memory=True,
-                )
-
-                logger.info("Done with sys-gen test dataloader.")
-
-                return gen_test_dataloader
-
-            else:
-                logger.info("Preparing test dataloader for testing.")
-
-                test_dataloader = DataLoader(
-                    self.test_set,
-                    batch_size=self.test_batch_size,
-                    shuffle=False,
-                    num_workers=self.num_workers,
-                    persistent_workers=True,
-                    pin_memory=True,
-                )
-
-                logger.info("Done with test dataloader.")
-
-            return test_dataloader
 
     @property
     def nb_train_data(self):
@@ -132,11 +146,16 @@ class DataModuleBase(LightningDataModule):
     def nb_val_data(self):
         assert self.val_set is not None, (f"Need to load val data before calling {self.nb_val_data.__name__}")
         return len(self.val_set)
+    
+    @property
+    def nb_gen_val_data(self):
+        assert self.gen_val_set is not None, (f"Need to load systematic generalization val data before calling {self.nb_gen_val_data.__name__}")
+        return len(self.gen_val_set)
 
     @property
     def nb_test_data(self):
         assert self.test_set is not None, (f"Need to load test data before calling {self.nb_test_data.__name__}")
-        return len(self.test_set)   # NOTE: we assume that the test set and the gen_test set have the same number of samples
+        return len(self.test_set)
 
     @property
     def nb_gen_test_data(self):

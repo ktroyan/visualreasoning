@@ -1,7 +1,6 @@
 import os
 import numpy as np
 import pandas as pd
-import wandb
 from PIL import Image
 import torch
 from torchvision import transforms as tvt
@@ -78,12 +77,12 @@ def compute_dataset_stats(dataset_path):
 
     return dataset_mean_global, dataset_std_global, dataset_mean_per_sample, dataset_std_per_sample
 
-def plot_metrics_locally(training_folder: str, metrics: Dict) -> List[str]:
+def plot_metrics_locally(save_folder_path: str, metrics: Dict) -> List[str]:
     """
     Generate and save plots for training and validation epoch metrics.
 
     Args:
-        training_folder (str): Path to save the plots.
+        save_folder_path (str): Path to save the plots.
         metrics (dict): Dictionary containing metric lists.
     """
 
@@ -91,7 +90,7 @@ def plot_metrics_locally(training_folder: str, metrics: Dict) -> List[str]:
     fig_paths = []
 
     # Create the /figs folder in the folder for training if it does not exist
-    figs_folder_path = os.path.join(training_folder, "figs")
+    figs_folder_path = os.path.join(save_folder_path, "figs")
     os.makedirs(figs_folder_path, exist_ok=True)
 
     # Make sure all elements in the values of the dictionary are on cpu
@@ -110,7 +109,7 @@ def plot_metrics_locally(training_folder: str, metrics: Dict) -> List[str]:
         plt.title(title)
         plt.legend()
         plt.tight_layout()
-        fig_path = os.path.join(training_folder, "figs", filename)
+        fig_path = os.path.join(figs_folder_path, filename)
         plt.savefig(fig_path)
         plt.close()
         return fig_path
@@ -151,26 +150,17 @@ def plot_metrics_locally(training_folder: str, metrics: Dict) -> List[str]:
 
     return fig_paths
 
-def observe_image_predictions(split: str, 
-                              inputs: torch.Tensor | list, 
-                              preds: torch.Tensor | list, 
-                              targets: torch.Tensor | list, 
-                              n_samples: int = 4, 
-                              batch_index: int = 0,
-                              epoch: int = None) -> None:
+def plot_image_predictions(save_folder_path: str,
+                           split: str,
+                           inputs: torch.Tensor | list,
+                           preds: torch.Tensor | list,
+                           targets: torch.Tensor | list,
+                           n_samples: int = 4,
+                           batch_index: int = 0,
+                           epoch: int = None
+                           ) -> None:
     """ 
     Observe the inputs, predictions and labels of a subset of a batch.
-
-    TODO: Update the function so that it is more adaptable to the number of samples n_samples
-    
-    Args:
-    - split: str: the split of the data (train, val, test, gen_test)
-    - inputs: torch.Tensor or list: the input grid images that were fed to the model
-    - preds: torch.Tensor or list: the flattened grid image predictions of the model
-    - targets: torch.Tensor or list: the flattened grid image targets
-    - batch_index: int: the index in the list of the batch to observe
-    - n_samples: int: the number of samples to observe from the batch
-
     """
 
     # Get a batch of inputs, predictions and targets
@@ -188,9 +178,9 @@ def observe_image_predictions(split: str,
     n_samples = min(n_samples, len(preds))
 
     if batch_index is not None:
-        logger.debug(f"Observing {n_samples} samples from the batch {batch_index} (of the list of batches given) at {split} time. See /figs folder.")
+        logger.debug(f"Observing {n_samples} samples from the batch {batch_index} (of the list of batches given) at {split} time.")
     else:
-        logger.debug(f"Observing {n_samples} samples from a batch at {split} time. See /figs folder.")
+        logger.debug(f"Observing {n_samples} samples from a batch at {split} time.")
 
     def prepare_display_sample(sample_index, x, y_pred, y, axes_row):
         for image_index in range(4):
@@ -223,8 +213,8 @@ def observe_image_predictions(split: str,
 
 
     # Save the figure
-    wandb_subfolder = "/" + wandb.run.id if wandb.run is not None else ""
-    os.makedirs(f"./figs{wandb_subfolder}", exist_ok=True)   # create the /figs folder if it does not exist
+    figs_folder = os.path.join(save_folder_path, "figs")
+    os.makedirs(figs_folder, exist_ok=True)
     
     # NOTE: "_of_saved_batches" indicates that the index of the batch here is that of the list given
     # as argument where we saved batches, not that of the batch in the dataloader. 
@@ -232,9 +222,9 @@ def observe_image_predictions(split: str,
     # Most likely we only save the first and the last batch of the epoch.
     if epoch is not None:
         # Training or Validation
-        fig.savefig(f"./figs{wandb_subfolder}/{split}_image_predictions_epoch{epoch}_batch{batch_index}_of_saved_batches.png")
+        fig.savefig(f"{figs_folder}/{split}_image_predictions_epoch{epoch}_batch{batch_index}_of_saved_batches.png")
     else:
         # Testing
-        fig.savefig(f"./figs{wandb_subfolder}/{split}_image_predictions_batch{batch_index}_of_saved_batches.png")
+        fig.savefig(f"{figs_folder}/{split}_image_predictions_batch{batch_index}_of_saved_batches.png")
 
     plt.close(fig)

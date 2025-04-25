@@ -8,5 +8,5 @@ data:
   shuffle_train_dl: true  # whether to shuffle the training data loader or not
   transform:
     enabled: true # whether to apply data transformation (e.g., normalization, augmentation). TODO: We can add a field to specify the type of transformation
-  use_gen_test_set: false
-  test_in_and_out_domain: false
+  use_gen_test_set: ${resolve_if_then_else_sysgen:${experiment.study},true} # whether to use a systematic generalization (i.e., OOD) test set as the main test set or not
+  validate_in_and_out_domain: ${resolve_if_then_else_sysgen:${experiment.study},true} # whether to validate OOD in addition to in-domain or not

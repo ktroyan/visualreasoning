@@ -38,7 +38,7 @@ if [[ -n "$GPU_ID" ]]; then
 fi
 
 # Construct log filename
-LOG_FILE="output_${DATA_ENV}_${STUDY}_${SETTING}_${EXPERIMENT}_${BACKBONE}_${HEAD}${ADDI_LOG_NAME}.log"
+LOG_FILE="output_${DATA_ENV}_${STUDY}_${SETTING}_${EXPERIMENT}_${BACKBONE}_${HEAD}_${ADDI_LOG_NAME}.log"
 
 # Construct command
 CMD="nohup uv run experiment.py"

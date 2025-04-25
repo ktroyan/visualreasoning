@@ -24,7 +24,7 @@ torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.deterministic = True
 
 
-def main(config, datamodule, model=None, model_ckpt_path=None, exp_logger=None):
+def main(config, inference_folder, datamodule, model=None, model_ckpt_path=None, exp_logger=None):
 
     logger.info("*** Inference started ***")
     inference_start_time = time.time()
@@ -64,37 +64,40 @@ def main(config, datamodule, model=None, model_ckpt_path=None, exp_logger=None):
 
 
     # Testing
-    trainer.test(model=model, datamodule=datamodule, verbose=True)  # NOTE: if more than one test dataloader was created in the datamodule, all the test dataloaders will be used for testing
+    trainer.test(model=model, datamodule=datamodule, verbose=True)  # NOTE: if more than one val/test dataloader was created in the datamodule, all the val/test dataloaders will be used for testing
    
 
     # Additional logging and plotting if needed
     if config.inference.inference_verbose == 1 and config.base.data_env in ["REARC", "BEFOREARC"]:
-        # TODO: Implement for other data environments
-
         logger.debug(f"Test predictions: {model.test_preds}")
         logger.debug(f"Test targets: {model.test_targets}")
 
         test_dataloader = datamodule.test_dataloader()[0] if isinstance(datamodule.test_dataloader(), list) else datamodule.test_dataloader()
-        observe_input_output_images(dataloader=test_dataloader, batch_id=0, n_samples=4, split="test")
+        observe_input_output_images(save_folder_path=inference_folder, dataloader=test_dataloader, batch_id=0, n_samples=4, split="test")
 
         if config.data.use_gen_test_set:
-            logger.debug(f"Sys-gen test predictions: {model.gen_test_preds}")
-            logger.debug(f"Sys-gen test targets: {model.gen_test_targets}")
+            logger.debug(f"OOD test predictions: {model.gen_test_preds}")
+            logger.debug(f"OOD test targets: {model.gen_test_targets}")
 
             gen_test_dataloader = datamodule.test_dataloader()[1]
-            observe_input_output_images(dataloader=gen_test_dataloader, batch_id=0, n_samples=4, split="gen_test")            
+            observe_input_output_images(save_folder_path=inference_folder, dataloader=gen_test_dataloader, batch_id=0, n_samples=4, split="gen_test")
+
+            if config.data.validate_gen_test_set:
+                logger.debug(f"OOD val predictions: {model.gen_val_preds}")
+                logger.debug(f"OOD val targets: {model.gen_val_targets}")
+
+                gen_val_dataloader = datamodule.val_dataloader()[0] if isinstance(datamodule.val_dataloader(), list) else datamodule.val_dataloader()
+                observe_input_output_images(save_folder_path=inference_folder, dataloader=gen_val_dataloader, batch_id=0, n_samples=4, split="gen_val")
 
     # Process the test results for better logging
     test_results = model.test_results
     processed_test_results = process_test_results(config, test_results, test_type="test", exp_logger=None)
+    all_test_results = {'test_results': processed_test_results}
 
     if config.data.use_gen_test_set:
         gen_test_results = model.gen_test_results
         processed_gen_test_results = process_test_results(config, gen_test_results, test_type="gen_test", exp_logger=None)
-    else:
-        processed_gen_test_results = {}
-
-    all_test_results = {'test_results': processed_test_results, 'gen_test_results': processed_gen_test_results}
+        all_test_results.update({'gen_test_results': processed_gen_test_results})
 
     # End of inference
     log_message = "*** Inference ended ***\n"
@@ -132,9 +135,13 @@ def run_inference_from_main():
     if config.base.seed is not None:
         pl.seed_everything(config.base.seed)
 
+    # Create the inference folder
+    inference_folder = f"./{config.data.data_env}/inference"
+    os.makedirs(inference_folder, exist_ok=True)
+
     # Data chosen
     data_module = vars(data)[config.base.data_module]
-    datamodule = data_module(config.data, config.model)  # initialize the data with the data config
+    datamodule = data_module(config.data)   # initialize the data with the data config
     logger.info(f"Data module instantiated. Now showing the total number of samples per dataloader:\n{datamodule}\n")
 
     # Get the image size from the datamodule. Useful for the model backbone
@@ -148,8 +155,7 @@ def run_inference_from_main():
         model = None
     else:
         model_module = vars(models)[config.base.model_module]
-        model = model_module(config.base, config.model, config.backbone_network, config.head_network,
-                             image_size)  # initialize the model with the model and network configs
+        model = model_module(config.base, config.model, config.data, config.backbone_network, config.head_network, image_size, inference_folder)   # initialize the model with the model and network configs
         logger.info(f"Model chosen for inference w.r.t. the current config files: {model}")
 
     # Initialize the experiment logger
@@ -161,6 +167,7 @@ def run_inference_from_main():
             f"Experiment logger {config.experiment.exp_logger} not recognized. The experiment logger is set to Null. Otherwise, choose 'wandb'.")
         exp_logger = None
 
+    test_results = main(config, inference_folder, datamodule, model, model_ckpt, exp_logger=None)
     all_test_results = main(config, datamodule, model, model_ckpt, exp_logger=exp_logger)
 
     # End the wandb run

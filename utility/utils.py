@@ -68,6 +68,12 @@ def get_complete_config(sweep_config=None):
         def resolve_if_then_else(enabled, set_value):
             return set_value if enabled else None  # return None when disabled
 
+        def resolve_if_then_else_sysgen(study_name, set_value):
+            if study_name == "sys-gen":
+                return set_value
+            else:
+                return False
+
         def resolve_data_env_img_size(data_env, img_size):
             if data_env == "CVR":
                 return 128
@@ -76,6 +82,7 @@ def get_complete_config(sweep_config=None):
 
         # Register the resolvers. Use replace=True to not try to re-register the resolver which would raise an error during WandB sweeps
         OmegaConf.register_new_resolver("resolve_if_then_else", resolve_if_then_else, replace=True)
+        OmegaConf.register_new_resolver("resolve_if_then_else_sysgen", resolve_if_then_else_sysgen, replace=True)
         OmegaConf.register_new_resolver("resolve_data_env_img_size", resolve_data_env_img_size, replace=True)
 
         # Merge all the non-specific configs into a single hierarchical object
@@ -160,13 +167,13 @@ def generate_timestamped_experiment_name(exp_basename):
     experiment_name = f"{exp_basename}_{timestamp}"
     return experiment_name
 
-def save_model_metadata_for_ckpt(save_folder, model):
+def save_model_metadata_for_ckpt(save_folder_path, model):
     """
     Save the model class and all the config arguments used to create the model and save it in the current (timestamped) experiment folder.
     This allows us to load the model module/class and config arguments in order to be able to easily load a model from a checkpoint only.
 
     Args:
-        save_folder (str): the folder in which to save the metadata .pth (dict) file
+        save_folder_path (str): the folder in which to save the metadata .pth (dict) file
         model (pl.LightningModule): the model to save metadata for
     """
 
@@ -175,7 +182,7 @@ def save_model_metadata_for_ckpt(save_folder, model):
     "hparams": model.hparams    # in fact not necessary to load the hparams as they are already saved in the checkpoint
     }
 
-    torch.save(metadata_for_ckpt, os.path.join(save_folder, "metadata_for_ckpt.pth"))
+    torch.save(metadata_for_ckpt, os.path.join(save_folder_path, "metadata_for_ckpt.pth"))
     logger.info("Model metadata saved for future checkpoint use.")
 
 def find_most_recent_experiment_folder(directory):
@@ -227,9 +234,10 @@ def get_model_from_ckpt(model_ckpt_path):
 
     return model
 
-def plot_lr_schedule(lr_values: List) -> str:
-    import wandb
-    wandb_subfolder = "/" + wandb.run.id if wandb.run is not None else ""
+def plot_lr_schedule(save_folder_path: str, lr_values: List) -> str:
+    figs_path = os.path.join(save_folder_path, "figs")
+    os.makedirs(figs_path, exist_ok=True)
+    fig_path = os.path.join(figs_path, "learning_rate_schedule.png")
 
     plt.figure(figsize=(10, 5))
     plt.plot(lr_values, label="Learning Rate")
@@ -238,7 +246,6 @@ def plot_lr_schedule(lr_values: List) -> str:
     plt.title("Learning Rate Schedule")
     plt.legend()
     plt.grid()
-    fig_path = f"./figs{wandb_subfolder}/learning_rate_schedule.png"
     plt.savefig(fig_path)
     # plt.show()
     plt.close()
@@ -253,11 +260,6 @@ def plot_absolute_positional_embeddings(pos_embed, num_prefix_tokens=None, viz_a
         num_prefix_tokens (int): Number of extra/prefixed tokens (e.g., cls, register tokens)
         viz_as_heatmap (bool): If True, plot a heatmap; otherwise, plot line plots per embedding dimension
     """
-    import wandb
-
-    # Ensure the figs directory exists
-    wandb_subfolder = "/" + wandb.run.id if wandb.run is not None else ""
-    os.makedirs(f'./figs{wandb_subfolder}', exist_ok=True)
 
     # Remove extra/prefix tokens if needed
     if num_prefix_tokens is not None and num_prefix_tokens > 0:
@@ -285,8 +287,10 @@ def plot_absolute_positional_embeddings(pos_embed, num_prefix_tokens=None, viz_a
         plt.title("APE Line Plot (dim traces)")
         plt.legend(loc='upper right', bbox_to_anchor=(1.15, 1), ncol=1, fontsize='small', frameon=False)
 
-    plt.tight_layout()
-    plt.savefig('./figs{wandb_subfolder}/positional_embeddings.png')
+    # plt.tight_layout()
+    save_folder_path = "./figs"
+    os.makedirs(save_folder_path, exist_ok=True)
+    plt.savefig(f'{save_folder_path}/positional_embeddings.png')
     plt.close()
 
 def timer_decorator(func):
@@ -324,7 +328,7 @@ def copy_folder(source_folder, destination_folder):
             shutil.copy2(source_path, destination_path)
 
 
-def observe_input_output_images(dataloader, batch_id=0, n_samples=4, split="test"):
+def observe_input_output_images(save_folder_path, dataloader, batch_id=0, n_samples=4, split="test"):
     """ 
     Observe the input and output images of a batch from the dataloader.
     
@@ -342,7 +346,7 @@ def observe_input_output_images(dataloader, batch_id=0, n_samples=4, split="test
     # Number of samples to observe
     n_samples = min(n_samples, len(inputs))
 
-    logger.debug(f"Observing {n_samples} samples from {split} batch {batch_id}. See /figs folder.")
+    logger.debug(f"Observing {n_samples} samples from {split} batch {batch_id}.")
 
     # Handle padding tokens. Replace the symbols for pad tokens with the background color
     pad_token = 10
@@ -380,9 +384,7 @@ def observe_input_output_images(dataloader, batch_id=0, n_samples=4, split="test
     # plt.show()
 
     # Save the figure
-    wandb_subfolder = "/" + wandb.run.id if wandb.run is not None else ""
-    os.makedirs(f"./figs{wandb_subfolder}", exist_ok=True)   # create the /figs folder if it does not exist
-    fig.savefig(f"./figs{wandb_subfolder}/{split}_image_input_output_batch{batch_id}.png")
+    fig.savefig(f"{save_folder_path}/{split}_image_input_output_batch{batch_id}.png")
 
     plt.close(fig)
 
@@ -391,19 +393,15 @@ def process_test_results(config, test_results, test_type="test", exp_logger=None
     """
     Process the test results and log them.
 
-    FIXME:
-    Update code for it to work with REARC, BEFOREARC and CVR
+    TODO:
+    Check if code ok and improve handling and display of the results, especially for multi-task experiments.
 
     FIXME:
     For this code to work currently, the batch size should yield a number of elements in each key of results so that it is a multiple of the number of tasks, otherwise the reshape will fail.
     Also see how to handle the case where the results are for multiple test dataloaders
     """
 
-    # Just handle some naming consistency issue with the generated data splits that are named "test_gen" instead of "gen_test"
-    if test_type == "gen_test":
-        test_set_path = f"{config.data.dataset_dir}/{'_'.join(reversed(test_type.split('_')))}"
-    else:
-        test_set_path = f"{config.data.dataset_dir}/{test_type}"
+    test_set_path = f"{config.data.dataset_dir}/{test_type}"
 
     # Check if the folder config.data.dataset_dir contains test_set_path with .csv or .json extension and load it accordingly with pandas
     if os.path.exists(f"{test_set_path}.csv"):
@@ -416,13 +414,14 @@ def process_test_results(config, test_results, test_type="test", exp_logger=None
     # Processing of the results and wrap-up of the parameters used
     if config.base.data_env == "REARC":
         tasks_considered = test_set['task'].unique()
-
+    
     elif config.base.data_env == "BEFOREARC":
+        # FIXME: Fix issue (e.g., when running for BEFOREARC Compositionality Setting 5 Experiment 1)
         unique_transformations = test_set['transformations'].drop_duplicates().tolist() # TODO: the field 'transformations' contains a list of transformations applied to obtain the output grid form the input grid?
         tasks_considered = ["-".join(transformation_list) for transformation_list in unique_transformations]
-
+    
     elif config.base.data_env == "CVR":
-        pass
+        tasks_considered = test_set['task'].unique()
 
     logger.debug(f"Post-processing results for tasks: {tasks_considered}")
 

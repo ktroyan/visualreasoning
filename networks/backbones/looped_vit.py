@@ -1,5 +1,5 @@
 """
-Vision Transformer (ViT) (encoder).
+Looped Vision Transformer (ViT) (encoder).
 It works for REARC, BEFOREARC, and CVR.
 It supports different types of: 2D APE, OPE, PE Mixer, RPE.
 It supports register tokens.
@@ -8,7 +8,6 @@ It supports register tokens.
 import math
 import torch
 import torch.nn as nn
-# from torchtune.modules.position_embeddings import VisionRotaryPositionalEmbeddings
 from rotary_embedding_torch import RotaryEmbedding, apply_rotary_emb
 from einops import rearrange
 import matplotlib.pyplot as plt
@@ -21,7 +20,7 @@ from utility.rearc.utils import one_hot_encode
 from utility.logging import logger
 
 
-__all__ = ['get_vit', 'PatchEmbed']
+__all__ = ['get_looped_vit']
 
 
 class PatchEmbed(nn.Module):
@@ -54,8 +53,6 @@ class PatchEmbed(nn.Module):
         self.patch_size = patch_size
         self.grid_size = img_size // patch_size
         self.num_patches = (self.grid_size) ** 2
-
-        # TODO: For CVR, consider a stride smaller than the patch to get overlapping patches that may be useful for their types of objects
         self.patch_proj = nn.Conv2d(in_channels=in_channels, out_channels=embed_dim, kernel_size=patch_size, stride=patch_size)
 
     def forward(self, x):
@@ -66,7 +63,7 @@ class PatchEmbed(nn.Module):
                 x = x.unsqueeze(1).float()  # add a channel dimension for the input image: [B, C=1, H, W] <-- [B, H, W]; x is int64, so we need to convert it to float32 for the Conv2d layer (otherwise issue with the conv bias)
 
         x = self.patch_proj(x)    # [B, embed_dim, H_out//patch_size, W_out//patch_size], where H_out = ((H-1)/1)+1) = H and W_out = ((W-1)/1)+1) = W if the spatial dimensions have not been reduced, by having patch_size=1 and stride=patch_size
-        x = x.flatten(2) # [B, embed_dim, num_patches]; flatten the spatial dimensions to get a sequence of patches
+        x = x.flatten(2) # [B, embed_dim, num_patches]  # flatten the spatial dimensions to get a sequence of patches
         x = x.transpose(1, 2)  # [B, num_patches, embed_dim], where num_patches = H*W = seq_len
         return x
 
@@ -92,8 +89,7 @@ class AbsolutePositionalEncoding(nn.Module):
 
     NOTE: Code for PEMixer adapted from the ViTARC repo. See their original class ViTARCEmbedding.
     """
-
-    def __init__(self, model_config, network_config, image_size, seq_len, patch_embed, embed_dim, num_extra_prepended_tokens, ape_type, mixer_strategy='default'):
+    def __init__(self, model_config, network_config, image_size, seq_len, patch_embed, embed_dim, num_extra_tokens, ape_type, mixer_strategy='default'):
         super().__init__()
 
         self.model_config = model_config
@@ -101,7 +97,7 @@ class AbsolutePositionalEncoding(nn.Module):
         self.image_size = image_size
         self.seq_len = seq_len
         self.patch_embed = patch_embed
-        self.num_extra_prepended_tokens = num_extra_prepended_tokens
+        self.num_extra_tokens = num_extra_tokens
         self.embed_dim = embed_dim
 
         self.mixer_strategy = mixer_strategy
@@ -113,7 +109,7 @@ class AbsolutePositionalEncoding(nn.Module):
                                               seq_len=seq_len,
                                               patch_embed=patch_embed,
                                               embed_dim=embed_dim,
-                                              num_extra_prepended_tokens=num_extra_prepended_tokens,
+                                              num_extra_tokens=num_extra_tokens,
                                               ape_type=ape_type
                                               )
 
@@ -136,7 +132,7 @@ class AbsolutePositionalEncoding(nn.Module):
         self.ape_drop = nn.Dropout(p=self.network_config.ape_dropout_rate)
 
 
-    def create_ape(self, image_size, seq_len, patch_embed, embed_dim, num_extra_prepended_tokens, ape_type) -> nn.Parameter:
+    def create_ape(self, image_size, seq_len, patch_embed, embed_dim, num_extra_tokens, ape_type) -> nn.Parameter:
         """ 
         Create and return the desired APE (absolute positional embedding).
         The APE will be added to the input embeddings of the backbone/encoder mode (e.g., ViT) during the forward pass.
@@ -149,15 +145,15 @@ class AbsolutePositionalEncoding(nn.Module):
         Check if 2D sin-cos APE is correctly implemented.
         """
         
-        num_pos_embeds = seq_len + num_extra_prepended_tokens
+        num_pos_embeds = seq_len + num_extra_tokens
 
         if ape_type == 'learn':    # learned APE
 
             pos_embed_learned = nn.Parameter(torch.randn(1, seq_len, embed_dim))  # [1, seq_len, embed_dim]; by default requires_grad=True
 
-            if num_extra_prepended_tokens > 0:
+            if num_extra_tokens > 0:
                 # Set the PE for the extra tokens to zero (i.e., no PE for the extra tokens since PE is added to the input embeddings and the PE is not learned)
-                pos_embed_extra_tokens = torch.zeros(1, num_extra_prepended_tokens, embed_dim, dtype=torch.float32, requires_grad=False)     # define the PE for the [cls] and register tokens to be concatenated at the beginning of the PE for the patches
+                pos_embed_extra_tokens = torch.zeros(1, num_extra_tokens, embed_dim, dtype=torch.float32, requires_grad=False)     # define the PE for the [cls] and register tokens to be concatenated at the beginning of the PE for the patches
                 pos_embed = torch.cat([pos_embed_extra_tokens, pos_embed_learned], dim=1)   # [1, num_pos_embeds, embed_dim]
             
             else:
@@ -194,9 +190,9 @@ class AbsolutePositionalEncoding(nn.Module):
             pos_embed = pos_embed.unsqueeze(0)  # [1, seq_len, embed_dim]; create a batch dimension so that it can be used for batched samples
 
             # Handle extra tokens (e.g., cls, register tokens)
-            if num_extra_prepended_tokens > 0:
-                extra_pe = torch.zeros([1, num_extra_prepended_tokens, embed_dim], dtype=torch.float32)
-                pos_embed = nn.Parameter(torch.cat([extra_pe, pos_embed], dim=1))  # [1, seq_len+num_extra_prepended_tokens, embed_dim]; concatenate along sequence dimension
+            if num_extra_tokens > 0:
+                extra_pe = torch.zeros([1, num_extra_tokens, embed_dim], dtype=torch.float32)
+                pos_embed = nn.Parameter(torch.cat([extra_pe, pos_embed], dim=1))  # [1, seq_len+num_extra_tokens, embed_dim]; concatenate along sequence dimension
             else:
                 pos_embed = nn.Parameter(pos_embed) # [1, seq_len, embed_dim]
 
@@ -207,11 +203,11 @@ class AbsolutePositionalEncoding(nn.Module):
             raise ValueError(f"Invalid positional encoding type: {ape_type}. Choose from ['learn', '2dsincos']")
 
         # Visualize PE
-        plot_absolute_positional_embeddings(pos_embed, num_prefix_tokens=num_extra_prepended_tokens, viz_as_heatmap=False)
+        plot_absolute_positional_embeddings(pos_embed, num_prefix_tokens=num_extra_tokens, viz_as_heatmap=False)
 
-        return pos_embed    # [1, seq_len(+num_extra_prepended_tokens), embed_dim]
+        return pos_embed    # [1, seq_len(+num_extra_tokens), embed_dim]
 
-    def create_ape_with_ope(self, image_size, seq_len, patch_embed, embed_dim, num_extra_prepended_tokens, x_grid_object_ids) -> nn.Parameter:
+    def create_ape_with_ope(self, image_size, seq_len, patch_embed, embed_dim, num_extra_tokens, x_grid_object_ids) -> nn.Parameter:
         """
         Dynamic PE.
         Build 2D Sin-Cos Absolute Positional Embeddings (APE) + Object Positional Encoding (OPE).
@@ -228,7 +224,7 @@ class AbsolutePositionalEncoding(nn.Module):
         Check if how I attribute the dimensions is correct.
         """
 
-        num_pos_embeds = seq_len + num_extra_prepended_tokens
+        num_pos_embeds = seq_len + num_extra_tokens
 
         # Check if x_grid_object_ids is flattened in the spatial dimensions
         assert x_grid_object_ids.ndim == 2, "x_grid_object_ids should be a 2D tensor [B, seq_len]"
@@ -276,16 +272,16 @@ class AbsolutePositionalEncoding(nn.Module):
 
         # Handle extra tokens (e.g., cls, register tokens). 
         # We simply increase the number of positions in the PE, so we don't create a useful PE for the extra tokens
-        if num_extra_prepended_tokens > 0:
-            extra_pe = torch.zeros((B, num_extra_prepended_tokens, embed_dim), dtype=torch.float32, device=pos_embed.device)
-            pos_embed = torch.cat([extra_pe, pos_embed], dim=1)  # [B, num_extra_prepended_tokens + seq_len, embed_dim]
+        if num_extra_tokens > 0:
+            extra_pe = torch.zeros((B, num_extra_tokens, embed_dim), dtype=torch.float32, device=pos_embed.device)
+            pos_embed = torch.cat([extra_pe, pos_embed], dim=1)  # [B, num_extra_tokens + seq_len, embed_dim]
 
         # Make sure the APE (with OPE) is fixed/non-learnable
-        pos_embed = nn.Parameter(pos_embed, requires_grad=False)  # [B, seq_len (+num_extra_prepended_tokens), embed_dim]; fixed/non-learnable
+        pos_embed = nn.Parameter(pos_embed, requires_grad=False)  # [B, seq_len (+num_extra_tokens), embed_dim]; fixed/non-learnable
 
         # Visualize PE
         # NOTE: Should not uncomment this line if the goal is not to observe the PE, as this would plot for each batch during training
-        # plot_absolute_positional_embeddings(pos_embed, num_prefix_tokens=num_extra_prepended_tokens)
+        # plot_absolute_positional_embeddings(pos_embed, num_prefix_tokens=num_extra_tokens)
 
         return pos_embed
 
@@ -307,7 +303,7 @@ class AbsolutePositionalEncoding(nn.Module):
                                                        seq_len=self.seq_len,
                                                        patch_embed=self.patch_embed,
                                                        embed_dim=self.embed_dim,
-                                                       num_extra_prepended_tokens=self.num_extra_prepended_tokens,
+                                                       num_extra_tokens=self.num_extra_tokens,
                                                        x_grid_object_ids=x_grid_object_ids
                                                        )    # [batch_size, seq_len, embed_dim]; created for each sample in the batch
         else:
@@ -354,12 +350,12 @@ class AbsolutePositionalEncoding(nn.Module):
 class MHSA(nn.Module):
     """ (Vanilla) Multi-Head Self-Attention block. """
 
-    def __init__(self, model_config, image_size, embed_dim, num_heads, qkv_bias=False, attn_drop=0., proj_drop=0., num_extra_prepended_tokens=0):
+    def __init__(self, model_config, image_size, embed_dim, num_heads, qkv_bias=False, attn_drop=0., proj_drop=0., num_extra_tokens=0):
         super().__init__()
 
         self.model_config = model_config
         self.image_size = image_size
-        self.num_extra_prepended_tokens = num_extra_prepended_tokens
+        self.num_extra_tokens = num_extra_tokens
 
         self.num_heads = num_heads
         self.scale = (embed_dim // num_heads) ** -0.5
@@ -404,12 +400,12 @@ class ViTARCMHSA(nn.Module):
     https://github.com/khalil-research/ViTARC/blob/effa665802946de83807143797247e81e8e7c4b3/vitarc/models/model.py#L195
 
     """
-    def __init__(self, model_config, image_size, embed_dim, num_heads, rpe_type, grid_2d_distance_matrix, qkv_bias=False, attn_drop=0., proj_drop=0., num_extra_prepended_tokens=0):
+    def __init__(self, model_config, image_size, embed_dim, num_heads, rpe_type, grid_2d_distance_matrix, qkv_bias=False, attn_drop=0., proj_drop=0., num_extra_tokens=0):
         super().__init__()
 
         self.model_config = model_config
         self.image_size = image_size
-        self.num_extra_prepended_tokens = num_extra_prepended_tokens
+        self.num_extra_tokens = num_extra_tokens
 
         self.num_heads = num_heads
         self.scale = (embed_dim // num_heads) ** -0.5
@@ -436,16 +432,16 @@ class ViTARCMHSA(nn.Module):
         large_dist = self.image_size + 100 # VITARC wrote +10 and get 44
 
         ## Calculate matrix of x and y differences
-        total_length = grid_height * grid_width + num_extra_prepended_tokens
+        total_length = grid_height * grid_width + num_extra_tokens
         
         distance_matrix = torch.full((total_length, total_length), fill_value=large_dist, dtype=torch.float)  # 100 as a large distance
 
         # Assign the 2D relative positions to the correct part of the matrix
-        distance_matrix[num_extra_prepended_tokens:total_length, num_extra_prepended_tokens:total_length] = grid_2d_distance_matrix
+        distance_matrix[num_extra_tokens:total_length, num_extra_tokens:total_length] = grid_2d_distance_matrix
 
         # Handle extra tokens relative positions. Extra tokens are assumed to be far from everything
-        distance_matrix[num_extra_prepended_tokens, :] = large_dist
-        distance_matrix[:, num_extra_prepended_tokens] = large_dist
+        distance_matrix[num_extra_tokens, :] = large_dist
+        distance_matrix[:, num_extra_tokens] = large_dist
 
         self.register_buffer("distance_matrix", distance_matrix)   # [total_length, total_length]; distance matrix for the 2D grid with extra tokens
 
@@ -538,12 +534,12 @@ class RoPEMHSA(nn.Module):
     """ 
     Multi-Head Self-Attention block including RoPE (RPE).
     """
-    def __init__(self, model_config, image_size, embed_dim, num_heads, qkv_bias=False, attn_drop=0., proj_drop=0., num_extra_prepended_tokens=0):
+    def __init__(self, model_config, image_size, embed_dim, num_heads, qkv_bias=False, attn_drop=0., proj_drop=0., num_extra_tokens=0):
         super().__init__()
 
         self.model_config = model_config
         self.image_size = image_size
-        self.num_extra_prepended_tokens = num_extra_prepended_tokens
+        self.num_extra_tokens = num_extra_tokens
 
         self.num_heads = num_heads
         self.scale = (embed_dim // num_heads) ** -0.5
@@ -554,7 +550,7 @@ class RoPEMHSA(nn.Module):
         self.proj = nn.Linear(embed_dim, embed_dim)
         self.proj_drop = nn.Dropout(proj_drop)
 
-        self.num_extra_prepended_tokens = num_extra_prepended_tokens
+        self.num_extra_tokens = num_extra_tokens
 
         ## 2D RoPE (Rotary Positional Embedding)
         # Choose RoPE dim (half features per axis)
@@ -572,7 +568,7 @@ class RoPEMHSA(nn.Module):
         flat_axial_freqs = rearrange(axial_freqs, 'h w d -> (h w) d') # [num_tokens, rope_dim * 2], where num_tokens is the sequence length that the axial frequencies are computed for
         self.register_buffer('rope_axial_freqs', flat_axial_freqs, persistent=False)
 
-    def forward(self, x, num_extra_appended_tokens):
+    def forward(self, x):
         B, seq_len, embed_dim = x.shape
         
         # Compute the Queries, Keys, Values from the input embeddings by a linear projection
@@ -585,16 +581,11 @@ class RoPEMHSA(nn.Module):
         x_q, x_k, x_v = x_qkv[0], x_qkv[1], x_qkv[2]    # ([B, num_heads, seq_len, head_embed_dim], [B, num_heads, seq_len, head_embed_dim], [B, num_heads, seq_len, head_embed_dim])
 
         ## Use RoPE (2D with Axial Rotary Embedding)
-        if self.num_extra_prepended_tokens > 0:
+        if self.num_extra_tokens > 0:
             # TODO: See if correct how I handle the extra tokens with RoPE (as the seq_len is not image_size**2 anymore)
             # Remove the extra tokens (i.e., cls and register tokens) from the input embeddings before applying RoPE
-            x_q = x_q[:, :, self.num_extra_prepended_tokens:, :]
-            x_k = x_k[:, :, self.num_extra_prepended_tokens:, :]
-
-        if num_extra_appended_tokens > 0:
-            # Remove the extra appended tokens (i.e., cls and register tokens) from the input embeddings before applying RoPE
-            x_q = x_q[:, :, :-num_extra_appended_tokens, :]
-            x_k = x_k[:, :, :-num_extra_appended_tokens, :]
+            x_q = x_q[:, :, self.num_extra_tokens:, :]
+            x_k = x_k[:, :, self.num_extra_tokens:, :]
         
 
         # Reshape q, k (to have seq_len and head_dim as the the two last dimensions) for apply_rotary_emb: [B*num_heads, seq_len, head_dim]
@@ -609,15 +600,10 @@ class RoPEMHSA(nn.Module):
         x_q = rearrange(q_rotated, '(b h) s d -> b h s d', h=self.num_heads)    # [B, num_heads, seq_len, head_embed_dim]
         x_k = rearrange(k_rotated, '(b h) s d -> b h s d', h=self.num_heads)    # [B, num_heads, seq_len, head_embed_dim]
 
-        if self.num_extra_prepended_tokens > 0:
+        if self.num_extra_tokens > 0:
             # Concatenate back the extra tokens to the embeddings after applying RoPE
-            x_q = torch.cat((x_q[:, :, :self.num_extra_prepended_tokens, :], x_q), dim=2)
-            x_k = torch.cat((x_k[:, :, :self.num_extra_prepended_tokens, :], x_k), dim=2)
-
-        if num_extra_appended_tokens > 0:
-            # Concatenate back the extra tokens to the embeddings after applying RoPE
-            x_q = torch.cat((x_q, x_q[:, :, -num_extra_appended_tokens:, :]), dim=2)
-            x_k = torch.cat((x_k, x_k[:, :, -num_extra_appended_tokens:, :]), dim=2)
+            x_q = torch.cat((x_q[:, :, :self.num_extra_tokens, :], x_q), dim=2)
+            x_k = torch.cat((x_k[:, :, :self.num_extra_tokens, :], x_k), dim=2)
 
         # Compute the attention scores
         attn = (x_q @ x_k.transpose(-2, -1))    # [B, num_heads, seq_len, seq_len]; unscaled attention logits
@@ -651,14 +637,12 @@ class FeedForward(nn.Module):
         x = self.drop(x)
         return x
 
-class TransformerLayer(nn.Module):
+class LoopedTransformerLayer(nn.Module):
     """ Transformer layer """
-    def __init__(self, model_config, image_size, embed_dim, num_heads, mlp_ratio=4., qkv_bias=False, attn_drop=0., attn_proj_drop=0., ff_drop=0., num_extra_prepended_tokens=0, rpe_type=None, grid_2d_distance_matrix=None):
+    def __init__(self, model_config, image_size, embed_dim, num_heads, mlp_ratio=4., qkv_bias=False, attn_drop=0., attn_proj_drop=0., ff_drop=0., num_extra_tokens=0, rpe_type=None, grid_2d_distance_matrix=None):
         super().__init__()
 
         self.first_norm = nn.LayerNorm(embed_dim)
-
-        self.rpe_type = rpe_type
 
         if rpe_type == 'rope':
             self.attn = RoPEMHSA(model_config,
@@ -668,7 +652,7 @@ class TransformerLayer(nn.Module):
                                  qkv_bias=qkv_bias,
                                  attn_drop=attn_drop,
                                  proj_drop=attn_proj_drop,
-                                 num_extra_prepended_tokens=num_extra_prepended_tokens
+                                 num_extra_tokens=num_extra_tokens
                                  )
 
         elif rpe_type in ["Four-diag-slope-Alibi", "Two-slope-Alibi"]:
@@ -681,7 +665,7 @@ class TransformerLayer(nn.Module):
                                    qkv_bias=qkv_bias,
                                    attn_drop=attn_drop,
                                    proj_drop=attn_proj_drop,
-                                   num_extra_prepended_tokens=num_extra_prepended_tokens,
+                                   num_extra_tokens=num_extra_tokens,
                                    )
 
         else:
@@ -692,7 +676,7 @@ class TransformerLayer(nn.Module):
                              qkv_bias=qkv_bias,
                              attn_drop=attn_drop,
                              proj_drop=attn_proj_drop,
-                             num_extra_prepended_tokens=num_extra_prepended_tokens
+                             num_extra_tokens=num_extra_tokens
                              )
         
         self.second_norm = nn.LayerNorm(embed_dim)
@@ -702,12 +686,8 @@ class TransformerLayer(nn.Module):
                               ff_drop=ff_drop
                               )
 
-    def forward(self, x, num_extra_appended_tokens=0):
-        if self.rpe_type == 'rope':
-            x = x + self.attn(self.first_norm(x), num_extra_appended_tokens)   # [B, seq_len, embed_dim]; this uses norm first and then attention
-        else:
-            x = x + self.attn(self.first_norm(x))   # [B, seq_len, embed_dim]; this uses norm first and then attention
-
+    def forward(self, x):
+        x = x + self.attn(self.first_norm(x))   # [B, seq_len, embed_dim]; this uses norm first and then attention
         x = x + self.ff(self.second_norm(x))    # [B, seq_len, embed_dim]
         return x, self.attn.attn_scores
 
@@ -754,8 +734,8 @@ def calculate_2d_relative_positions(grid_height, grid_width, rpe_type):
 
     return relative_position
 
-class VisionTransformer(nn.Module):
-    """ Vision Transformer """
+class LoopedVisionTransformer(nn.Module):
+    """ Looped Vision Transformer """
     def __init__(self,
                  base_config,
                  model_config,
@@ -774,8 +754,7 @@ class VisionTransformer(nn.Module):
         self.seq_len = self.image_size * self.image_size    # NOTE: here image_size also takes into account border padding if relevant
         self.num_channels = num_channels
         self.num_classes = num_classes
-        self.num_token_categories = self.num_classes
-        
+
         self.patch_size = model_config.patch_size
 
         self.num_all_tokens = self.seq_len  # essentially seq_len + extra tokens; number of tokens/positions in a sequence (i.e., the extra tokens are also accounted for)
@@ -783,19 +762,22 @@ class VisionTransformer(nn.Module):
         self.embed_dim = network_config.embed_dim
         assert self.embed_dim % network_config.num_heads == 0, 'Embedding dimension must be divisible by the number of heads'
 
-        if base_config.data_env == 'BEFOREARC' and model_config.task_embedding.enabled and model_config.task_embedding.approach == 'task_tokens':
-            self.num_token_categories = self.num_token_categories + model_config.num_elementary_tasks
+        if base_config.data_env in ['REARC', 'BEFOREARC']:
+            if model_config.visual_tokens.enabled:
+                self.num_token_categories = self.num_classes + 1 + 4 # 10 symbols (0-9) + 1 pad token + 4 x,y,xy border tokens and newline tokens
+            else:
+                self.num_token_categories = self.num_classes + 1
+
 
         ## [Optional] Extra tokens
-        # NOTE: They are concatenated to the input embeddings during the forward pass of the model
-        self.num_extra_prepended_tokens = 0 # coming from the cls token or register tokens
-        self.num_extra_appended_tokens = 0  # coming from the task embedding
+        # NOTE: They are concatenated (prepended) to the input embeddings during the forward pass of the model
+        self.num_extra_tokens = 0
 
         # Create cls token
         if model_config.use_cls_token:
             self.cls_token = nn.Parameter(torch.zeros(1, 1, self.embed_dim)) # create the [cls] token
             self.num_all_tokens += 1
-            self.num_extra_prepended_tokens += 1
+            self.num_extra_tokens += 1
             if base_config.data_env in ['REARC', 'BEFOREARC']:
                 self.num_token_categories += 1  # + 1 cls token
 
@@ -803,7 +785,7 @@ class VisionTransformer(nn.Module):
         if model_config.num_reg_tokens > 0:
             self.reg_tokens = nn.Parameter(torch.zeros(1, model_config.num_reg_tokens, self.embed_dim)) # create the register tokens
             self.num_all_tokens += model_config.num_reg_tokens
-            self.num_extra_prepended_tokens += model_config.num_reg_tokens
+            self.num_extra_tokens += model_config.num_reg_tokens
             if base_config.data_env in ['REARC', 'BEFOREARC']:
                 self.num_token_categories += 1  # + 1 register token
 
@@ -842,7 +824,7 @@ class VisionTransformer(nn.Module):
                                                   seq_len=self.seq_len,
                                                   patch_embed=self.patch_embed,
                                                   embed_dim=self.embed_dim,
-                                                  num_extra_prepended_tokens=self.num_extra_prepended_tokens,
+                                                  num_extra_tokens=self.num_extra_tokens,
                                                   ape_type=model_config.ape.ape_type,
                                                   mixer_strategy=model_config.ape.mixer
                                                   )
@@ -861,9 +843,11 @@ class VisionTransformer(nn.Module):
             rpe_type = None
             grid_2d_distance_matrix = None
 
-        ## Transformer Encoder Layers
+        ## Looped Transformer Encoder Layers
+        self.num_loops = self.network_config.num_loops  # number of loops T
+        self.num_layers = self.network_config.num_layers
         self.transformer_layers = nn.ModuleList([
-            TransformerLayer(
+            LoopedTransformerLayer(
                 model_config=model_config,
                 image_size=self.image_size,
                 embed_dim=self.embed_dim,
@@ -873,15 +857,20 @@ class VisionTransformer(nn.Module):
                 attn_drop=network_config.attn_dropout_rate,
                 attn_proj_drop=network_config.attn_proj_dropout_rate,
                 ff_drop=network_config.ff_dropout_rate,
-                num_extra_prepended_tokens=self.num_extra_prepended_tokens,
+                num_extra_tokens=self.num_extra_tokens,
                 rpe_type=rpe_type,
                 grid_2d_distance_matrix=grid_2d_distance_matrix
             )
-            for _ in range(self.network_config.num_layers)
+            for _ in range(self.num_layers)
             ])
 
         self.last_layer_norm = nn.LayerNorm(self.embed_dim)
 
+        # Create Step Embeddings (to encode depth/time)
+        # TODO: 
+        # Here we make them learnable, however in the UT paper they use fixed sinusoid embeddings.
+        # The sinusoid embeddings UT uses are (considered) 2D because there is the spatial and temporal dimension/coordinate, so in our case it should be made 3D as we have a 2D spatial dimension.
+        self.step_embeddings = nn.Parameter(torch.zeros(self.num_loops, 1, self.embed_dim)) # [num_loops, 1, embed_dim] to allow broadcasting across batch and sequence length, and with zeros as place holders before init
 
         ## Weights initialization of all the learnable components
         self.init_type = self.network_config.init_weights_cfg.type
@@ -939,11 +928,13 @@ class VisionTransformer(nn.Module):
         if hasattr(self, 'cls_token'):
             nn.init.trunc_normal_(self.cls_token, std=0.02)
 
-    def forward_embed(self, x, task_embeddings=None, example_in_context=None, x_grid_object_ids=None):
+        # Step embeddings
+        if hasattr(self, 'step_embeddings'):
+            nn.init.trunc_normal_(self.step_embeddings, std=0.02)
+
+    def forward_embed(self, x):
         x_shape = x.shape
         B = x_shape[0]
-
-        # TODO: Check with debugger issue here? Shape of x?
 
         x = self.patch_embed(x) # [B, num_patches, embed_dim]; embed the input
 
@@ -951,56 +942,49 @@ class VisionTransformer(nn.Module):
         # TODO: Depending on if we want to use PE for the extra tokens, we should add first the PE and then concatenate or concatenate first and then add the PE
         if hasattr(self, 'reg_tokens'):
             reg_tokens = self.reg_tokens.expand(B, -1, -1)   # [B, num_register_tokens, embed_dim]; use expand to create and add the tokens to each sample in the batch instead of just one sample
-            x = torch.cat((reg_tokens, x), dim=1)   # [B, num_all_tokens, embed_dim]
+            x = torch.cat((reg_tokens, x), dim=1) 
         if hasattr(self, 'cls_token'):
             cls_tokens = self.cls_token.expand(B, -1, -1)   # [B, 1, embed_dim]; use expand to create and add the token for each sample in the batch instead of just one sample
             x = torch.cat((cls_tokens, x), dim=1)   # [B, num_all_tokens, embed_dim]
-
-        # Absolute Positional Encoding
-        if self.model_config.ape.enabled:
-            # Apply APE
-            x = self.ape(x, x_grid_object_ids)  # [B, num_all_tokens(+task_embedding_length), embed_dim], where num_all_tokens depends on the number of patches and extra tokens (if any) (e.g., cls ro register tokens)
-
-        # Handle the task embedding for the example_in_context approach
-        # NOTE: We do not use an APE for the example (input-output pair) in context
-        if self.model_config.task_embedding.enabled and example_in_context is not None:
-            example_input = self.patch_embed(example_in_context[0])
-            example_output = self.patch_embed(example_in_context[1])
-
-            # Append the example input and output to the input sequence
-            x = torch.cat((x, example_input, example_output), dim=1)    # [B, 3*num_patches, embed_dim]
-            
-            # Update the attribute variable keeping track of the total number of tokens in the sequence processed by the encoder layers
-            self.num_all_tokens += 2 * self.patch_embed.num_patches
-
-            self.num_extra_appended_tokens = 2 * self.patch_embed.num_patches
         
-        # Handle the task embedding for the task_tokens approach
-        # NOTE: We do not use an APE for the task tokens
-        if self.model_config.task_embedding.enabled and task_embeddings is not None:
-            x = torch.cat((x, task_embeddings), dim=1)  # [B, num_all_tokens + task_embedding_length, embed_dim]
-            
-            self.num_extra_appended_tokens = task_embeddings.shape[1]  # [B, task_embedding_length, embed_dim]
+        # NOTE: (Spatial) Absolute Positional Encoding (APE)
+        # As per the Universal Transformer paper, the APE should be applied at each time step.
+        # See forward_encode() for the looped transformer pass.
 
         return x
 
-    def forward_encode(self, x, num_extra_appended_tokens):
+    def forward_encode(self, x, x_grid_object_ids):
 
-        x_shape = x.shape    # [B, num_all_tokens, embed_dim]
+        x_shape = x.shape   # [B, N, embed_dim]
 
         if self.model_config.attention_map.enabled:
             self.attn_scores = []
 
-        # Transformer layers/blocks
-        for i, layer in enumerate(self.transformer_layers):
-            x, attn_scores = layer(x, num_extra_appended_tokens)  # [B, num_all_tokens, embed_dim], [B, num_heads, seq_len, seq_len]
+        # TODO: Check if correct.
+        # From the UT paper, it seems that the spatial position should also be added at each step instead of once at the beginning
+
+        # TODO: If we implement ACT, we need to simply copy/propagate the embeddings of the positions that reached the end of their iterative refinement process.
+
+        # Looped Transformer pass
+        for i in range(self.num_loops):
             
+            # Add (spatial) absolute positional encoding (APE) for this loop iteration
+            if self.model_config.ape.enabled:
+                x = self.ape(x, x_grid_object_ids)  # [B, num_all_tokens, embed_dim], where num_all_tokens depends on the number of patches and extra tokens (if any) (e.g., cls ro register tokens)
+        
+            # Add step embedding for this loop iteration
+            step_emb = self.step_embeddings[i]  # [1, embed_dim]
+            x = x + step_emb.unsqueeze(1)       # [B, N, embed_dim]; add step embedding broadcasted (because dim with 1) over sequence length to [B, N, embed_dim]
+
+            # Pass through the layer(s) for this loop/step
+            current_layer = self.transformer_layers[i % self.num_layers]
+            x, attn = current_layer(x) # [B, N, embed_dim], [B, num_heads, N, N]
+
             if self.model_config.attention_map.enabled:
-                # Store the attention scores for visualization
-                self.attn_scores.append(attn_scores)  # list of elements of dimensions [B, num_heads, seq_len, seq_len]
+                self.attn_scores.append(attn)   # store attention scores for this loop/step
         
         # Last layer norm
-        x = self.last_layer_norm(x) # [B, num_all_tokens, embed_dim]
+        x = self.last_layer_norm(x) # [B, N, embed_dim]
         
         return x
     
@@ -1022,14 +1006,11 @@ class VisionTransformer(nn.Module):
                 x = x.max(dim=1).values    # [B, embed_dim]
         else:
             # Output the embeddings for each patch/token after having removed [those for] the extra tokens (e.g., cls, register tokens) if applicable
-            x = x[:, self.num_extra_prepended_tokens:, :]    # [B, seq_len, embed_dim] <-- [B, num_all_tokens - num_extra_prepended_tokens, embed_dim]
-
-            # Remove the embeddings for the extra appended tokens (e.g., task tokens or input-output example in context) if applicable
-            x = x[:, :-self.num_extra_appended_tokens, :]
+            x = x[:, self.num_extra_tokens:, :]    # [B, seq_len, embed_dim] <-- [B, num_all_tokens - num_extra_tokens, embed_dim]
 
         return x
 
-    def forward(self, src, task_embeddings=None, example_in_context=None, x_grid_object_ids=None):
+    def forward(self, src, x_grid_object_ids=None):
         # NOTE: Masks for the forward() method
         # 1) [Not needed] (Self-)Attention mask. Use mask in forward() of nn.TransformerEncoder. It is used for custom attention masking. Use value 0 for allowed and -inf for masked positions.
         # 2) [Not needed] Padding mask. Use src_key_padding_mask in forward() of nn.TransformerEncoder. It is used to mask the padding (or other) tokens in the input sequence. Use value True for padding tokens and False for actual tokens.
@@ -1037,10 +1018,10 @@ class VisionTransformer(nn.Module):
         src_shape = src.shape
 
         # Embed the input image to an input sequence
-        x = self.forward_embed(src, task_embeddings, example_in_context, x_grid_object_ids)  # [B, num_all_tokens(+task_embedding_length), embed_dim] <-- [B, C, H, W]
+        x = self.forward_embed(src)  # [B, num_all_tokens, embed_dim] <-- [B, C, H, W]
 
         # Encode the sequence (i.e., the embedded input image)
-        x = self.forward_encode(x, self.num_extra_appended_tokens)  # [B, num_all_tokens, embed_dim] <-- [B, num_all_tokens, embed_dim]
+        x = self.forward_encode(x, x_grid_object_ids)  # [B, num_all_tokens, embed_dim] <-- [B, num_all_tokens, embed_dim]
 
         # Output feature embeddings from the encoded input sequence
         x = self.forward_features(x)    # [B, embed_dim] <-- [B, num_all_tokens, embed_dim]
@@ -1055,15 +1036,15 @@ class VisionTransformer(nn.Module):
             logger.warning("Attention scores not available. Ensure that the attention map is enabled in the model configuration.")
             return None
 
-def get_vit(base_config, model_config, network_config, image_size, num_channels, num_classes):
-    """ Return a ViT encoder instance """
+def get_looped_vit(base_config, model_config, network_config, image_size, num_channels, num_classes):
+    """ Return a Looped ViT encoder instance """
     
-    vit_encoder = VisionTransformer(base_config,
-                                    model_config, 
-                                    network_config, 
-                                    image_size, 
-                                    num_channels, 
-                                    num_classes
-                                    )
+    looped_vit_encoder = LoopedVisionTransformer(base_config,
+                                                 model_config,
+                                                 network_config,
+                                                 image_size,
+                                                 num_channels,
+                                                 num_classes
+                                                 )
     
-    return vit_encoder
+    return looped_vit_encoder
