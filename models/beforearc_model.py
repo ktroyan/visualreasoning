@@ -463,13 +463,12 @@ class VisReasModel(pl.LightningModule):
         if self.data_config.validate_in_and_out_domain:
             self.gen_val_attention_scores = []
 
+
     def test_step(self, batch, batch_idx, dataloader_idx=0):
         """
         This method is called for each batch during the testing phase.
         This is a default PyTorch Lightning method that we override to define the testing logic.
         """
-
-        x, y, task_tokens_seq, example_in_context, y_true_size, x_grid_object_ids, special_grid_tokens_dict = batch
 
         x, y_hat, y, mask, prediction_mask, special_grid_tokens_dict = self.shared_step(batch)
 
@@ -773,7 +772,7 @@ class BEFOREARCModel(VisReasModel):
                                              num_channels=self.num_channels,
                                              num_classes=self.num_classes,
                                              )
-            self.bb_embed_dim = backbone_network_config.d_model  # embedding dimension backbone model
+            self.bb_embed_dim = backbone_network_config.embed_dim  # embedding dimension backbone model
 
 
         elif model_config.backbone == "looped_vit":
@@ -879,6 +878,18 @@ class BEFOREARCModel(VisReasModel):
 
     def forward(self, x, y, task_tokens_seq=None, example_in_context=None, x_grid_object_ids=None):
 
+        device = x.device
+
+        # Handle the task embedding if applicable
+        if self.model_config.task_embedding.enabled and (task_tokens_seq is not None):
+            task_embedding = self.embed_task_tokens_seq(task_tokens_seq.to(device))  # [B, num_tasks, embed_dim]
+        else:
+            task_embedding = None
+
+        # Use grid object ids for the OPE (which is used within the APE)
+        if not (self.model_config.ope.enabled and (x_grid_object_ids is not None) and self.model_config.backbone in ["vit", "looped_vit", "transformer", "llada"]):
+            x_grid_object_ids = None
+
         if isinstance(self.encoder, LLaDAModel):
             # LLaDA expects a token sequence, not an image. We flatten already here as this makes it easier to mask
             # the input sequence
@@ -897,39 +908,30 @@ class BEFOREARCModel(VisReasModel):
                 # Optional, ignore padding and NL Token
                 # attention_mask = self.encoder.get_attention_mask(xy_masked)
 
-                logits = self.forward_sample(x, y, task_tokens_seq, example_in_context, x_grid_object_ids)
+                logits = self.forward_sample(xy_masked, xy, task_embedding, example_in_context, x_grid_object_ids)
 
             else:
                 # inference -> LLaDA Diffusion Process
-                raise NotImplementedError()
-                logits = self.encoder.generate_masked_sequence(self.forward_sample, x, y, task_tokens_seq, example_in_context, x_grid_object_ids)
+                logits = self.encoder.generate_masked_sequence(self.forward_sample, x, y, forward_sample_params = {
+                    'task_embedding': task_embedding,
+                    'example_in_context': example_in_context,
+                    'x_grid_object_ids': x_grid_object_ids
+                })
                 mask = None
 
             # The logits are both, input and prediction. Lets only keep the prediction logits.
             logits = logits[:, x.shape[1]:]
 
         else:
-            logits = self.forward_sample(x, y, task_tokens_seq, example_in_context, x_grid_object_ids)
+            logits = self.forward_sample(x, y, task_embedding, example_in_context, x_grid_object_ids)
             mask = None
 
         return logits, mask
 
-    def forward_sample(self, x, y, task_tokens_seq=None, example_in_context=None, x_grid_object_ids=None):
-
-        device = x.device
-
-        # Handle the task embedding if applicable
-        if self.model_config.task_embedding.enabled and (task_tokens_seq is not None):
-            task_embedding = self.embed_task_tokens_seq(task_tokens_seq.to(device))  # [B, num_tasks, embed_dim]
-        else:
-            task_embedding = None
-
-        # Use grid object ids for the OPE (which is used within the APE)
-        if not(self.model_config.ope.enabled and (x_grid_object_ids is not None) and self.model_config.backbone in ["vit", "looped_vit", "transformer"]):
-            x_grid_object_ids = None
+    def forward_sample(self, x, y, task_embedding=None, example_in_context=None, x_grid_object_ids=None):
 
         # Encode the input sequence
-        x_encoded = self.encoder(x, task_embedding, example_in_context, x_grid_object_ids)  # [B, seq_len, embed_dim]; NOTE: the extra tokens will have been truncated so the encoded sequence will also have a dim seq_len
+        x_encoded = self.encoder(x, task_embeddings=task_embedding, example_in_context=example_in_context, x_grid_object_ids=x_grid_object_ids)  # [B, seq_len, embed_dim]; NOTE: the extra tokens will have been truncated so the encoded sequence will also have a dim seq_len
 
         # Decode the encoded input sequence
         if self.model_config.head in ["transformer", "xtransformer", "mytransformer"]:

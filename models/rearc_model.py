@@ -461,8 +461,6 @@ class VisReasModel(pl.LightningModule):
         This is a default PyTorch Lightning method that we override to define the testing logic.
         """
 
-        x, y, samples_task_id, y_true_size, x_grid_object_ids, special_tokens_dict = batch
-
         x, y_hat, y, mask, prediction_mask, special_tokens_dict = self.shared_step(batch)
 
         assert prediction_mask is None, "Prediction mask should be None during testing as we generate all the tokens."
@@ -765,7 +763,7 @@ class REARCModel(VisReasModel):
                                              num_channels=self.num_channels,
                                              num_classes=self.num_classes,
                                              )
-            self.backbone_input_embed_dim = backbone_network_config.d_model  # embedding dimension backbone model
+            self.backbone_input_embed_dim = backbone_network_config.embed_dim  # embedding dimension backbone model
 
 
         elif model_config.backbone == "looped_vit":
@@ -894,11 +892,14 @@ class REARCModel(VisReasModel):
                 # Optional, ignore padding and NL Token
                 # attention_mask = self.encoder.get_attention_mask(xy_masked)
 
-                logits = self.forward_sample(samples_task_id, x_grid_object_ids, x=xy_masked, y=xy)
+                logits = self.forward_sample(x=xy_masked, y=xy, samples_task_id=samples_task_id, x_grid_object_ids=x_grid_object_ids)
 
             else:
                 # inference -> LLaDA Diffusion Process
-                logits = self.encoder.generate_masked_sequence(self.forward_sample, samples_task_id, x_grid_object_ids, x, y)
+                logits = self.encoder.generate_masked_sequence(self.forward_sample, x, y, forward_sample_params={
+                    'samples_task_id': samples_task_id,
+                    'x_grid_object_ids': x_grid_object_ids
+                })
                 mask = None
 
             # The logits are both, input and prediction. Lets only keep the prediction logits.
@@ -910,12 +911,12 @@ class REARCModel(VisReasModel):
 
         return logits, mask
 
-    def forward_sample(self, samples_task_id, x_grid_object_ids, x, y):
+    def forward_sample(self,  x, y, samples_task_id, x_grid_object_ids):
 
         # Encode the input sequence
         if self.model_config.ope.enabled and (x_grid_object_ids is not None) and self.model_config.backbone in ["vit", "looped_vit", "transformer", "llada"]:
             # Encode the input grid image grid and use grid object ids for the OPE (which is used within the APE)
-            x_encoded = self.encoder(x, x_grid_object_ids)  # [B, seq_len, backbone_input_embed_dim]; NOTE: the extra tokens will have been truncated so the encoded sequence will also have a dim seq_len 
+            x_encoded = self.encoder(x, x_grid_object_ids=x_grid_object_ids)  # [B, seq_len, backbone_input_embed_dim]; NOTE: the extra tokens will have been truncated so the encoded sequence will also have a dim seq_len
 
         else:
             x_encoded = self.encoder(x)  # [B, seq_len, backbone_input_embed_dim]; NOTE: the extra tokens will have been truncated so the encoded sequence will also have a dim seq_len 

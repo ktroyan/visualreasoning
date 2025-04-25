@@ -1,15 +1,13 @@
 backbone_network:
   name: 'llada'
   activation_type: silu
-  alibi: false
-  alibi_bias_max: 8.0
   attention_dropout: 0.0
   attention_layer_norm: false
   attention_layer_norm_with_affine: true
   bias_for_layer_norm: false
   block_group_size: 1
   block_type: llama
-  d_model: 128 # 384 # 4096
+  embed_dim: 128 # 384 # 4096
   embedding_dropout: 0.0
   embedding_size: 126464
   eos_token_id: 126081

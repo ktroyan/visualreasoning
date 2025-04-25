@@ -1,5 +1,5 @@
 model:
-  backbone: 'vit'  # choices: 'vit', 'looped_vit', 'transformer', 'resnet', 'llada'
+  backbone: 'llada'  # choices: 'vit', 'looped_vit', 'transformer', 'resnet', 'llada'
   head: 'mlp'  # choices: 'transformer', 'mlp', 'mytransformer', 'xtransformer'
   pretrained: null
   patch_size: 1
