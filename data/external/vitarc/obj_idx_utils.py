@@ -44,6 +44,7 @@ def generate_input_type_ids_multi(grid, visualize=False):
     unique_values = unique_values[unique_values != background_value]
 
     # I added this
+    figs_folder = "./figs"
     # Plot the input grid
     if visualize:
         plot_grid_image(grid)
@@ -57,7 +58,7 @@ def generate_input_type_ids_multi(grid, visualize=False):
             plt.figure()
             plt.title(f'Binary Image for Object Value {value}')
             plt.imshow(binary_image, cmap='gray')
-            plt.savefig(f'./value{value}_binary_image_object_ids_grid.png')  # NOTE: I added this
+            plt.savefig(f'{figs_folder}/value{value}_binary_image_object_ids_grid.png')  # NOTE: I added this
             # plt.show()
             plt.close()  # NOTE: I added this
 
@@ -71,7 +72,7 @@ def generate_input_type_ids_multi(grid, visualize=False):
             plt.figure()
             plt.title(f'Contours for Object Value {value}')
             plt.imshow(contour_image, cmap='gray')
-            plt.savefig(f'./value{value}_contour_image_object_ids_grid.png')  # NOTE: I added this
+            plt.savefig(f'{figs_folder}/value{value}_contour_image_object_ids_grid.png')  # NOTE: I added this
             # plt.show()
             plt.close()  # NOTE: I added this
 
@@ -92,7 +93,7 @@ def generate_input_type_ids_multi(grid, visualize=False):
         plt.title('input_type_ids')
         plt.imshow(input_type_ids, cmap='tab20')
         plt.colorbar()
-        plt.savefig('./object_ids_grid.png')  # NOTE: I added this
+        plt.savefig(f'{figs_folder}/object_ids_grid.png')  # NOTE: I added this
         # plt.show()
         plt.close()  # NOTE: I added this
 
