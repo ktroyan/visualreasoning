@@ -448,7 +448,7 @@ class CVRModel(VisReasModel):
                                                            image_size=self.image_size,
                                                            num_classes=self.num_classes,
                                                            )
-            self.head_input_dim = bb_num_out_features
+            self.bb_embed_dim = bb_num_out_features
 
         elif model_config.backbone == "vit_timm":
             self.encoder, bb_num_out_features = get_vit_timm(base_config=base_config,
@@ -458,7 +458,7 @@ class CVRModel(VisReasModel):
                                                              num_channels=self.num_channels,
                                                              num_classes=self.num_classes
                                                              )
-            self.head_input_dim = bb_num_out_features
+            self.bb_embed_dim = bb_num_out_features
 
         elif model_config.backbone == "transformer":
             self.encoder = get_transformer_encoder(base_config=base_config,
@@ -468,8 +468,8 @@ class CVRModel(VisReasModel):
                                                    num_channels=self.num_channels,
                                                    num_classes=self.num_classes,
                                                    )
-            self.head_input_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
-
+            self.bb_embed_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
+            
         elif model_config.backbone == "vit":
             self.encoder = get_vit(base_config=base_config,
                                    model_config=model_config,
@@ -478,7 +478,7 @@ class CVRModel(VisReasModel):
                                    num_channels=self.num_channels,
                                    num_classes=self.num_classes,
                                    )
-            self.head_input_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
+            self.bb_embed_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
 
         elif model_config.backbone == "looped_vit":
             self.encoder = get_looped_vit(base_config=base_config,
@@ -488,7 +488,7 @@ class CVRModel(VisReasModel):
                                    num_channels=self.num_channels,
                                    num_classes=self.num_classes,
                                    )
-            self.backbone_input_embed_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
+            self.bb_embed_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
 
         elif model_config.backbone == "llada":
             self.encoder = get_llada_encoder(base_config=base_config,
@@ -498,11 +498,14 @@ class CVRModel(VisReasModel):
                                              num_channels=self.num_channels,
                                              num_classes=self.num_classes,
                                              )
-            self.head_input_dim = backbone_network_config.d_model   # embedding dimension backbone model
+            self.bb_embed_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
 
         else:
             raise ValueError(f"Unknown model backbone given: {model_config.backbone}")
         
+        self.head_input_dim = self.bb_embed_dim     # actual embedding dimension to be passed to the head/decoder network, which will be projected to the correct embedding dimension if different from the backbone/decoder embedding dimension
+        self.head_input_embed_dim = head_network_config.embed_dim   # dimension of the input that should be passed to the head network; initially assumed to be of dimension equal to the embedding dimension of the backbone/encoder network
+
 
         ## Task embedding
         if model_config.task_embedding.enabled:

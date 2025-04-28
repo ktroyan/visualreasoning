@@ -587,6 +587,7 @@ def plot_image_predictions(save_folder_path: str,
                             figsize=(15, n_samples * 4),
                             dpi=150,
                             gridspec_kw={'width_ratios': [1, 1, 1]},
+                            squeeze=False,  # to ensure axs is always a 2D array
                             )
 
     for i in range(n_samples):

@@ -788,11 +788,11 @@ class BEFOREARCModel(VisReasModel):
         else:
             raise ValueError(f"Unknown model backbone given: {model_config.backbone}")
         
-        self.head_input_dim = self.bb_embed_dim   # embedding dimension of the backbone model, usually the same as its input embedding dimension
-        self.head_input_embed_dim = head_network_config.embed_dim   # dimension of the actual input that will be passed to the head network; initially assumed to be of dimension equal to the embedding dimension of the head model
-
+        self.head_input_dim = self.bb_embed_dim     # actual embedding dimension to be passed to the head/decoder network, which will be projected to the correct embedding dimension if different from the backbone/decoder embedding dimension
+        self.head_input_embed_dim = head_network_config.embed_dim   # dimension of the input that should be passed to the head network; initially assumed to be of dimension equal to the embedding dimension of the backbone/encoder network
 
         ## Task embedding
+        # Task tokens approach
         if model_config.task_embedding.enabled and model_config.task_embedding.approach == "task_tokens":
             self.embed_task_tokens_seq = nn.Embedding(self.num_classes + model_config.num_elementary_tasks, embedding_dim=backbone_network_config.embed_dim, device=self.device)
 

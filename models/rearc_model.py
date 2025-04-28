@@ -143,10 +143,6 @@ class VisReasModel(pl.LightningModule):
         if not self.model_config.ope.enabled:
             x_grid_object_ids = None
 
-        # Handle task embedding
-        if not self.model_config.task_embedding.enabled:
-            samples_task_id = None
-
         # Forward pass through the whole model
         y_hat, prediction_mask = self(x, y, samples_task_id=samples_task_id, x_grid_object_ids=x_grid_object_ids)  # computed logits
 
@@ -731,7 +727,7 @@ class REARCModel(VisReasModel):
                                                            image_size=self.image_size,
                                                            num_classes=self.num_classes,
                                                            )
-            self.backbone_input_embed_dim = bb_num_out_features   # embedding dimension backbone model
+            self.bb_embed_dim = bb_num_out_features   # embedding dimension backbone model
 
 
         elif model_config.backbone == "transformer":
@@ -742,7 +738,7 @@ class REARCModel(VisReasModel):
                                                    num_channels=self.num_channels,
                                                    num_classes=self.num_classes, 
                                                    )
-            self.backbone_input_embed_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
+            self.bb_embed_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
             
 
         elif model_config.backbone == "vit":
@@ -753,7 +749,7 @@ class REARCModel(VisReasModel):
                                    num_channels=self.num_channels,
                                    num_classes=self.num_classes,
                                    )
-            self.backbone_input_embed_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
+            self.bb_embed_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
 
         elif model_config.backbone == "llada":
             self.encoder = get_llada_encoder(base_config=base_config,
@@ -763,7 +759,7 @@ class REARCModel(VisReasModel):
                                              num_channels=self.num_channels,
                                              num_classes=self.num_classes,
                                              )
-            self.backbone_input_embed_dim = backbone_network_config.embed_dim  # embedding dimension backbone model
+            self.bb_embed_dim = backbone_network_config.embed_dim  # embedding dimension backbone model
 
 
         elif model_config.backbone == "looped_vit":
@@ -774,31 +770,15 @@ class REARCModel(VisReasModel):
                                    num_channels=self.num_channels,
                                    num_classes=self.num_classes,
                                    )
-            self.backbone_input_embed_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
+            self.bb_embed_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
         
         else:
             raise ValueError(f"Unknown model backbone given: {model_config.backbone}")
         
-        self.head_input_dim = self.backbone_input_embed_dim   # embedding dimension of the backbone model, usually the same as its input embedding dimension
-        self.head_input_embed_dim = head_network_config.embed_dim   # dimension of the actual input that will be passed to the head network; initially assumed to be of dimension equal to the embedding dimension of the head model
+        self.head_input_dim = self.bb_embed_dim     # actual embedding dimension to be passed to the head/decoder network, which will be projected to the correct embedding dimension if different from the backbone/decoder embedding dimension
+        self.head_input_embed_dim = head_network_config.embed_dim   # dimension of the input that should be passed to the head network; initially assumed to be of dimension equal to the embedding dimension of the backbone/encoder network
 
 
-        ## Task embedding
-        if model_config.task_embedding.enabled:
-            task_embedding_dim = model_config.task_embedding.task_embedding_dim
-            self.task_embedding = nn.Embedding(model_config.n_tasks, embedding_dim=task_embedding_dim, device=self.device)   # NOTE: 103 is the total number of tasks because the input is a task id (i.e., a number between 0 and 102)
-            self.head_input_dim += task_embedding_dim
-        else:
-            task_embedding_dim = 0
-            self.task_embedding = None
-
-
-        ## Encoder to Decoder projection layer; useful to handle the task embedding that is concatenated
-        # TODO: We could handle the task embedding differently than by a simple concatenation. For example using FiLM. See later.
-        if self.head_input_dim != self.head_input_embed_dim:
-            self.enc_to_dec_proj = nn.Linear(self.head_input_dim, self.head_input_embed_dim, device=self.device)  # project the encoder output (of dimension backbone_network_config.embed_dim + task_embedding_dim) to the decoder embedding dimension
-
-        
         ## Model head or decoder
         if model_config.head == "transformer":
             self.decoder = get_transformer_decoder(model_config=self.model_config,
@@ -916,16 +896,10 @@ class REARCModel(VisReasModel):
         # Encode the input sequence
         if self.model_config.ope.enabled and (x_grid_object_ids is not None) and self.model_config.backbone in ["vit", "looped_vit", "transformer", "llada"]:
             # Encode the input grid image grid and use grid object ids for the OPE (which is used within the APE)
-            x_encoded = self.encoder(x, x_grid_object_ids=x_grid_object_ids)  # [B, seq_len, backbone_input_embed_dim]; NOTE: the extra tokens will have been truncated so the encoded sequence will also have a dim seq_len
+            x_encoded = self.encoder(x, x_grid_object_ids=x_grid_object_ids)  # [B, seq_len, bb_embed_dim]; NOTE: the extra tokens will have been truncated so the encoded sequence will also have a dim seq_len
 
         else:
-            x_encoded = self.encoder(x)  # [B, seq_len, backbone_input_embed_dim]; NOTE: the extra tokens will have been truncated so the encoded sequence will also have a dim seq_len 
-
-        # Handle the task embedding if applicable
-        if self.model_config.task_embedding.enabled and (samples_task_id is not None):
-            task_embedding = self.task_embedding(samples_task_id)   # [B, task_embedding_dim]
-            task_embedding = task_embedding.unsqueeze(1).repeat(1, x_encoded.shape[1], 1) # [B, seq_len, task_embedding_dim]
-            x_encoded = torch.cat([x_encoded, task_embedding], dim=2)  # [B, seq_len, backbone_input_embed_dim + task_embedding_dim]
+            x_encoded = self.encoder(x)  # [B, seq_len, bb_embed_dim]; NOTE: the extra tokens will have been truncated so the encoded sequence will also have a dim seq_len
 
         # Decode the encoded input sequence
         if self.model_config.head in ["transformer", "xtransformer", "mytransformer"]:
