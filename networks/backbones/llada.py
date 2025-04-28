@@ -1589,21 +1589,21 @@ class LLaDAModel(nn.Module):
             # Custom implementation of adding OPE
             x = x + self.build_object_positional_encoding(x_grid_object_ids)
 
-            # Handle the task embedding for the example_in_context approach
-            # NOTE: We do not use an APE for the example (input-output pair) in context
-            if self.model_config.task_embedding.enabled and example_in_context is not None:
-                # TODO: Check this -> is it required?
-                # example_input = self.patch_embed(example_in_context[0])
-                # example_output = self.patch_embed(example_in_context[1])
-                example_input = self.transformer.wte(example_in_context[0])  # type: ignore
-                example_output = self.transformer.wte(example_in_context[1])  # type: ignore
+        # Handle the task embedding for the example_in_context approach
+        # NOTE: We do not use an APE for the example (input-output pair) in context
+        if self.model_config.task_embedding.enabled and example_in_context is not None:
+            # TODO: Check this -> is it required?
+            # example_input = self.patch_embed(example_in_context[0])
+            # example_output = self.patch_embed(example_in_context[1])
+            example_input = self.transformer.wte(example_in_context[0])  # type: ignore
+            example_output = self.transformer.wte(example_in_context[1])  # type: ignore
 
-                if self.config.input_emb_norm:
-                    example_input = example_input * (self.config.embed_dim ** 0.5)
-                    example_output = example_output * (self.config.embed_dim ** 0.5)
+            if self.config.input_emb_norm:
+                example_input = example_input * (self.config.embed_dim ** 0.5)
+                example_output = example_output * (self.config.embed_dim ** 0.5)
 
-                # Append the example input and output to the input sequence
-                x = torch.cat((example_input, example_output, x), dim=1)  # [B, 3*num_patches, embed_dim]
+            # Append the example input and output to the input sequence
+            x = torch.cat((example_input, example_output, x), dim=1)  # [B, 3*num_patches, embed_dim]
 
         # else:
         #     # TODO: This is just debugging
