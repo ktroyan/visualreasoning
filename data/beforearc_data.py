@@ -4,6 +4,8 @@ import torch
 from torch.utils.data import Dataset
 import torch.nn.functional as F
 import numpy as np
+from datasets import load_dataset
+
 
 # Personal codebase dependencies
 from .data_base import DataModuleBase
@@ -48,7 +50,7 @@ def create_object_grid(input_grid, max_img_size, special_tokens_dic):
     return object_ids_grid
 
 class BEFOREARCDataset(Dataset):
-    def __init__(self, json_dataset_path, image_size, use_visual_tokens, use_grid_object_ids, task_embedding_approach, max_transformation_depth, transform=None):
+    def __init__(self, dataset_split_df, image_size, use_visual_tokens, use_grid_object_ids, task_embedding_approach, max_transformation_depth, transform=None):
         super().__init__()
 
         # Get whether visual tokens should be used or not
@@ -60,10 +62,10 @@ class BEFOREARCDataset(Dataset):
         # Get the task embedding approach to use (useful for Compositionality)
         self.task_embedding_approach = task_embedding_approach
 
-        # Get the samples paths from the json dataset split
-        self.data_samples_df = pd.read_json(json_dataset_path)
-
-        self.n_samples = len(self.data_samples_df)
+        # Get the samples paths from the parquet file to a pandas dataframe
+        self.dataset_split_df = dataset_split_df
+        
+        self.n_samples = len(dataset_split_df)
         self.transform = transform
 
         # Store special grid tokens
@@ -231,15 +233,25 @@ class BEFOREARCDataset(Dataset):
         
         return grid_padded
 
+    def convert_to_tensor(self, grid):
+        """ Convert array of numpy objects (lists) into proper 2D array and then to torch (long) tensor. """
+        if isinstance(grid, np.ndarray) and grid.dtype == np.object_:
+            grid = np.array(list(grid))
+        return torch.tensor(grid, dtype=torch.long)
+
     def __len__(self):
         return self.n_samples
 
     def __getitem__(self, idx):
 
         # Get the sample data for the current index idx
-        sample = self.data_samples_df.iloc[idx]
-        x = sample['input']
-        y = sample['output']
+        sample = self.dataset_split_df.iloc[idx]
+
+        # Transform the input grid image x (which is a list of list of integers) to a 2D-tensor
+        x = self.convert_to_tensor(sample['input'])
+
+        # Transform the output grid image y (which is a list of list of integers) to a 2D-tensor
+        y = self.convert_to_tensor(sample['output'])
 
         ## Task embedding
         if self.task_embedding_approach == 'task_tokens':
@@ -249,7 +261,7 @@ class BEFOREARCDataset(Dataset):
             # We maintain the same order and pad with the identity transformation token.
             # A transformation is of the form: ["elementary_transformation_1", "elementary_transformation_2", ...]. It can also just be ["elementary_transformation_1"].
 
-            elem_transformations_sequence = sample['transformations']  # sequence of elementary transformations
+            elem_transformations_sequence = sample['transformation_suite']  # sequence of elementary transformations
         
             # Create the sequence of tokens based on elem_transformations_sequence
             transformation_tokens_sequence = [self.elementary_transformations_to_token_ids[transformation] for transformation in elem_transformations_sequence]
@@ -262,20 +274,13 @@ class BEFOREARCDataset(Dataset):
 
         elif self.task_embedding_approach == 'example_in_context':
             # Get the input-output pair of grids as an example of the transformation to perform
-            example_input = torch.tensor(sample['demo_input'], dtype=torch.long)
-            example_output = torch.tensor(sample['demo_output'], dtype=torch.long)
-
-
-        # Transform the input grid image x (which is a list of list of integers) to a 2D-tensor
-        x = torch.tensor(x, dtype=torch.long)
+            example_input = self.convert_to_tensor(sample['demo_input'])
+            example_output = self.convert_to_tensor(sample['demo_output'])
 
         ## Input image data-transform
         # TODO: Should the potential transform be applied before the border and pad tokens added or after? Usually before?
         if self.transform is not None:
             x = self.transform(x)
-
-        ## Transform the output grid image y (which is a list of list of integers) to a 2D-tensor
-        y = torch.tensor(y, dtype=torch.long)
 
         # Get the true (i.e., non-padded) size of the output tensor
         y_true_size = y.shape
@@ -355,8 +360,6 @@ class BEFOREARCDataset(Dataset):
 def get_max_grid_size(df, columns=["input", "output"]):
     
     def get_grid_size(grid):
-        if not grid:  # handle empty grid
-            return (0, 0)
         height = len(grid)  # number of rows
         width = len(grid[0]) if height > 0 else 0  # width of the first row; NOTE: all rows of a same sample input/output are assumed to have the same width since otherwise it is not a rectangular grid image
         return height, width
@@ -372,31 +375,25 @@ def get_max_grid_size(df, columns=["input", "output"]):
 
     return max_size
 
-def get_max_img_size_across_dataset_splits(data_splits_paths):
+def get_max_img_size_across_dataset_splits(dataset_splits):
     overall_max_img_size = 0
 
-    for split_path in data_splits_paths:
-
-        # Get the samples paths from the dataset csv metadata file
-        data_samples_df = pd.read_json(split_path)
+    for split in dataset_splits:
 
         # Get the maximum image size (to which all images will be padded) for the current dataset split
-        max_img_size = get_max_grid_size(data_samples_df, columns=["input", "output"])    # find the maximum image size in the dataset; useful to minimize padding
+        max_img_size = get_max_grid_size(split, columns=["input", "output"])    # find the maximum image size in the dataset; useful to minimize padding
         if max_img_size > overall_max_img_size:
             overall_max_img_size = max_img_size
     
     return overall_max_img_size
 
-def get_max_transformation_depth_across_dataset_splits(data_splits_paths):
+def get_max_transformation_depth_across_dataset_splits(dataset_splits):
     overall_max_transformation_depth = 0
 
-    for split_path in data_splits_paths:
-
-        # Get the samples paths from the dataset csv metadata file
-        data_samples_df = pd.read_json(split_path)
+    for split in dataset_splits:
 
         # Get the maximum transformation depth (to which all the task embeddings will be padded with the identity transformation token) for the current dataset split
-        max_transformation_depth = data_samples_df['transformations'].apply(len).max()    # find the maximum transformation depth in the current dataset split
+        max_transformation_depth = split['transformation_suite'].apply(len).max()    # find the maximum transformation depth in the current dataset split
 
         # Update the overall maximum transformation depth
         if max_transformation_depth > overall_max_transformation_depth:
@@ -421,22 +418,49 @@ class BEFOREARCDataModule(DataModuleBase):
 
         self.image_size = data_config.image_size # if None, the max grid image size will be inferred from the dataset
 
-        train_set_path = data_config.dataset_dir + '/train.json'
-        val_set_path = data_config.dataset_dir + '/val.json'
-        test_set_path = data_config.dataset_dir + '/test.json'
-        data_splits_paths = [train_set_path, val_set_path, test_set_path]
+        # Load the dataset from HuggingFace
+        # Get experiment study from path
+        study = data_config.dataset_dir.split('/')[-3]
+        if "sys-gen" in study:  # to match the local naming convention of the studies
+            study = study.replace('sys-gen', 'generalization')
+
+        # Get experiment setting from path
+        setting = data_config.dataset_dir.split('/')[-2]
+
+        # Get experiment name from path
+        exp_name = data_config.dataset_dir.split('/')[-1]
+
+        # Dataset path (using HuggingFace datasets)
+        dataset_path = f"{study}/{setting}/{exp_name}"
+        
+        # TODO: When Yassine is done fixing the HF datasets naming, uncomment the lines commented below and delete the extra lines using the test set
+        train_set_parquet = load_dataset("taratataw/before-arc", data_files={"data": f"{dataset_path}/train.parquet"})
+        # val_set_parquet = load_dataset("taratataw/before-arc", data_files={"data": f"{dataset_path}/val.parquet"})
+        val_set_parquet = load_dataset("taratataw/before-arc", data_files={"data": f"{dataset_path}/test.parquet"})
+        test_set_parquet = load_dataset("taratataw/before-arc", data_files={"data": f"{dataset_path}/test.parquet"})
+
+        # Convert parquet to pandas dataframe
+        train_set_df = train_set_parquet['data'].to_pandas()
+        val_set_df = val_set_parquet['data'].to_pandas()
+        test_set_df = test_set_parquet['data'].to_pandas()
+
+        dataset_splits = [train_set_df, val_set_df, test_set_df]
 
         if data_config.use_gen_test_set:
-            gen_test_set_path = data_config.dataset_dir + '/gen_test.json'
-            data_splits_paths.append(gen_test_set_path)
+            # gen_test_set_parquet = load_dataset("taratataw/before-arc", data_files={"data": f"{dataset_path}/test_ood.parquet"})
+            gen_test_set_parquet = load_dataset("taratataw/before-arc", data_files={"data": f"{dataset_path}/test.parquet"})
+            gen_test_set_df = gen_test_set_parquet['data'].to_pandas()
+            dataset_splits.append(gen_test_set_df)
 
             if data_config.validate_in_and_out_domain:
-                gen_val_set_path = data_config.dataset_dir + '/gen_test.json'   # NOTE: We make the choice to use gen_test_set to monitor the OOD validation performance during training because the official final results are reported on a new OOD test set
-                data_splits_paths.append(gen_val_set_path)
+                # gen_val_set_parquet = load_dataset("taratataw/before-arc", data_files={"data": f"{dataset_path}/val_ood.parquet"})
+                gen_val_set_parquet = load_dataset("taratataw/before-arc", data_files={"data": f"{dataset_path}/test.parquet"})
+                gen_val_set_df = gen_val_set_parquet['data'].to_pandas()
+                dataset_splits.append(gen_val_set_df)
 
         # Max. image size (without considering any sort of special tokens such as padding or other visual tokens)
         if self.image_size is None:
-            self.image_size = get_max_img_size_across_dataset_splits(data_splits_paths)
+            self.image_size = get_max_img_size_across_dataset_splits(dataset_splits)
             if self.image_size == 0:
                 raise ValueError("The max grid image size across the dataset splits is 0. Please check the dataset.")
             logger.info(f"Using a max grid image size of {self.image_size} that was inferred from the dataset splits.")
@@ -448,7 +472,7 @@ class BEFOREARCDataModule(DataModuleBase):
                 task_embedding_approach = 'task_tokens'
                 # Max. transformation depth
                 # Check the maximum transformation depth (i.e., how many elementary transformations at most compose the transformations part of the dataset splits)
-                max_transformation_depth = get_max_transformation_depth_across_dataset_splits(data_splits_paths)
+                max_transformation_depth = get_max_transformation_depth_across_dataset_splits(dataset_splits)
             
             elif model_config.task_embedding.approach == 'example_in_context':
                 task_embedding_approach = 'example_in_context'
@@ -483,15 +507,15 @@ class BEFOREARCDataModule(DataModuleBase):
             transform = None
 
         # Create the torch Dataset objects that will then be used to create the dataloaders
-        self.train_set = BEFOREARCDataset(train_set_path, self.image_size, use_visual_tokens, use_grid_object_ids, task_embedding_approach, max_transformation_depth, transform=transform)
-        self.val_set = BEFOREARCDataset(val_set_path, self.image_size, use_visual_tokens, use_grid_object_ids, task_embedding_approach, max_transformation_depth, transform=transform)
-        self.test_set = BEFOREARCDataset(test_set_path, self.image_size, use_visual_tokens, use_grid_object_ids, task_embedding_approach, max_transformation_depth, transform=transform)
+        self.train_set = BEFOREARCDataset(train_set_df, self.image_size, use_visual_tokens, use_grid_object_ids, task_embedding_approach, max_transformation_depth, transform=transform)
+        self.val_set = BEFOREARCDataset(val_set_df, self.image_size, use_visual_tokens, use_grid_object_ids, task_embedding_approach, max_transformation_depth, transform=transform)
+        self.test_set = BEFOREARCDataset(test_set_df, self.image_size, use_visual_tokens, use_grid_object_ids, task_embedding_approach, max_transformation_depth, transform=transform)
 
         if data_config.use_gen_test_set:
-            self.gen_test_set = BEFOREARCDataset(gen_test_set_path, self.image_size, use_visual_tokens, use_grid_object_ids, task_embedding_approach, max_transformation_depth, transform=transform)
+            self.gen_test_set = BEFOREARCDataset(gen_test_set_df, self.image_size, use_visual_tokens, use_grid_object_ids, task_embedding_approach, max_transformation_depth, transform=transform)
 
             if data_config.validate_in_and_out_domain:
-                self.gen_val_set = BEFOREARCDataset(gen_val_set_path, self.image_size, use_visual_tokens, use_grid_object_ids, task_embedding_approach, max_transformation_depth, transform=transform)
+                self.gen_val_set = BEFOREARCDataset(gen_val_set_df, self.image_size, use_visual_tokens, use_grid_object_ids, task_embedding_approach, max_transformation_depth, transform=transform)
 
     def _transforms(self):
         return None
