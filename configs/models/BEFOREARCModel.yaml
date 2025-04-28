@@ -4,16 +4,16 @@ model:
   pretrained: null
   patch_size: 1
   visual_tokens:
-    enabled: true
-  use_ohe_repr: true # if True, use OHE for the possible tokens thus yielding as many artificial channels as there are different possible tokens; if False, use a simple sequence of tokens with an artificial channel only created to use convolution for linear projection of patches/pixels/tokens
+    enabled: false
+  use_ohe_repr: false # if True, use OHE for the possible tokens thus yielding as many artificial channels as there are different possible tokens; if False, use a simple sequence of tokens with an artificial channel only created to use convolution for linear projection of patches/pixels/tokens
   ape:
-    enabled: true
+    enabled: false
     ape_type: '2dsincos'  # choices: 'learn', '2dsincos'; absolute positional encoding
     mixer: 'weighted_sum'  # choices: 'default', 'weighted_sum', ...; how to mix the input embeddings and the positional embeddings
   ope:
-    enabled: true
+    enabled: false
   rpe:
-    enabled: true
+    enabled: false
     rpe_type: 'rope'  # choices: 'rope', 'Two-slope-Alibi', 'Four-diag-slope-Alibi'; relative positional encoding
   use_cls_token: false # whether to use a cls token or not
   num_reg_tokens: 0 # number of register tokens to prepend to the input sequence
