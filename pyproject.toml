@@ -27,6 +27,7 @@ dependencies = [
     "seaborn>=0.13.2",
     "rotary-embedding-torch>=0.8.6",
     "x-transformers>=2.2.8",
+    "datasets>=3.5.1",
 ]
 
 [tool.uv.sources]
