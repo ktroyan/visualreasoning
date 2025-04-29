@@ -3,6 +3,7 @@
 declare -a configs=(
   "base.data_env=BEFOREARC model.task_embedding.enabled=false"
   "base.data_env=BEFOREARC model.task_embedding.enabled=true"
+  "base.data_env=BEFOREARC model.task_embedding.enabled=true backbone_network.diffusion.sage_thinking=true"
   #"base.data_env=REARC backbone_network.diffusion.steps=32"
   #"base.data_env=REARC backbone_network.diffusion.steps=32 backbone_network.diffusion.sage_thinking=true"
 )

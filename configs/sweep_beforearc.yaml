@@ -27,7 +27,7 @@ parameters:
         # values: ['exp_setting_1'] # sample-efficiency
         # values: ['exp_setting_1', 'exp_setting_2', 'exp_setting_3', 'exp_setting_5']  # compositionality
         # values: ['exp_setting_1', 'exp_setting_2']  # sys-gen
-      values: ['exp_setting_1']
+      values: ['exp_setting_3']
       name:
         # values: ['experiment_1', experiment_2', 'experiment_3', 'experiment_4', 'experiment_5', 'experiment_6', 'experiment_7', 'experiment_8', 'experiment_9', 'experiment_10', 'experiment_11', 'experiment_12', 'experiment_13', 'experiment_14', 'experiment_15', 'experiment_16']  # sample-efficiency
         # values: []  # compositionality; the number of experiments per setting is not the same across settings
