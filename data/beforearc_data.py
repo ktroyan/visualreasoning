@@ -433,7 +433,6 @@ class BEFOREARCDataModule(DataModuleBase):
         # Dataset path (using HuggingFace datasets)
         dataset_path = f"{study}/{setting}/{exp_name}"
         
-        # TODO: When Yassine is done fixing the HF datasets naming, uncomment the lines commented below and delete the extra lines using the test set
         train_set_parquet = load_dataset("taratataw/before-arc", data_files={"data": f"{dataset_path}/train.parquet"})
         val_set_parquet = load_dataset("taratataw/before-arc", data_files={"data": f"{dataset_path}/val.parquet"})
         test_set_parquet = load_dataset("taratataw/before-arc", data_files={"data": f"{dataset_path}/test.parquet"})
