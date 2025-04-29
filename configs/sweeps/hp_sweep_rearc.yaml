@@ -1,0 +1,71 @@
+# NOTE: The parameters structure should follow that of the nested keys used in the config files in /configs by using "parameters" to create imbrication
+
+# Program to run
+program: experiment.py
+
+# Method to use for HPs optimization: random, grid, bayes
+method: grid
+
+# Project of the sweep
+# project: 'VisReas-project'
+# entity: 'klim-t'
+
+# Metric to optimize
+metric:
+  goal: minimize
+  name: metrics/val_loss_epoch  # TODO: see why metrics/val_loss does not exist in the Sweep section on WandB
+
+##### Hyperparameters sweep #####
+# parameters:
+  # model:
+  #   parameters:
+  #     training_hparams:
+  #       parameters:
+  #         optimizer:
+  #           values: ['AdamW', 'SGD']
+  #         scheduler:
+  #           parameters:
+  #             type:
+  #               values: ['CosineAnnealingLR', 'ReduceLROnPlateau', 'StepLR']
+  #         lr_warmup:
+  #           parameters:
+  #             enabled:
+  #               values: [true, false]
+  #             num_steps:
+  #               values: [100.0]
+  #         lr:
+  #           values: [0.0001, 0.0005, 0.001]
+  #         wd:
+  #           values: [0.001]
+  #     backbone:
+  #       values: ['transformer', 'vit', 'resnet']
+  #     head:
+  #       values: ['transformer', 'mlp']
+  #     use_ohe_repr:
+  #       values: [true]
+  #     ape:
+  #       parameters:
+  #         enabled:
+  #           values: [true, false]
+  #         ape_type:
+  #           values: ['learn', '2dsincos']  # absolute positional encoding
+  #     num_reg_tokens:
+  #       values: [0, 4, 8]
+  # backbone_network:
+  #   parameters:
+  #     embed_dim:
+  #       values: [128, 256]
+  #     num_heads:
+  #       values: [4]
+  #     num_layers:
+  #       values: [4, 12]
+  # data:
+  #   parameters:
+  #     train_batch_size:
+  #       values: [64, 128]
+
+# early_terminate:
+#   type: hyperband
+#   s: 2
+#   eta: 3
+#   max_iter: 10
