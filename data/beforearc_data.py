@@ -435,8 +435,7 @@ class BEFOREARCDataModule(DataModuleBase):
         
         # TODO: When Yassine is done fixing the HF datasets naming, uncomment the lines commented below and delete the extra lines using the test set
         train_set_parquet = load_dataset("taratataw/before-arc", data_files={"data": f"{dataset_path}/train.parquet"})
-        # val_set_parquet = load_dataset("taratataw/before-arc", data_files={"data": f"{dataset_path}/val.parquet"})
-        val_set_parquet = load_dataset("taratataw/before-arc", data_files={"data": f"{dataset_path}/test.parquet"})
+        val_set_parquet = load_dataset("taratataw/before-arc", data_files={"data": f"{dataset_path}/val.parquet"})
         test_set_parquet = load_dataset("taratataw/before-arc", data_files={"data": f"{dataset_path}/test.parquet"})
 
         # Convert parquet to pandas dataframe
@@ -447,14 +446,12 @@ class BEFOREARCDataModule(DataModuleBase):
         dataset_splits = [train_set_df, val_set_df, test_set_df]
 
         if data_config.use_gen_test_set:
-            # gen_test_set_parquet = load_dataset("taratataw/before-arc", data_files={"data": f"{dataset_path}/test_ood.parquet"})
-            gen_test_set_parquet = load_dataset("taratataw/before-arc", data_files={"data": f"{dataset_path}/test.parquet"})
+            gen_test_set_parquet = load_dataset("taratataw/before-arc", data_files={"data": f"{dataset_path}/test_ood.parquet"})
             gen_test_set_df = gen_test_set_parquet['data'].to_pandas()
             dataset_splits.append(gen_test_set_df)
 
             if data_config.validate_in_and_out_domain:
-                # gen_val_set_parquet = load_dataset("taratataw/before-arc", data_files={"data": f"{dataset_path}/val_ood.parquet"})
-                gen_val_set_parquet = load_dataset("taratataw/before-arc", data_files={"data": f"{dataset_path}/test.parquet"})
+                gen_val_set_parquet = load_dataset("taratataw/before-arc", data_files={"data": f"{dataset_path}/val_ood.parquet"})
                 gen_val_set_df = gen_val_set_parquet['data'].to_pandas()
                 dataset_splits.append(gen_val_set_df)
 
