@@ -1,3 +1,4 @@
+import math
 import os
 import time
 from omegaconf import OmegaConf
@@ -114,25 +115,25 @@ def main() -> None:
     log_message += f"\nTotal experiment time: \n{exp_elapsed_time} seconds ~=\n{exp_elapsed_time/60} minutes ~=\n{exp_elapsed_time/(60*60)} hours"
     logger.info(log_message)
 
+    logger.warning(all_test_results.keys())
+    logger.warning(all_test_results['test_results'].keys())
+    logger.warning(all_test_results)
+
     # Save the results and config arguments that we are the most interested to check quickly when experimenting
     exp_results_dict = {
         'experiments_dir': config.experiment.experiments_dir,
         'exp_name': experiment_name_timestamped,
         'dataset_dir': config.data.dataset_dir,
         'exp_duration': exp_elapsed_time,
-        'exp_logger': config.experiment.exp_logger,
         'data_module': config.base.data_module,
         'model_module': config.base.model_module,
         'network_backbone': config.model.backbone,
         'network_head': config.model.head,
         'model_ckpt': config.training.model_ckpt_path,
-        'backbone_ckpt': config.training.backbone_ckpt_path,
-        'freeze_backbone': config.training.freeze_backbone,
         'max_epochs': config.training.max_epochs,
         'train_batch_size': config.data.train_batch_size,
         'val_batch_size': config.data.val_batch_size,
         'test_batch_size': config.data.test_batch_size,
-        'task_embedding': config.model.task_embedding,
         'lr': config.model.training_hparams.lr,
         'optimizer': config.model.training_hparams.optimizer,
         'scheduler_type': config.model.training_hparams.scheduler.type,
@@ -158,6 +159,34 @@ def main() -> None:
     write_header = not os.path.exists(csv_path)
     output_dict_df.to_csv(csv_path, sep=';', mode='a', index=False, header=write_header)
 
+def count_grid_combinations_for_sweep_jobs(sweep_config):
+    """
+    Count the number of combinations of the grid search for the sweep jobs.
+    This is used to determine how many jobs to run for the sweep if the num_sweeps parameter is set to -1 in the sweep config.
+    """
+    def extract_values(d):
+        """
+        Recursively extract all lists of 'values' from nested 'parameters' dicts because of OmegaConf style.
+        """
+        count_list = []
+        if isinstance(d, dict):
+            for key, value in d.items():
+                if key == 'values' and isinstance(value, list):
+                    count_list.append(len(value))
+                elif isinstance(value, dict):
+                    count_list.extend(extract_values(value))
+        return count_list
+
+    # Extract 'parameters' section
+    param_section = sweep_config.get('parameters', {})
+
+    # Get all counts/lengths of value lists
+    all_counts = extract_values(param_section)
+
+    # Compute total combinations as product of all value list lengths
+    total_combinations = math.prod(all_counts)
+
+    return total_combinations
 
 if __name__ == '__main__':
     logger.info(f"experiment.py process ID: {os.getpid()}")
@@ -173,21 +202,28 @@ if __name__ == '__main__':
         sweep_start_time = time.time()
         logger.info(f"*** Sweep started ***")
 
-        # Get the sweep yaml file for the data environment specified in the base config
-        sweep_yaml_file = f"./configs/sweep_{(config.base.data_env).lower()}.yaml"
-
         # Load the sweep config yaml file
-        with open(sweep_yaml_file, 'r') as f:
+        with open(config.wandb.sweep.config, 'r') as f:
             sweep_config = yaml.safe_load(f)
 
         # Setup WandB sweep
         sweep_id = wandb.sweep(sweep=sweep_config,
                                project=config.wandb.wandb_project_name)
 
+        # Get number of sweep jobs to run for this sweep
+        if config.wandb.sweep.num_sweeps == -1:
+            # If num_sweeps is -1, run all the possible jobs as per the grid search
+            num_sweeps = count_grid_combinations_for_sweep_jobs(sweep_config)
+        else:
+            # If num_sweeps is specified, run that many jobs
+            num_sweeps = config.wandb.sweep.num_sweeps
+        
+        logger.info(f"Number of sweep jobs to run: {num_sweeps}")
+
         # Start sweep job
         wandb.agent(sweep_id, 
                     function=main,
-                    count=config.wandb.sweep.num_sweeps)
+                    count=num_sweeps)
         
         # End sweep time
         sweep_elapsed_time = time.time() - sweep_start_time

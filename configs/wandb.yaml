@@ -1,7 +1,8 @@
 wandb:
   sweep:
     enabled: false
-    num_sweeps: 10
+    config: 'configs/sweeps/beforearc/comp_es1.yaml'  # runs a sweep for all the models and experiments specific in the file
+    num_sweeps: -1  # -1 for all runs possible in the sweep config given
   wandb_project_name: 'VisReas-project'
   wandb_entity_name: 'klim-t'     # this should be a WandB username or team name
   log_model: false

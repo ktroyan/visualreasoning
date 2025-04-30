@@ -26,7 +26,7 @@ class ResNet(nn.Module):
 
         self.original_num_out_features = resnet.fc.in_features   # get the original number of output features of the backbone
 
-        if self.base_config.data_env =='REARC':
+        if self.base_config.data_env in ['REARC', 'BEFOREARC']:
             patch_size = 1
             if self.model_config.use_ohe_repr:
                 self.num_channels = num_classes
@@ -55,7 +55,7 @@ class ResNet(nn.Module):
         self.projection_to_embed_dim = nn.Linear(self.original_num_out_features, self.network_config.embed_dim)
 
 
-    def forward(self, x):
+    def forward(self, x, *args, **kwargs):
         """
         NOTE:
         For REARC, we need to transform our input so that it has 3 channels as expected by the torchvision ResNet model.
@@ -65,7 +65,7 @@ class ResNet(nn.Module):
 
         B = x.shape[0]
 
-        if self.base_config.data_env == 'REARC':
+        if self.base_config.data_env in ['REARC', 'BEFOREARC']:
             # Prepare REARC input data to be used by a ResNet network
             if self.model_config.use_ohe_repr:
                 # One-hot encode the input to add an artificial channel dimension (of size equal to the number of classes) to the input

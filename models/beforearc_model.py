@@ -931,7 +931,12 @@ class BEFOREARCModel(VisReasModel):
     def forward_sample(self, x, y, task_embedding=None, example_in_context=None, x_grid_object_ids=None):
 
         # Encode the input sequence
-        x_encoded = self.encoder(x, task_embeddings=task_embedding, example_in_context=example_in_context, x_grid_object_ids=x_grid_object_ids)  # [B, seq_len, embed_dim]; NOTE: the extra tokens will have been truncated so the encoded sequence will also have a dim seq_len
+        if self.model_config.backbone in ["vit", "looped_vit", "llada"]:
+            x_encoded = self.encoder(x, task_embeddings=task_embedding, example_in_context=example_in_context, x_grid_object_ids=x_grid_object_ids)  # [B, seq_len, embed_dim]; NOTE: the extra tokens will have been truncated so the encoded sequence will also have a dim seq_len
+
+        elif self.model_config.backbone in ["resnet"]:
+            # TODO: How to handle the task embedding, etc. for ResNet?
+            x_encoded = self.encoder(x)
 
         # Decode the encoded input sequence
         if self.model_config.head in ["transformer", "xtransformer", "mytransformer"]:
