@@ -1,40 +1,63 @@
 #!/bin/bash
 
-# Define options
-data_env="BEFOREARC"
+# Choose which environments to run: options are "BEFOREARC", "REARC", or "BOTH"
+run_env="REARC"
+
+# Define common parameters
 task_embedding_options=("false" "true")
-sweep_types=("comp" "sysgen")
-experiment_ids=("es1" "es2" "es3" "es4" "es5")
-
-# Lowercase version of data_env for file paths
-data_env_lc=$(echo "$data_env" | tr '[:upper:]' '[:lower:]')
-
-# WANDB config
-wandb_project="VisReas-project-${data_env}-sweep"
 wandb_entity="sagerpascal"
 
-# Build configs dynamically
-configs=()
+# Submit jobs
+if [[ "$run_env" == "BEFOREARC" || "$run_env" == "BOTH" ]]; then
+  data_env="BEFOREARC"
+  data_env_lc=$(echo "$data_env" | tr '[:upper:]' '[:lower:]')
+  wandb_project="VisReas-project-${data_env}-sweep"
+  sweep_types=("comp" "sysgen")
+  experiment_settings=("es1" "es2" "es3" "es4" "es5")
 
-for task_embedding in "${task_embedding_options[@]}"; do
-  for sweep_type in "${sweep_types[@]}"; do
-    for exp_id in "${experiment_ids[@]}"; do
-      config="base.data_env=${data_env} \
+  for task_embedding in "${task_embedding_options[@]}"; do
+    for sweep_type in "${sweep_types[@]}"; do
+      for setting in "${experiment_settings[@]}"; do
+        config="base.data_env=${data_env} \
 model.task_embedding.enabled=${task_embedding} \
-wandb.sweep.config=configs/sweeps/${data_env_lc}/${sweep_type}_${exp_id}.yaml \
+wandb.sweep.config=configs/sweeps/${data_env_lc}/${sweep_type}_${setting}.yaml \
 wandb.wandb_project_name=${wandb_project} \
 wandb.wandb_entity_name=${wandb_entity}"
-      configs+=("$config")
+        echo "Submitting BEFOREARC: $config"
+        sbatch run_experiment.submit \
+          data.use_gen_test_set=true \
+          data.validate_in_and_out_domain=true \
+          wandb.sweep.enabled=true \
+          $config
+        sleep 61
+      done
     done
   done
-done
+fi
 
-# Submit jobs
-for config in "${configs[@]}"; do
-  sbatch run_experiment.submit \
-    data.use_gen_test_set=true \
-    data.validate_in_and_out_domain=true \
-    wandb.sweep.enabled=true \
-    $config
-  sleep 61 # optional: avoid timestamp collision
-done
+if [[ "$run_env" == "REARC" || "$run_env" == "BOTH" ]]; then
+  data_env="REARC"
+  data_env_lc=$(echo "$data_env" | tr '[:upper:]' '[:lower:]')
+  wandb_project="VisReas-project-${data_env}-sweep"
+  sweep_types=("se" "sysgen")
+  experiment_settings=("es1")
+
+  for task_embedding in "${task_embedding_options[@]}"; do
+    for sweep_type in "${sweep_types[@]}"; do
+      for setting in "${experiment_settings[@]}"; do
+        config="base.data_env=${data_env} \
+model.task_embedding.enabled=${task_embedding} \
+wandb.sweep.config=configs/sweeps/${data_env_lc}/${sweep_type}_${setting}.yaml \
+wandb.wandb_project_name=${wandb_project} \
+wandb.wandb_entity_name=${wandb_entity}"
+        echo "Submitting REARC: $config"
+        sbatch run_experiment.submit \
+          data.use_gen_test_set=true \
+          data.validate_in_and_out_domain=true \
+          wandb.sweep.enabled=true \
+          $config
+        sleep 61
+      done
+    done
+  done
+fi
