@@ -31,10 +31,10 @@ done
 
 # Submit jobs
 for config in "${configs[@]}"; do
-  echo sbatch run_experiment.submit \
+  sbatch run_experiment.submit \
     data.use_gen_test_set=true \
     data.validate_in_and_out_domain=true \
     wandb.sweep.enabled=true \
     $config
-  # sleep 61 # optional: avoid timestamp collision
+  sleep 61 # optional: avoid timestamp collision
 done
