@@ -433,15 +433,21 @@ def process_test_results(config, test_results, test_type="test", exp_logger=None
 
     for metric_key, r in test_results.items():
         logger.debug(f"Processing results for metric key: {metric_key}, and result with shape: {r.shape}")
-        k_result = r.reshape([len(tasks_considered), -1])
-        for i, task in enumerate(tasks_considered):
-            if 'task' not in task:
-                per_task[f'{metric_key}_task_{task}'] = k_result[i]
-                per_task_avg[f'{metric_key}_task_{task}'] = k_result[i].mean()
-                
-            else:
-                per_task[f'{metric_key}_{task}'] = k_result[i]
-                per_task_avg[f'{metric_key}_{task}'] = k_result[i].mean()
+
+        # TODO: Ugly hack as there is an error in this function
+        try:
+            k_result = r.reshape([len(tasks_considered), -1])
+            for i, task in enumerate(tasks_considered):
+                if 'task' not in task:
+                    per_task[f'{metric_key}_task_{task}'] = k_result[i]
+                    per_task_avg[f'{metric_key}_task_{task}'] = k_result[i].mean()
+
+                else:
+                    per_task[f'{metric_key}_{task}'] = k_result[i]
+                    per_task_avg[f'{metric_key}_{task}'] = k_result[i].mean()
+        except Exception as e:
+            logger.error(f"Error reshaping results for metric key '{metric_key}': {e}")
+            logger.debug(f"Original result shape: {r.shape}, tasks considered: {tasks_considered}")
     
     logger.info(f"Global average results:\n{global_avg}")
     
