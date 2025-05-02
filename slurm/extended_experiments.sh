@@ -45,14 +45,19 @@ if [[ "$run_env" == "REARC" || "$run_env" == "BOTH" ]]; then
   for task_embedding in "${task_embedding_options[@]}"; do
     for sweep_type in "${sweep_types[@]}"; do
       for setting in "${experiment_settings[@]}"; do
+        use_gen_test_set="true"
+        if [[ "$sweep_type" == "se" ]]; then
+          use_gen_test_set="false"
+        fi
+
         config="base.data_env=${data_env} \
 model.task_embedding.enabled=${task_embedding} \
 wandb.sweep.config=configs/sweeps/${data_env_lc}/${sweep_type}_${setting}.yaml \
 wandb.wandb_project_name=${wandb_project} \
 wandb.wandb_entity_name=${wandb_entity}"
-        echo "Submitting REARC: $config"
+        echo "Submitting REARC ($sweep_type): $config"
         sbatch run_experiment.submit \
-          data.use_gen_test_set=true \
+          data.use_gen_test_set=$use_gen_test_set \
           data.validate_in_and_out_domain=true \
           wandb.sweep.enabled=true \
           $config
