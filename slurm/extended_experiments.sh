@@ -60,6 +60,9 @@ wandb.wandb_entity_name=${wandb_entity}"
           data.use_gen_test_set=$use_gen_test_set \
           data.validate_in_and_out_domain=true \
           wandb.sweep.enabled=true \
+          data.train_batch_size=48 \
+          data.val_batch_size=48 \
+          data.test_batch_size=48 \
           $config
         sleep 61
       done
