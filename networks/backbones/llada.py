@@ -1151,7 +1151,7 @@ class LLaDAModel(nn.Module):
 
             self.ignored_tokens = [self.config.pad_token_id, self.config.nlgrid_token_id]
 
-        if base_config.data_env == "BEFOREARC":
+        elif base_config.data_env == "BEFOREARC":
             # TODO: This is pretty ugly and should probably be stored in the dataset config, not set here
             special_tokens = 1 #  MASK
             self.config.vocab_size = num_classes + special_tokens
@@ -1165,7 +1165,7 @@ class LLaDAModel(nn.Module):
             self.ignored_tokens = [self.config.pad_token_id, self.config.nlgrid_token_id]
 
         else:
-            raise NotImplementedError("Only REARC dataset is supported for now")
+            raise NotImplementedError("Only REARC and BEFOREARC dataset is supported for now")
 
 
         config = self.config
