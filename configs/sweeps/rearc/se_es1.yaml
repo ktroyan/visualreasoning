@@ -20,7 +20,7 @@ parameters:
   model:
     parameters:
       backbone:
-        values: ['vit', 'resnet']
+        values: ['llada']
       head:
         values: ['mlp']
 
