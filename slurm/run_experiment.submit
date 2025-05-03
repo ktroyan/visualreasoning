@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --time=1440
+#SBATCH --time=2880
 #SBATCH --job-name=vr_experiment
 #SBATCH --ntasks=1
 #SBATCH --nodes=1

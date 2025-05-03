@@ -46,8 +46,10 @@ if [[ "$run_env" == "REARC" || "$run_env" == "BOTH" ]]; then
     for sweep_type in "${sweep_types[@]}"; do
       for setting in "${experiment_settings[@]}"; do
         use_gen_test_set="true"
+        validate_in_and_out_domain="true"
         if [[ "$sweep_type" == "se" ]]; then
           use_gen_test_set="false"
+          validate_in_and_out_domain="false"
         fi
 
         config="base.data_env=${data_env} \
@@ -58,11 +60,11 @@ wandb.wandb_entity_name=${wandb_entity}"
         echo "Submitting REARC ($sweep_type): $config"
         sbatch run_experiment.submit \
           data.use_gen_test_set=$use_gen_test_set \
-          data.validate_in_and_out_domain=true \
+          data.validate_in_and_out_domain=$validate_in_and_out_domain \
           wandb.sweep.enabled=true \
-          data.train_batch_size=48 \
-          data.val_batch_size=48 \
-          data.test_batch_size=48 \
+          data.train_batch_size=32 \
+          data.val_batch_size=32 \
+          data.test_batch_size=32 \
           $config
         sleep 61
       done
