@@ -4,13 +4,13 @@
 run_env="BOTH"
 
 # Define common parameters
-wandb_entity="sagerpascal"
+wandb_entity="VisReas-ETHZ"
 
 # Submit jobs
 if [[ "$run_env" == "BEFOREARC" || "$run_env" == "BOTH" ]]; then
   data_env="BEFOREARC"
   data_env_lc=$(echo "$data_env" | tr '[:upper:]' '[:lower:]')
-  wandb_project="VisReas-project-${data_env}-sweep"
+  wandb_project="VisReas-project-${data_env}-llada"
   sweep_types=("comp" "sysgen")
   experiment_settings=("es1" "es2" "es3" "es4" "es5")
 
@@ -51,7 +51,7 @@ fi
 if [[ "$run_env" == "REARC" || "$run_env" == "BOTH" ]]; then
   data_env="REARC"
   data_env_lc=$(echo "$data_env" | tr '[:upper:]' '[:lower:]')
-  wandb_project="VisReas-project-${data_env}-sweep"
+  wandb_project="VisReas-project-${data_env}-llada"
   sweep_types=("se" "sysgen")
   experiment_settings=("es1")
 
