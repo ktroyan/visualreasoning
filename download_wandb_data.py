@@ -5,6 +5,7 @@ import wandb
 import warnings
 import json
 import ast
+import numpy as np
 
 warnings.filterwarnings("ignore")
 
@@ -34,13 +35,23 @@ def download_data(entity: str, project: str) -> pd.DataFrame:
 
             # Load required config
             config = json.loads(run.json_config)
+            run_infos['data_env'] = config["base"]["value"]["data_env"]
             run_infos['study'] = config["experiment"]["value"]["study"]
             run_infos['name'] = config["experiment"]["value"]["name"]
             run_infos['setting'] = config["experiment"]["value"]["setting"]
-            run_infos['backbone'] = ast.literal_eval(config["backbone_network_config"]["value"])["name"]
-            run_infos['head'] = ast.literal_eval(config["head_network_config"]["value"])["name"]
-            run_infos['use_task_embeddings'] = ast.literal_eval(config['model_config']['value'])['task_embedding'][
-                'enabled']
+
+            if "backbone_network_config" in config:
+                run_infos['backbone'] = ast.literal_eval(config["backbone_network_config"]["value"])["name"]
+            else:
+                run_infos['backbone'] = config["model"]["value"]["backbone"]
+
+            if "backbone_network_config" in config:
+                run_infos['head'] = ast.literal_eval(config["head_network_config"]["value"])["name"]
+            else:
+                run_infos['head'] = config["model"]["value"]["head"]
+
+            # TODO: "use_task_embeddings" will not be needed anymore in the future
+            run_infos['use_task_embeddings'] = ast.literal_eval(config['model_config']['value'])['task_embedding']['enabled']
 
             # Get required results
             summary = run.summary._json_dict
@@ -107,84 +118,164 @@ def create_latex_tables(run_data_df: pd.DataFrame) -> None:
     ]
 
     models = [
-        {'name': 'LlADA + MLP w/o TE',
+        {'name': 'LlADA',
          'conditions': {
              'backbone': 'llada',
              'head': 'mlp',
              'use_task_embeddings': False,
          },
          },
-        {'name': 'LlADA + MLP w/ TE',
+        {'name': 'LlADA TE',
          'conditions': {
              'backbone': 'llada',
              'head': 'mlp',
              'use_task_embeddings': True,
          },
          },
+        {'name': 'Looped ViT',
+         'conditions': {
+             'backbone': 'looped_vit',
+             'head': 'mlp',
+             'use_task_embeddings': False,
+         },
+         },
+        {'name': 'Looped ViT TE',
+         'conditions': {
+             'backbone': 'looped_vit',
+             'head': 'mlp',
+             'use_task_embeddings': True,
+         },
+         },
+        {'name': 'ResNet',
+         'conditions': {
+             'backbone': 'resnet',
+             'head': 'mlp',
+             'use_task_embeddings': False,
+         },
+         },
+        {'name': 'ResNet TE',
+         'conditions': {
+             'backbone': 'resnet',
+             'head': 'mlp',
+             'use_task_embeddings': True,
+         },
+         },
+        # {'name': 'Transformer',
+        #  'conditions': {
+        #      'backbone': 'transformer',
+        #      'head': 'mlp',
+        #      'use_task_embeddings': False,
+        #  },
+        #  },
+        # {'name': 'Transformer TE',
+        #  'conditions': {
+        #      'backbone': 'transformer',
+        #      'head': 'mlp',
+        #      'use_task_embeddings': True,
+        #  },
+        #  },
+        # {'name': 'ViT',
+        #  'conditions': {
+        #      'backbone': 'vit',
+        #      'head': 'mlp',
+        #      'use_task_embeddings': False,
+        #  },
+        #  },
+        # {'name': 'ViT TE',
+        #  'conditions': {
+        #      'backbone': 'vit',
+        #      'head': 'mlp',
+        #      'use_task_embeddings': True,
+        #  },
+        #  },
+        # {'name': 'ViT Timm',
+        #  'conditions': {
+        #      'backbone': 'vit_timm',
+        #      'head': 'mlp',
+        #      'use_task_embeddings': False,
+        #  },
+        #  },
+        # {'name': 'ViT Timm TE',
+        #  'conditions': {
+        #      'backbone': 'vit_timm',
+        #      'head': 'mlp',
+        #      'use_task_embeddings': True,
+        #  },
+        #  },
     ]
 
-    for study in run_data_df['study'].unique():
-        for metric in metrics:
-            table = []
-            table.append(r"\begin{table}[ht]")
-            table.append(r"\centering")
-            table.append(f"\\caption{{{metric['col']} for Study: {study}}}")
-            table.append(r"\begin{tabular}{l" + "c" * len(models) + "}")
-            table.append(r"\toprule")
-            header = ["Experiment"] + [model["name"] for model in models]
-            table.append(" & ".join(header) + r" \\")
-            table.append(r"\midrule")
-
-            settings = run_data_df[run_data_df['study'] == study]['setting'].unique()
-            for setting in sorted(settings):
-                table.append(f"{setting.replace('exp_setting_', 'Exp. Setting ')}")
-                table.append(r"\midrule")
-                setting_rows = []
-
-                experiments = run_data_df[(run_data_df['study'] == study) & (run_data_df['setting'] == setting)]['name'].unique()
-                for experiment in sorted(experiments):
-                    row = [experiment]
-                    for model in models:
-                        cond = model['conditions']
-                        mask = (
-                                (run_data_df['study'] == study) &
-                                (run_data_df['setting'] == setting) &
-                                (run_data_df['name'] == experiment) &
-                                (run_data_df['backbone'] == cond['backbone']) &
-                                (run_data_df['head'] == cond['head']) &
-                                (run_data_df['use_task_embeddings'] == cond['use_task_embeddings'])
-                        )
-                        value = run_data_df.loc[mask, metric['key']]
-                        if len(value.values) > 1:
-                            warnings.warn(f"Multiple values found for {metric['key']} with {study}, {setting}, {experiment}, {model['name']}")
-                            warnings.warn(f"Found these values {str(value.values)}")
-                        if not value.empty:
-                            row.append(f"{value.values[0]:.2f}")
-                        else:
-                            row.append("N/A")
-                    setting_rows.append(" & ".join(row) + r" \\")
-                table.extend(setting_rows)
+    for data_env in run_data_df['data_env'].unique():
+        data_df = run_data_df[run_data_df['data_env'] == data_env]
+        for study in data_df['study'].unique():
+            for metric in metrics:
+                table = []
+                table.append(r"\begin{table}[ht]")
+                table.append(r"\centering")
+                table.append(f"\\caption{{{data_env}: {metric['col']} for Study: {study}}}")
+                table.append(r"\begin{tabular}{l" + "|c" * len(models) + "}")
+                table.append(r"\toprule")
+                header = ["Experiment"] + [model["name"] for model in models]
+                header = [f"\\textbf{{{h}}}" for h in header]
+                table.append(" & ".join(header) + r" \\")
                 table.append(r"\midrule")
 
-            table.append(r"\bottomrule")
-            table.append(r"\end{tabular}")
-            table.append(r"\end{table}")
-            table.append("\n")
+                data_df2 = data_df[data_df['study'] == study]
+                settings = data_df2['setting'].unique()
+                for setting in sorted(settings):
+                    table.append(f"\\multicolumn{{{len(models)+1}}}{{c}}{{\\textbf{{\\emph{{{setting.replace('exp_setting_', 'Exp. Setting ')}}}}}}} \\\\")
+                    table.append(r"\midrule")
+                    setting_rows = []
 
-            # Output the LaTeX table (e.g., print or save to file)
-            print("\n".join(table))
+                    data_df3 = data_df2[data_df2['setting'] == setting]
+                    experiments = data_df3['name'].unique()
+                    for experiment in sorted(experiments):
+                        row = [experiment.replace('experiment_', 'Exp. ')]
+                        for model in models:
+                            cond = model['conditions']
+                            base_conditions = (
+                                    (data_df3['study'] == study) &
+                                    (data_df3['setting'] == setting) &
+                                    (data_df3['name'] == experiment)
+                            )
+
+                            # Build additional conditions from `cond` keys
+                            additional_conditions = [data_df3[key] == value for key, value in cond.items()]
+                            mask = base_conditions & np.logical_and.reduce(additional_conditions)
+                            value = data_df3.loc[mask, metric['key']]
+                            if len(value.values) > 1:
+                                warnings.warn(f"Multiple values found for {metric['key']} with {study}, {setting}, {experiment}, {model['name']}")
+                                warnings.warn(f"Found these values {str(value.values)}")
+                            if not value.empty:
+                                row.append(f"{value.values[0]:.2f}")
+                            else:
+                                row.append("N/A")
+                        setting_rows.append(" & ".join(row) + r" \\")
+                    table.extend(setting_rows)
+                    table.append(r"\midrule")
+
+                table.append(r"\bottomrule")
+                table.append(r"\end{tabular}")
+                table.append(r"\end{table}")
+                table.append("\n")
+
+                # Output the LaTeX table (e.g., print or save to file)
+                print("\n".join(table))
 
 
 def main():
-    data_beforearc_df = download_data(entity="sagerpascal", project="VisReas-project-BEFOREARC-sweep")
-    data_beforearc_df['dataset'] = ["BEFOREARC"] * len(data_beforearc_df)
-    # pretty_print_run_data(run_data_df)
+    data_beforearc_sage_df = download_data(entity="sagerpascal", project="VisReas-project-BEFOREARC-sweep")
+    # pretty_print_run_data(data_beforearc_sage_df)
 
-    data_rearc_df = download_data(entity="sagerpascal", project="VisReas-project-REARC-sweep")
-    data_rearc_df['dataset'] = ["REARC"] * len(data_rearc_df)
-    # pretty_print_run_data(run_data_df)
+    data_rearc_sage_df = download_data(entity="sagerpascal", project="VisReas-project-REARC-sweep")
+    # pretty_print_run_data(data_rearc_sage_df)
 
-    data_df = pd.concat([data_beforearc_df, data_rearc_df])
+    # data_klim_df = download_data(entity="klim-t", project="VisReas-project")
+    # pretty_print_run_data(data_klim_df)
+
+    # data_eth_df = download_data(entity="VisReas-ETHZ", project="VisReas-project")
+    # pretty_print_run_data(data_eth_df)
+
+    data_df = pd.concat([data_beforearc_sage_df, data_rearc_sage_df])
     create_latex_tables(data_df)
 
 
