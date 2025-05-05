@@ -34,11 +34,12 @@ def check_train_test_contamination(train_dataloader, test_dataloader):
         x_hashes = set()
         y_hashes = set()
 
+        x_samples = {}
+        y_samples = {}
+
         for i, tuple_of_batches in enumerate(dataloader):  # for each tuple of batches in the dataloader
             x_batch = tuple_of_batches[0]
             y_batch = tuple_of_batches[1]
-            # task_id_batch = tuple_of_batches[2]
-            # y_true_size_batch = tuple_of_batches[3]
 
             for j in range(x_batch.shape[0]): # for each sample in the batch
                 x_sample = x_batch[j]
@@ -49,11 +50,14 @@ def check_train_test_contamination(train_dataloader, test_dataloader):
                 x_hashes.add(x_hash)
                 y_hashes.add(y_hash)
 
-        return x_hashes, y_hashes
+                x_samples[x_hash] = x_sample
+                y_samples[y_hash] = y_sample
+
+        return x_hashes, y_hashes, x_samples, y_samples
 
     # Get hashes for each dataset split
-    train_x_hashes, train_y_hashes = get_sample_hashes(train_dataloader)
-    test_x_hashes, test_y_hashes = get_sample_hashes(test_dataloader)
+    train_x_hashes, train_y_hashes, train_x_samples, train_y_samples = get_sample_hashes(train_dataloader)
+    test_x_hashes, test_y_hashes, test_x_samples, test_y_samples = get_sample_hashes(test_dataloader)
 
     # Print the number of unique hashes in each dataset split
     log_message += f"Number of unique x samples in train set: {len(train_x_hashes)}\n"
@@ -69,12 +73,33 @@ def check_train_test_contamination(train_dataloader, test_dataloader):
     log_message += f"Number of y overlapping samples: {len(y_overlap)}\n"
 
     if len(x_overlap) == 0:
-        log_message += "Success! No data contamination between train and test sets (it seems)."
+        log_message += "Success! No input data contamination between train and test sets (it seems)."
         logger.info(log_message)
+    
+    # TODO: Check for when x-y pair is the same as in some settings it is ok to have x train and x test the same as long as the y is different
+    
     else:
         log_message += f"Overlapping x samples: {x_overlap}\n"
         log_message += "Warning! Data contamination detected between train and test sets."
-        logger.warning(log_message)
+
+        for i, (x_hash, y_hash) in enumerate(zip(x_overlap, y_overlap)):
+            train_x_sample = train_x_samples[x_hash]
+            train_y_sample = train_y_samples[y_hash]
+
+            test_x_sample = test_x_samples[x_hash]
+            test_y_sample = test_y_samples[y_hash]
+
+            log_message = f"{i}-th sample contaminating train-test...\n"
+            log_message += f"Shape of the train x sample: {train_x_sample.shape}, train y sample: {train_y_sample.shape}\n"
+            log_message += f"Shape of the test x sample: {test_x_sample.shape}, test y sample: {test_y_sample.shape}\n"
+            log_message += f"Now plotting the contaminating samples with hash {x_hash} for x and {y_hash} for y.\n"
+            logger.warning(log_message)
+
+            plot_grid_image("./data_contamination", train_x_sample, f"train_x_sample_{x_hash}")
+            plot_grid_image("./data_contamination", train_y_sample, f"train_y_sample_{y_hash}")
+
+            plot_grid_image("./data_contamination", test_x_sample, f"test_x_sample_{x_hash}")
+            plot_grid_image("./data_contamination", test_y_sample, f"test_y_sample_{y_hash}")
 
 
 def one_hot_encode(x: torch.Tensor, num_token_categories: int) -> torch.Tensor:
@@ -640,7 +665,7 @@ def plot_image_predictions(save_folder_path: str,
 
     return fig_paths
 
-def plot_grid_image(figs_folder, grid_image):
+def plot_grid_image(figs_folder, grid_image, fig_name="grid_image"):
     """ 
     Plot a grid image from REARC.
     """
@@ -802,7 +827,65 @@ def plot_grid_image(figs_folder, grid_image):
     figs_folder = os.path.join(figs_folder, "figs")
     os.makedirs(figs_folder, exist_ok=True)
 
-    fig_path = f"{figs_folder}/grid_image.png"
+    fig_path = f"{figs_folder}/{fig_name}.png"
     fig.savefig(fig_path)
+
+    plt.close(fig)
+
+def observe_rearc_input_output_images(save_folder_path, dataloader, split, batch_id=0, n_samples=4):
+    """ 
+    Observe the input and output images of a batch from the dataloader.
+    """
+    
+    # Get the batch batch_id from the dataloader
+    for i, batch in enumerate(dataloader):
+        if i == batch_id:
+            break
+    
+    # Get the input and output images
+    inputs, outputs = batch[0], batch[1]
+
+    # Number of samples to observe
+    n_samples = min(n_samples, len(inputs))
+
+    logger.debug(f"Observing {n_samples} samples from {split} batch {batch_id}.")
+
+    # Handle padding tokens. Replace the symbols for pad tokens with the background color
+    pad_token = 10
+    inputs[inputs == pad_token] = 0
+    outputs[outputs == pad_token] = 0
+
+    # Use the same color map as REARC
+    cmap = ListedColormap([
+        '#000', '#0074D9', '#FF4136', '#2ECC40', '#FFDC00',
+        '#AAAAAA', '#F012BE', '#FF851B', '#7FDBFF', '#870C25'
+    ])
+    
+    vmin = 0
+    vmax = 9
+
+    # Create a figure to plot the samples
+    fig, axs = plt.subplots(2, n_samples, figsize=(n_samples * 3, 6), dpi=150)
+
+    for i in range(n_samples):
+        input_img = inputs[i].cpu().numpy()
+        target_img = outputs[i].cpu().numpy()
+
+        for ax, img, title in zip([axs[0, i], axs[1, i]], 
+                                  [input_img, target_img], 
+                                  [f"Input {i} of batch {batch_id}", f"Output {i} of batch {batch_id}"]
+                                  ):
+            sns.heatmap(img, ax=ax, cbar=False, linewidths=0.05, linecolor='gray', square=True, cmap=cmap, vmin=vmin, vmax=vmax)
+            ax.set_title(title, fontsize=8)
+            ax.set_xticks([])
+            ax.set_yticks([])
+
+    fig.suptitle(f"{split} batch {batch_id}", fontsize=18)
+
+    plt.tight_layout()
+    # plt.show()
+
+    # Save the figure
+    fig.savefig(f"{save_folder_path}/{split}_image_input_output_batch{batch_id}.png")
 
     plt.close(fig)
