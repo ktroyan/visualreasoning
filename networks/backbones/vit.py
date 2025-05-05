@@ -39,7 +39,6 @@ class PatchEmbed(nn.Module):
     def __init__(self, base_config, img_size, patch_size, in_channels, embed_dim, num_token_categories=None):
         super().__init__()
 
-        # TODO: See if it is correct to create patches (in the forward pass) without the extra tokens (so not considered when creating the artificial channels)
         
         self.base_config = base_config
         if self.base_config.data_env in ['REARC', 'BEFOREARC']:
@@ -93,7 +92,7 @@ class AbsolutePositionalEncoding(nn.Module):
     NOTE: Code for PEMixer adapted from the ViTARC repo. See their original class ViTARCEmbedding.
     """
 
-    def __init__(self, model_config, network_config, image_size, seq_len, patch_embed, embed_dim, num_prepended_extra_tokens, ape_type, mixer_strategy='default'):
+    def __init__(self, model_config, network_config, image_size, seq_len, patch_embed, embed_dim, num_prepended_extra_tokens, num_appended_extra_tokens, ape_type, mixer_strategy='default'):
         super().__init__()
 
         self.model_config = model_config
@@ -114,6 +113,7 @@ class AbsolutePositionalEncoding(nn.Module):
                                               patch_embed=patch_embed,
                                               embed_dim=embed_dim,
                                               num_prepended_extra_tokens=num_prepended_extra_tokens,
+                                              num_appended_extra_tokens=0,
                                               ape_type=ape_type
                                               )
 
@@ -136,7 +136,7 @@ class AbsolutePositionalEncoding(nn.Module):
         self.ape_drop = nn.Dropout(p=self.network_config.ape_dropout_rate)
 
 
-    def create_ape(self, image_size, seq_len, patch_embed, embed_dim, num_prepended_extra_tokens, ape_type) -> nn.Parameter:
+    def create_ape(self, image_size, seq_len, patch_embed, embed_dim, num_prepended_extra_tokens, num_appended_extra_tokens, ape_type) -> nn.Parameter:
         """ 
         Create and return the desired APE (absolute positional embedding).
         The APE will be added to the input embeddings of the backbone/encoder mode (e.g., ViT) during the forward pass.
@@ -145,24 +145,27 @@ class AbsolutePositionalEncoding(nn.Module):
             However, the extra tokens (e.g., [cls] and register tokens) are not considered for the PE.
             The PE should still be of the correct size since it is added to the whole input embeddings which include the extra tokens.
 
-        TODO:
-        Check if 2D sin-cos APE is correctly implemented.
         """
         
-        num_pos_embeds = seq_len + num_prepended_extra_tokens
+        num_pos_embeds = seq_len + num_prepended_extra_tokens + num_appended_extra_tokens
 
-        if ape_type == 'learn':    # learned APE
+        if ape_type == 'learn': # learned APE
 
-            pos_embed_learned = nn.Parameter(torch.randn(1, seq_len, embed_dim))  # [1, seq_len, embed_dim]; by default requires_grad=True
+            # Create the learnable PE
+            pos_embed = nn.Parameter(torch.randn(1, seq_len, embed_dim))  # [1, seq_len, embed_dim]; by default requires_grad=True
 
+            # Handle prepended extra tokens (e.g., cls, register tokens)
             if num_prepended_extra_tokens > 0:
                 # Set the PE for the extra tokens to zero (i.e., no PE for the extra tokens since PE is added to the input embeddings and the PE is not learned)
-                pos_embed_extra_tokens = torch.zeros(1, num_prepended_extra_tokens, embed_dim, dtype=torch.float32, requires_grad=False)     # define the PE for the [cls] and register tokens to be concatenated at the beginning of the PE for the patches
-                pos_embed = torch.cat([pos_embed_extra_tokens, pos_embed_learned], dim=1)   # [1, num_pos_embeds, embed_dim]
+                prepended_pe = torch.zeros(1, num_prepended_extra_tokens, embed_dim, dtype=torch.float32, requires_grad=False)
+                pos_embed = torch.cat([prepended_pe, pos_embed], dim=1)   # [1, num_pos_embeds, embed_dim]
             
-            else:
-                pos_embed = pos_embed_learned
-
+            # Handle appended extra tokens (e.g., task tokens, in-context example)
+            if num_appended_extra_tokens > 0:
+                # Set the PE for the extra tokens to zero (i.e., no PE for the extra tokens since PE is added to the input embeddings and the PE is not learned)
+                appended_pe = torch.zeros(1, num_appended_extra_tokens, embed_dim, dtype=torch.float32, requires_grad=False)
+                pos_embed = torch.cat([pos_embed, appended_pe], dim=1)
+            
         elif ape_type == '2dsincos':    # fixed 2D sin-cos APE 
 
             # PE dimension per axis and sin/cos
@@ -193,25 +196,28 @@ class AbsolutePositionalEncoding(nn.Module):
             
             pos_embed = pos_embed.unsqueeze(0)  # [1, seq_len, embed_dim]; create a batch dimension so that it can be used for batched samples
 
-            # Handle extra tokens (e.g., cls, register tokens)
+            # Handle prepended extra tokens (e.g., cls, register tokens)
             if num_prepended_extra_tokens > 0:
-                extra_pe = torch.zeros([1, num_prepended_extra_tokens, embed_dim], dtype=torch.float32)
-                pos_embed = nn.Parameter(torch.cat([extra_pe, pos_embed], dim=1))  # [1, seq_len+num_prepended_extra_tokens, embed_dim]; concatenate along sequence dimension
-            else:
-                pos_embed = nn.Parameter(pos_embed) # [1, seq_len, embed_dim]
+                prepended_pe = torch.zeros([1, num_prepended_extra_tokens, embed_dim], dtype=torch.float32)
+                pos_embed = torch.cat([prepended_pe, pos_embed], dim=1)   # concatenate along sequence dimension
 
-            # Ensure PE is fixed/non-learnable
-            pos_embed.requires_grad = False
+            # Handle appended extra tokens (e.g., task tokens, in-context example)
+            if num_appended_extra_tokens > 0:
+                appended_pe = torch.zeros([1, num_appended_extra_tokens, embed_dim], dtype=torch.float32)
+                pos_embed = torch.cat([pos_embed, appended_pe], dim=1)    # concatenate along sequence dimension
+
+            # Create the PE as a (non-learnable) parameter
+            pos_embed = nn.Parameter(pos_embed, requires_grad=False) # [1, num_pos_embeds, embed_dim]; ensure PE is fixed/non-learnable
             
         else:
             raise ValueError(f"Invalid positional encoding type: {ape_type}. Choose from ['learn', '2dsincos']")
 
         # Visualize PE
-        plot_absolute_positional_embeddings(pos_embed, num_prefix_tokens=num_prepended_extra_tokens, viz_as_heatmap=False)
+        plot_absolute_positional_embeddings(pos_embed, num_prepended_tokens=num_prepended_extra_tokens, num_appended_tokens=num_appended_extra_tokens, viz_as_heatmap=False)
 
-        return pos_embed    # [1, seq_len(+num_prepended_extra_tokens), embed_dim]
+        return pos_embed    # [1, num_pos_embeds, embed_dim]
 
-    def create_ape_with_ope(self, image_size, seq_len, patch_embed, embed_dim, num_prepended_extra_tokens, x_grid_object_ids) -> nn.Parameter:
+    def create_ape_with_ope(self, image_size, seq_len, patch_embed, embed_dim, num_prepended_extra_tokens, num_appended_extra_tokens, x_grid_object_ids) -> nn.Parameter:
         """
         Dynamic PE.
         Build 2D Sin-Cos Absolute Positional Embeddings (APE) + Object Positional Encoding (OPE).
@@ -224,11 +230,9 @@ class AbsolutePositionalEncoding(nn.Module):
         Note that this method computes an APE (with OPE considered) for each input sample in the batch since
         it is a dynamic APE computed (i.e., computed during each forward pass, and for each sample of a given batch).
 
-        TODO:
-        Check if how I attribute the dimensions is correct.
         """
 
-        num_pos_embeds = seq_len + num_prepended_extra_tokens
+        num_pos_embeds = seq_len + num_prepended_extra_tokens + num_appended_extra_tokens
 
         # Check if x_grid_object_ids is flattened in the spatial dimensions
         assert x_grid_object_ids.ndim == 2, "x_grid_object_ids should be a 2D tensor [B, seq_len]"
@@ -274,20 +278,23 @@ class AbsolutePositionalEncoding(nn.Module):
         # Combined PE: APE with OPE
         pos_embed = torch.cat([obj_pe, x_pe, y_pe], dim=-1)  # [B, seq_len, embed_dim]; NOTE: ViTARC prepends the OPE
 
-        # Handle extra tokens (e.g., cls, register tokens). 
-        # We simply increase the number of positions in the PE, so we don't create a useful PE for the extra tokens
+        # Handle prepended extra tokens (e.g., cls, register tokens). 
         if num_prepended_extra_tokens > 0:
-            extra_pe = torch.zeros((B, num_prepended_extra_tokens, embed_dim), dtype=torch.float32, device=pos_embed.device)
-            pos_embed = torch.cat([extra_pe, pos_embed], dim=1)  # [B, num_prepended_extra_tokens + seq_len, embed_dim]
+            prepended_pe = torch.zeros((B, num_prepended_extra_tokens, embed_dim), dtype=torch.float32, device=pos_embed.device)
+            pos_embed = torch.cat([prepended_pe, pos_embed], dim=1)  # [B, num_prepended_extra_tokens + seq_len, embed_dim]
 
-        # Make sure the APE (with OPE) is fixed/non-learnable
-        pos_embed = nn.Parameter(pos_embed, requires_grad=False)  # [B, seq_len (+num_prepended_extra_tokens), embed_dim]; fixed/non-learnable
+        # Handle appended extra tokens (e.g., task tokens, in-context example)
+        if num_appended_extra_tokens > 0:
+            appended_pe = torch.zeros((B, num_appended_extra_tokens, embed_dim), dtype=torch.float32, device=pos_embed.device)
+            pos_embed = torch.cat([pos_embed, appended_pe], dim=1)
 
-        # Visualize PE
-        # NOTE: Should not uncomment this line if the goal is not to observe the PE, as this would plot for each batch during training
-        # plot_absolute_positional_embeddings(pos_embed, num_prefix_tokens=num_prepended_extra_tokens)
+        # Create the PE (APE with OPE) as a (non-learnable) parameter
+        pos_embed = nn.Parameter(pos_embed, requires_grad=False)  # [B, num_pos_embeds, embed_dim]; fixed/non-learnable
 
-        return pos_embed
+        # Visualize PE for a sample in the batch
+        # plot_absolute_positional_embeddings(pos_embed, num_prepended_tokens=num_prepended_extra_tokens, num_appended_tokens=num_appended_extra_tokens, viz_as_heatmap=False, sample_index_in_batch=0)
+
+        return pos_embed    # [1, num_pos_embeds, embed_dim]
 
 
     def forward(self, inputs_embeds, x_grid_object_ids):
@@ -298,6 +305,8 @@ class AbsolutePositionalEncoding(nn.Module):
 
         Returns:
             output_embeds (torch.Tensor): [batch_size, seq_len, embed_dim]
+
+        NOTE: Code for PEMixer adapted from the ViTARC repo.
         """
 
         # Get the APE
@@ -308,6 +317,7 @@ class AbsolutePositionalEncoding(nn.Module):
                                                        patch_embed=self.patch_embed,
                                                        embed_dim=self.embed_dim,
                                                        num_prepended_extra_tokens=self.num_prepended_extra_tokens,
+                                                       num_appended_extra_tokens=0,
                                                        x_grid_object_ids=x_grid_object_ids
                                                        )    # [batch_size, seq_len, embed_dim]; created for each sample in the batch
         else:
@@ -853,6 +863,7 @@ class VisionTransformer(nn.Module):
                                                   patch_embed=self.patch_embed,
                                                   embed_dim=self.embed_dim,
                                                   num_prepended_extra_tokens=self.num_prepended_extra_tokens,
+                                                  num_appended_extra_tokens=self.num_appended_extra_tokens,
                                                   ape_type=model_config.ape.ape_type,
                                                   mixer_strategy=model_config.ape.mixer
                                                   )
