@@ -208,6 +208,7 @@ if __name__ == '__main__':
 
         # Setup WandB sweep
         sweep_id = wandb.sweep(sweep=sweep_config,
+                               entity=config.wandb.wandb_entity_name,
                                project=config.wandb.wandb_project_name)
 
         # Get number of sweep jobs to run for this sweep
