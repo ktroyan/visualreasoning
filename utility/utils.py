@@ -77,6 +77,13 @@ def get_complete_config(sweep_config: Dict = None) -> Tuple[OmegaConf, Dict]:
             else:
                 return False
 
+        # This resolver is used to handle specific cases for the compositionality study
+        def resolve_if_then_else_compositionality(study_name, set_value):
+            if study_name == "compositionality":
+                return set_value
+            else:
+                return False
+
         # This resolver is used to use an OOD test set only when applicable
         def resolve_use_gen_test_set(study, data_env, bool_value):
             if study in ["sys-gen", "compositionality"] and data_env == "BEFOREARC":
@@ -112,6 +119,7 @@ def get_complete_config(sweep_config: Dict = None) -> Tuple[OmegaConf, Dict]:
         # Register the resolvers. Use replace=True to not try to register twice the resolver which would raise an error during WandB sweeps
         OmegaConf.register_new_resolver("resolve_if_then_else", resolve_if_then_else, replace=True)
         OmegaConf.register_new_resolver("resolve_if_then_else_sysgen", resolve_if_then_else_sysgen, replace=True)
+        OmegaConf.register_new_resolver("resolve_if_then_else_compositionality", resolve_if_then_else_compositionality, replace=True)
         OmegaConf.register_new_resolver("resolve_use_gen_test_set", resolve_use_gen_test_set, replace=True)
         OmegaConf.register_new_resolver("resolve_if_then_else_validate_in_and_out_domain", resolve_if_then_else_validate_in_and_out_domain, replace=True)
         OmegaConf.register_new_resolver("resolve_validate_in_and_out_domain", resolve_validate_in_and_out_domain, replace=True)

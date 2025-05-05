@@ -22,7 +22,7 @@ model:
     method: '' # choices: '' (for no pooling and returning a sequence), 'mean', 'max', 'token' (for aggregating features and returning the cls token)
   num_elementary_tasks: 5    # number of elementary transformations + 1 for identity as padding; used for the task embedding; NOTE: this should match the transformations in the data module
   task_embedding:
-    enabled: false
+    enabled: ${resolve_if_then_else_compositionality:${experiment.study}, true}  # if the study is compositionality, then whether the task embedding is used or not depends on the set value. Otherwise, it is not used.
     approach: ${resolve_if_then_else:${model.task_embedding.enabled}, task_tokens}  # choices: task_tokens, example_in_context
   training_hparams:
     optimizer: 'AdamW' # choices: Adam, AdamW, SGD

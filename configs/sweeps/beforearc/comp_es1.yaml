@@ -17,15 +17,15 @@ parameters:
       data_env:
         values: ['BEFOREARC']
 
-  model:
-    parameters:
-      backbone:
-        # values: ['resnet']
-        values: ['vit']
-        # values: ['looped_vit']
-        # values: ['diffusion_vit']
-      head:
-        values: ['mlp']
+  # model:
+  #   parameters:
+  #     backbone:
+  #       # values: ['resnet']
+  #       # values: ['vit']
+  #       # values: ['looped_vit']
+  #       # values: ['diffusion_vit']
+  #     head:
+  #       # values: ['mlp']
   
   experiment:
     parameters:
