@@ -87,12 +87,12 @@ class AbsolutePositionalEncoding(nn.Module):
         - 'weighted_sum_vec'
         - 'weighted_sum_no_norm_vec'
         - 'layer_norm'
-        - 'default' (simple addition of the APE to the input embeddings)
+        - 'sum' (simple addition of the APE to the input embeddings)
 
     NOTE: Code for PEMixer adapted from the ViTARC repo. See their original class ViTARCEmbedding.
     """
 
-    def __init__(self, model_config, network_config, image_size, seq_len, patch_embed, embed_dim, num_prepended_extra_tokens, num_appended_extra_tokens, ape_type, mixer_strategy='default'):
+    def __init__(self, model_config, network_config, image_size, seq_len, patch_embed, embed_dim, num_prepended_extra_tokens, num_appended_extra_tokens, ape_type, mixer_strategy='sum'):
         super().__init__()
 
         self.model_config = model_config
@@ -350,7 +350,7 @@ class AbsolutePositionalEncoding(nn.Module):
             combined_embeds = inputs_embeds + position_embeds
             output_embeds = self.layer_norm(combined_embeds)
 
-        elif strategy == 'default':
+        elif strategy == 'sum':
             output_embeds = inputs_embeds + position_embeds
 
         else:
@@ -414,7 +414,7 @@ class ViTARCMHSA(nn.Module):
     https://github.com/khalil-research/ViTARC/blob/effa665802946de83807143797247e81e8e7c4b3/vitarc/models/model.py#L195
 
     """
-    def __init__(self, model_config, image_size, embed_dim, num_heads, rpe_type, grid_2d_distance_matrix, qkv_bias=False, attn_drop=0., proj_drop=0., num_prepended_extra_tokens=0):
+    def __init__(self, model_config, image_size, embed_dim, num_heads, rpe_type, grid_2d_distance_matrix, qkv_bias=False, attn_drop=0., proj_drop=0., num_prepended_extra_tokens=0, num_appended_extra_tokens=0):
         super().__init__()
 
         self.model_config = model_config
@@ -438,28 +438,40 @@ class ViTARCMHSA(nn.Module):
         self.register_buffer("slopes_r", torch.Tensor(self.get_slopes(self.num_heads, start_exponent=0.5)) * -1)    # TODO: Why 0.5 and not 1 like the left slope?
 
         # Relative position
-        # Calculate relative positions for the 2D grid
+        # Calculate relative positions for the 2D grid. Assume square grid
         grid_height = self.image_size # VITARC wrote: 33
         grid_width = self.image_size # VITARC wrote: 34
+        num_grid_tokens = grid_height * grid_width
         
-        # TODO: Why + 10 ? Just an arbitrary large distance? Why not much more? when we observe the matrix during a run it also contains distance values such as 61 (which is greater than 44) ?
-        large_dist = self.image_size + 100 # VITARC wrote +10 and get 44
+        large_dist = self.image_size + 100  # define an arbitrary large distance for non-grid tokens
 
         ## Calculate matrix of x and y differences
-        total_length = grid_height * grid_width + num_prepended_extra_tokens
-        
+        total_length = grid_height * grid_width + num_prepended_extra_tokens + num_appended_extra_tokens
+
         distance_matrix = torch.full((total_length, total_length), fill_value=large_dist, dtype=torch.float)  # 100 as a large distance
 
         # Assign the 2D relative positions to the correct part of the matrix
-        distance_matrix[num_prepended_extra_tokens:total_length, num_prepended_extra_tokens:total_length] = grid_2d_distance_matrix
+        distance_matrix[num_prepended_extra_tokens:total_length-num_appended_extra_tokens, num_prepended_extra_tokens:total_length-num_appended_extra_tokens] = grid_2d_distance_matrix
 
-        # Handle extra tokens relative positions. Extra tokens are assumed to be far from everything
-        distance_matrix[num_prepended_extra_tokens, :] = large_dist
-        distance_matrix[:, num_prepended_extra_tokens] = large_dist
+        ## Assign the 2D relative distances to the correct slice
+        start_grid_tokens = num_prepended_extra_tokens
+        end_grid_tokens = start_grid_tokens + num_grid_tokens
+        distance_matrix[start_grid_tokens:end_grid_tokens, start_grid_tokens:end_grid_tokens] = grid_2d_distance_matrix
+
+        ## Handle extra tokens relative positions. Extra tokens are assumed to be far from everything
+        # Prepended tokens
+        if num_prepended_extra_tokens > 0:
+            distance_matrix[:start_grid_tokens, :] = large_dist
+            distance_matrix[:, :start_grid_tokens] = large_dist
+
+        # Appended tokens
+        if num_appended_extra_tokens > 0:
+            distance_matrix[end_grid_tokens:, :] = large_dist
+            distance_matrix[:, end_grid_tokens:] = large_dist
 
         self.register_buffer("distance_matrix", distance_matrix)   # [total_length, total_length]; distance matrix for the 2D grid with extra tokens
 
-        
+
     def get_slopes(self, n, start_exponent=1):
         """ ViTARC. Create the slopes for the relative position bias. """
         def get_geometric_slopes(n, start_exponent):
@@ -474,7 +486,6 @@ class ViTARCMHSA(nn.Module):
             closest_power_of_2 = 2 ** math.floor(math.log2(n))
             return (get_geometric_slopes(closest_power_of_2, start_exponent) +
                     self.get_slopes(2 * closest_power_of_2, start_exponent)[0::2][:n - closest_power_of_2])    
-
 
     def compute_bias(self, query_length, key_length, relative_position, device):
         """ ViTARC. Compute binned relative position bias. """
@@ -494,16 +505,24 @@ class ViTARCMHSA(nn.Module):
         values = torch.triu(alibi_right) + torch.tril(alibi_left)
 
         # Slice the relevant part of the bias before reshaping
-        values = values[:, :query_length, :key_length]  # Slicing the tensor before reshaping
-        values = values.view(1, self.num_heads, query_length, key_length)  # shape (1, num_heads, query_length, key_length)            
+        values = values[:, :query_length, :key_length]  # slicing the tensor before reshaping
+        values = values.view(1, self.num_heads, query_length, key_length)  # shape (1, num_heads, query_length, key_length)
 
         return values            
 
-    def forward(self, x):
+    def forward(self, x, num_appended_extra_tokens=0):
         
         ## As usual
         B, seq_len, embed_dim = x.shape
         device = x.device
+
+        # Handle extra tokens
+        if num_appended_extra_tokens > 0:
+            query_length = seq_len - num_appended_extra_tokens
+            key_length = seq_len - num_appended_extra_tokens
+        else:
+            query_length = seq_len
+            key_length = seq_len
         
         # Compute the Queries, Keys, Values from the input embeddings by a linear projection
         x_qkv = self.qkv_proj(x) # [B, seq_len, 3*embed_dim]
@@ -515,17 +534,40 @@ class ViTARCMHSA(nn.Module):
         # Get the Queries, Keys, Values for all heads
         x_q, x_k, x_v = x_qkv[0], x_qkv[1], x_qkv[2]    # ([B, num_heads, seq_len, head_embed_dim], [B, num_heads, seq_len, head_embed_dim], [B, num_heads, seq_len, head_embed_dim])
 
+        # TODO: See how to handle the extra tokens.
+        #       The issue is that the attention we compute and the bias we compute need to be of the same size,
+        #       which is the size of the full sequence. However, when we compute the bias we only compute it for the
+        #       original sequence, no? Also, why do we want to compute attention for the extra tokens anyway?
+        # Remove the extra tokens temporarily
+        # First store q,k extra tokens before removing them
+        prepended_extra_q = None
+        prepended_extra_k = None
+        appended_extra_q = None
+        appended_extra_k = None
+
+        if self.num_prepended_extra_tokens > 0:
+            prepended_extra_q = x_q[:, :, :self.num_prepended_extra_tokens, :]
+            prepended_extra_k = x_k[:, :, :self.num_prepended_extra_tokens, :]
+            x_q = x_q[:, :, self.num_prepended_extra_tokens:, :]
+            x_k = x_k[:, :, self.num_prepended_extra_tokens:, :]
+
+        if num_appended_extra_tokens > 0:
+            appended_extra_q = x_q[:, :, -num_appended_extra_tokens:, :]
+            appended_extra_k = x_k[:, :, -num_appended_extra_tokens:, :]
+            x_q = x_q[:, :, :-num_appended_extra_tokens, :]
+            x_k = x_k[:, :, :-num_appended_extra_tokens, :]
+
         # Compute the attention scores
         attn = (x_q @ x_k.transpose(-2, -1))    # [B, num_heads, seq_len, seq_len]; logits
         attn_scaled = attn * self.scale   # [B, num_heads, seq_len, seq_len]; scaled logits
 
         ## ViTARC. Compute relative bias and add it to the attention logits for RPE
         # TODO: Compute the RPE bias over all the sequence x, which possbily includes extra tokens
-        position_bias = self.compute_bias(seq_len, seq_len, relative_position=self.distance_matrix, device=device)  # [B, num_heads, seq_len, seq_len]
+        position_bias = self.compute_bias(query_length, key_length, relative_position=self.distance_matrix, device=device)  # [B, num_heads, seq_len, seq_len]
         
         # TODO:
         # See if correct to add the position bias to the unscaled logits and to never scale them?
-        # Alibi says we should scale but ViTARC code does not seem to do it?
+        # ViTARC paper says we should scale but their code does not seem to do it?
         attn += position_bias
 
         logits = attn   # [B, num_heads, seq_len, seq_len]
@@ -673,7 +715,7 @@ class FeedForward(nn.Module):
 
 class TransformerLayer(nn.Module):
     """ Transformer layer """
-    def __init__(self, model_config, image_size, embed_dim, num_heads, mlp_ratio=4., qkv_bias=False, attn_drop=0., attn_proj_drop=0., ff_drop=0., num_prepended_extra_tokens=0, rpe_type=None, grid_2d_distance_matrix=None):
+    def __init__(self, model_config, image_size, embed_dim, num_heads, mlp_ratio=4., qkv_bias=False, attn_drop=0., attn_proj_drop=0., ff_drop=0., num_prepended_extra_tokens=0, num_appended_extra_tokens=0, rpe_type=None, grid_2d_distance_matrix=None):
         super().__init__()
 
         self.first_norm = nn.LayerNorm(embed_dim)
@@ -702,6 +744,7 @@ class TransformerLayer(nn.Module):
                                    attn_drop=attn_drop,
                                    proj_drop=attn_proj_drop,
                                    num_prepended_extra_tokens=num_prepended_extra_tokens,
+                                   num_appended_extra_tokens=num_appended_extra_tokens
                                    )
 
         else:
@@ -725,6 +768,8 @@ class TransformerLayer(nn.Module):
     def forward(self, x, num_appended_extra_tokens=0):
         if self.rpe_type == 'rope':
             x = x + self.attn(self.first_norm(x), num_appended_extra_tokens)   # [B, seq_len, embed_dim]; this uses norm first and then attention
+        elif self.rpe_type in ["Four-diag-slope-Alibi", "Two-slope-Alibi"]:
+            x = x + self.attn(self.first_norm(x), num_appended_extra_tokens)
         else:
             x = x + self.attn(self.first_norm(x))   # [B, seq_len, embed_dim]; this uses norm first and then attention
 
@@ -895,6 +940,7 @@ class VisionTransformer(nn.Module):
                 attn_proj_drop=network_config.attn_proj_dropout_rate,
                 ff_drop=network_config.ff_dropout_rate,
                 num_prepended_extra_tokens=self.num_prepended_extra_tokens,
+                num_appended_extra_tokens=self.num_appended_extra_tokens,
                 rpe_type=rpe_type,
                 grid_2d_distance_matrix=grid_2d_distance_matrix
             )

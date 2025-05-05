@@ -9,7 +9,7 @@ model:
   ape:
     enabled: true
     ape_type: '2dsincos'  # choices: 'learn', '2dsincos'; absolute positional encoding
-    mixer: 'default'  # choices: 'default', 'weighted_sum', ...; how to mix the input embeddings and the positional embeddings
+    mixer: 'sum'  # choices: 'sum', 'weighted_sum', ...; how to mix the input embeddings and the positional embeddings
   ope:
     enabled: false
   rpe:
