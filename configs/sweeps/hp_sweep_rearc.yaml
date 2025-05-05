@@ -8,7 +8,7 @@ method: grid
 
 # Project of the sweep
 # project: 'VisReas-project'
-# entity: 'klim-t'
+# entity: 'klim-t'  # 'VisReas-ETHZ'
 
 # Metric to optimize
 metric:

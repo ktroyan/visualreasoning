@@ -20,7 +20,10 @@ parameters:
   model:
     parameters:
       backbone:
-        values: ['vit', 'resnet']
+        # values: ['resnet']
+        values: ['vit']
+        # values: ['looped_vit']
+        # values: ['diffusion_vit']
       head:
         values: ['mlp']
   

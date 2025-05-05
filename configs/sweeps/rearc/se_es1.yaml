@@ -20,7 +20,10 @@ parameters:
   model:
     parameters:
       backbone:
-        values: ['vit', 'resnet']
+        # values: ['resnet']
+        values: ['vit']
+        # values: ['looped_vit']
+        # values: ['diffusion_vit']
       head:
         values: ['mlp']
 
@@ -31,4 +34,4 @@ parameters:
       setting:
         values: ['exp_setting_1']
       name:
-        values: ['experiment_1', 'experiment_2', 'experiment_3', 'experiment_4', 'experiment_5', 'experiment_6', 'experiment_7', 'experiment_8', 'experiment_9', 'experiment_10', 'experiment_11', 'experiment_12', 'experiment_13', 'experiment_14', 'experiment_15', 'experiment_16', 'experiment_17', 'experiment_18', 'experiment_19', 'experiment_20', 'experiment_21', 'experiment_22', 'experiment_23', 'experiment_24', 'experiment_25', 'experiment_26', 'experiment_27', 'experiment_28', 'experiment_29', 'experiment_30']
+        values: ['experiment_1', 'experiment_2', 'experiment_3', 'experiment_4', 'experiment_5', 'experiment_6', 'experiment_7', 'experiment_8', 'experiment_9', 'experiment_10', 'experiment_11', 'experiment_12', 'experiment_13', 'experiment_14', 'experiment_15', 'experiment_16', 'experiment_17', 'experiment_18', 'experiment_19', 'experiment_20', 'experiment_21', 'experiment_22', 'experiment_23', 'experiment_24', 'experiment_25', 'experiment_26', 'experiment_27', 'experiment_28', 'experiment_29', 'experiment_30', 'experiment_31', 'experiment_32', 'experiment_33', 'experiment_34', 'experiment_35', 'experiment_36', 'experiment_37', 'experiment_38', 'experiment_39', 'experiment_40']

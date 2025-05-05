@@ -26,7 +26,7 @@ model:
   training_hparams:
     optimizer: 'AdamW' # choices: Adam, AdamW, SGD
     scheduler:
-      monitored_metric: 'val_loss' # choices: 'val_acc', 'val_loss'
+      monitored_metric: ${resolve_if_then_else_validate_in_and_out_domain:${data.validate_in_and_out_domain}, gen_val_loss, val_loss} # choices: 'gen_val_loss', 'gen_val_acc', 'val_acc', 'val_loss'
       type: 'CosineAnnealingLR' # choices: ReduceLROnPlateau, StepLR, CosineAnnealingLR
       interval: 'epoch' # choices: 'step', 'epoch'
       frequency: 1
