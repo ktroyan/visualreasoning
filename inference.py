@@ -1,5 +1,8 @@
 import os
+import pprint
 import time
+import numpy as np
+from omegaconf import OmegaConf
 import pandas as pd
 import torch
 import pytorch_lightning as pl
@@ -8,8 +11,8 @@ import pytorch_lightning as pl
 # Personal codebase dependencies
 import data
 import models
-from utility.utils import get_complete_config, log_config_dict, get_model_from_ckpt, observe_input_output_images, process_test_results
-from utility.rearc.utils import check_train_test_contamination as check_rearc_train_test_contamination
+from utility.utils import get_complete_config, log_config_dict, get_model_from_ckpt, process_test_results
+from utility.rearc.utils import observe_rearc_input_output_images, check_train_test_contamination as check_rearc_train_test_contamination
 from utility.logging import logger
 
 
@@ -17,6 +20,92 @@ torch.set_float32_matmul_precision('medium')    # 'high'
 torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.deterministic = True
 
+
+def get_paper_model_name(config):
+    """ Prepare model name for logging """
+    if config.model.backbone == "vit":
+        if (
+            (config.model.visual_tokens.enabled) and 
+            (config.model.ape.enabled) and 
+            (config.model.ape.ape_type == "2dsincos") and
+            (config.model.ape.mixer != "default") and
+            (config.model.ope.enabled) and
+            (config.model.rpe.enabled) and 
+            ("Alibi" in config.model.rpe.rpe_type)
+        ):
+            model_name = "ViT-vitarc"
+        elif (
+            (config.model.visual_tokens.enabled) and 
+            (config.model.ape.enabled) and 
+            (config.model.ape.ape_type == "2dsincos") and
+            (config.model.rpe.enabled) and
+            (config.model.rpe.rpe_type == "rope")
+        ):
+            model_name = "ViT"
+        elif (
+            (not config.model.visual_tokens.enabled) and
+            (config.model.ape.enabled) and
+            (config.model.ape.ape_type == "learn") and
+            (not config.model.rpe.enabled) and
+            (not config.model.ope.enabled)
+        ):
+            model_name = "ViT-vanilla"
+    elif config.model.backbone == "resnet":
+        model_name = "ResNet"
+    elif config.model.backbone == "diffusion_vit":
+        model_name = "ViT-diffusion"
+    elif config.model.backbone == "looped_vit":
+        model_name = "ViT-looped"
+    else:
+        raise ValueError(f"Model {config.model.backbone} not recognized. Please check the model name.")
+
+    return model_name
+
+def write_inference_results_logs(config, inference_folder, all_test_results, paper_model_name):
+    # Format filename
+    test_results_file_name = (
+        f"{config.base.data_env.lower()}_"
+        f"{config.experiment.study.replace('-', '')}_"
+        f"{config.experiment.setting.replace('exp_setting_', 'es')}_"
+        f"{config.experiment.name.replace('experiment_', 'exp')}_"
+        f"{paper_model_name}_"
+        "test_results.log"
+    )
+
+    test_results_file_path = os.path.join(inference_folder, test_results_file_name)
+
+    # Write results with metadata
+    with open(test_results_file_path, 'w') as f:
+        # Log metadata
+        f.write("*** Data ***\n")
+        f.write(f"Data Environment: {config.base.data_env}\n")
+        f.write(f"Study: {config.experiment.study}\n")
+        f.write(f"Experiment Setting: {config.experiment.setting}\n")
+        f.write(f"Experiment Name: {config.experiment.name}\n\n")
+
+        # Log model name
+        f.write(f"*** Model ***\n")
+        full_model_name = f"{paper_model_name} + {config.model.head}"   # model name including network head
+        f.write(f"Model: {full_model_name}\n\n")
+
+        # Log test results
+        f.write("*** Test Results ***\n")
+        for result_set_name, result_dict in all_test_results.items():
+            f.write(f"{result_set_name}:\n")
+            for metric_name, metric_values in result_dict.items():
+                values = np.array(metric_values)
+                mean_value = values.mean()
+                f.write(f"  {metric_name}:\n")
+                f.write(f"    steps: {values.tolist()}\n")
+                f.write(f"    epoch: {mean_value:.6f}\n")
+            f.write("\n")
+
+        # Log full config at the end of the log file
+        f.write("\n\n*** Config ***\n")
+        f.write(OmegaConf.to_yaml(config))
+        f.write("\n")
+
+    logger.info(f"Test results saved to: {test_results_file_path}")
 
 def main(config, inference_folder, datamodule, model=None, model_ckpt_path=None, exp_logger=None):
 
@@ -48,17 +137,25 @@ def main(config, inference_folder, datamodule, model=None, model_ckpt_path=None,
         raise ValueError("No model instance or model checkpoint path was given for inference.")
 
 
-    logger.info(f"All hyperparameters of the model used for inference:\n{model.hparams} \n")
+    logger.info(f"All hyperparameters of the model module used for inference:\n{model.hparams} \n")
 
     # Sanity check for data contamination between train and test dataloaders
-    if config.inference.check_data_contamination:
+    if config.inference.check_data_contamination and config.base.data_env in ["REARC", "BEFOREARC"]:
         train_dataloader = datamodule.train_dataloader()
-        test_dataloader = datamodule.test_dataloader()[0] if isinstance(datamodule.test_dataloader(), list) else datamodule.test_dataloader()
-        check_rearc_train_test_contamination(train_dataloader, test_dataloader)
+        
+        if isinstance(datamodule.test_dataloader(), list):
+            test_dataloader = datamodule.test_dataloader()[0]       # get in-domain test dataloader
+            check_rearc_train_test_contamination(train_dataloader, test_dataloader)
+            gen_test_dataloader = datamodule.test_dataloader()[1]   # get OOD test dataloader
+            check_rearc_train_test_contamination(train_dataloader, gen_test_dataloader)
+
+        else:
+            test_dataloader = datamodule.test_dataloader()
+            check_rearc_train_test_contamination(train_dataloader, test_dataloader)
 
 
     # Testing
-    trainer.test(model=model, datamodule=datamodule, verbose=True)  # NOTE: if more than one val/test dataloader was created in the datamodule, all the val/test dataloaders will be used for testing
+    trainer.test(model=model, datamodule=datamodule, verbose=True)  # NOTE: if more than one val/test dataloader was created in the datamodule, all the val/test dataloaders will be used for validation/testing
    
 
     # Additional logging and plotting if needed
@@ -66,32 +163,35 @@ def main(config, inference_folder, datamodule, model=None, model_ckpt_path=None,
         logger.debug(f"Test predictions: {model.test_preds}")
         logger.debug(f"Test targets: {model.test_targets}")
 
-        test_dataloader = datamodule.test_dataloader()[0] if isinstance(datamodule.test_dataloader(), list) else datamodule.test_dataloader()
-        observe_input_output_images(save_folder_path=inference_folder, dataloader=test_dataloader, batch_id=0, n_samples=4, split="test")
+        test_dataloader = datamodule.test_dataloader()[0] if isinstance(datamodule.test_dataloader(), list) else datamodule.test_dataloader()   # get in-domain test dataloader
+        observe_rearc_input_output_images(save_folder_path=inference_folder, dataloader=test_dataloader, split="test", batch_id=0, n_samples=4)
 
         if config.data.use_gen_test_set:
             logger.debug(f"OOD test predictions: {model.gen_test_preds}")
             logger.debug(f"OOD test targets: {model.gen_test_targets}")
 
-            gen_test_dataloader = datamodule.test_dataloader()[1]
-            observe_input_output_images(save_folder_path=inference_folder, dataloader=gen_test_dataloader, batch_id=0, n_samples=4, split="gen_test")
+            gen_test_dataloader = datamodule.test_dataloader()[1]   # get OOD test dataloader
+            observe_rearc_input_output_images(save_folder_path=inference_folder, dataloader=gen_test_dataloader, split="gen_test", batch_id=0, n_samples=4)
 
-            if config.data.validate_gen_test_set:
+            if config.data.validate_in_and_out_domain:
                 logger.debug(f"OOD val predictions: {model.gen_val_preds}")
                 logger.debug(f"OOD val targets: {model.gen_val_targets}")
 
-                gen_val_dataloader = datamodule.val_dataloader()[0] if isinstance(datamodule.val_dataloader(), list) else datamodule.val_dataloader()
-                observe_input_output_images(save_folder_path=inference_folder, dataloader=gen_val_dataloader, batch_id=0, n_samples=4, split="gen_val")        
+                gen_val_dataloader = datamodule.val_dataloader()[1] # get OOD val dataloader
+                observe_rearc_input_output_images(save_folder_path=inference_folder, dataloader=gen_val_dataloader, split="gen_val", batch_id=0, n_samples=4)        
 
-    # Process the test results for better logging
+    ## Test results
     test_results = model.test_results
-    processed_test_results = process_test_results(config, test_results, test_type="test", exp_logger=None)
-    all_test_results = {'test_results': processed_test_results}
+    all_test_results = {'test_results': test_results}
 
     if config.data.use_gen_test_set:
         gen_test_results = model.gen_test_results
-        processed_gen_test_results = process_test_results(config, gen_test_results, test_type="gen_test", exp_logger=None)
-        all_test_results.update({'gen_test_results': processed_gen_test_results})
+        all_test_results.update({'gen_test_results': gen_test_results})
+
+    paper_model_name = get_paper_model_name(config)
+
+    # Save test results relevant to the paper in a log file
+    write_inference_results_logs(config, inference_folder, all_test_results, paper_model_name)
 
     # End of inference
     log_message = "*** Inference ended ***\n"
