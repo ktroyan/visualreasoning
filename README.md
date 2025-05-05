@@ -161,7 +161,7 @@ The result of an experiment run is complete logs of the configs, data, metrics, 
 
 
 ### Sweeps
-There is the possibility to perform experiments sweeps using [WandB Sweeps](https://docs.wandb.ai/guides/sweeps/). For this, simply set the parameters ```wandb.sweep.enabled ``` to true and the parameter ```wandb.sweep.num_sweeps``` to the number of parameter combinations to run experiments for. The sweep config can be found in ```/configs/sweep_<data_env>.yaml```.
+There is the possibility to perform experiments sweeps using [WandB Sweeps](https://docs.wandb.ai/guides/sweeps/). For this, simply set the parameters ```wandb.sweep.enabled ``` to true and the parameter ```wandb.sweep.num_jobs``` to the number of parameter combinations to run experiments for. The sweep config can be found in ```/configs/sweep_<data_env>.yaml```.
 
 
 # General information
