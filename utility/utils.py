@@ -1,14 +1,11 @@
 import os
 import time
-import yaml
 import glob
 import datetime
 import torch
 from omegaconf import OmegaConf
 import pandas as pd
 import matplotlib.pyplot as plt
-from matplotlib.colors import ListedColormap
-import seaborn as sns
 import shutil
 from typing import Any, Dict, List, Tuple
 
@@ -16,23 +13,25 @@ from typing import Any, Dict, List, Tuple
 from utility.logging import logger
 
 
-def get_complete_config(sweep_config=None):
+def get_complete_config(sweep_config: Dict = None) -> Tuple[OmegaConf, Dict]:
     """
     Load and merge all relevant configuration files using OmegaConf.
+    
     If enabled, the WandB sweep config arguments take priority over the default config arguments.
     The CLI arguments (provided with OmegaConf syntax) take priority (i.e., overwrite any other parameter value).
-    Essentially, the merging order in OmegaConf.merge() is important.
 
-    NOTE: 
-    The merging order of the configs is important in order to get expected and correct parameter values.
+    Therefore, the merging order of the configs in OmegaConf.merge() is important in order to get expected and correct parameter values.
     That is why the CLI config is merged last and the sweep config right before it.
     
-    Moreover, we should proceed to the creation of the complete configs in several steps in order to 
+    Moreover, we should proceed with the creation of the complete configs in several steps in order to 
     get the correct specific config files to load that may depend on some arguments of other configs.
     
     For example base.model_module decides on what model config to load.
     For example model.backbone decides on what backbone network config to load.
     For example model.head decides on what head network config to load.
+
+    Args:
+        sweep_config (dict, optional): The WandB sweep config dictionary. If None, there is no sweep config.
 
     Returns:
         resolved_complete_config_oc (OmegaConf): The complete resolved configuration as an OmegaConf object.
@@ -43,13 +42,13 @@ def get_complete_config(sweep_config=None):
         # Merge configs
         merged_config = OmegaConf.merge(*configs)
 
-        # Explicitly resolve interpolations in the main config so that we get the values needed to load the specific configs below
+        # Explicitly resolve variable interpolations in the main config so that we get the values needed to load the subsequent specific configs
         OmegaConf.resolve(merged_config)
 
         return merged_config
 
     try:
-        # Load non-specific configs
+        ## Load non-specific configs
         base_config = OmegaConf.load("configs/base.yaml")
         data_config = OmegaConf.load("configs/data.yaml")
         experiment_config = OmegaConf.load("configs/experiment.yaml")
@@ -64,25 +63,58 @@ def get_complete_config(sweep_config=None):
         else:
             log_config_dict(sweep_config, "*** Parameter values selected from the sweep config ***")
 
-        # Create resolvers
-        def resolve_if_then_else(enabled, set_value):
-            return set_value if enabled else None  # return None when disabled
+        ## Create resolvers.
+        # They are used to resolve some parameters' value based on the values of other parameters through variable interpolation.
         
+        # This resolver yields a cleaner config overview of the parameters actually used in the experiment since it sets the value to None when the parameter is not enabled.
+        def resolve_if_then_else(enabled, set_value):
+            return set_value if enabled else None  # return None when parameter is not enabled
+        
+        # This resolver is used to handle specific cases for the sys-gen study
         def resolve_if_then_else_sysgen(study_name, set_value):
             if study_name == "sys-gen":
                 return set_value
             else:
                 return False
 
+        # This resolver is used to use an OOD test set only when applicable
+        def resolve_use_gen_test_set(study, data_env, bool_value):
+            if study in ["sys-gen", "compositionality"] and data_env == "BEFOREARC":
+                return bool_value
+            elif study in ["sys-gen"] and data_env in ["REARC", "CVR"]:
+                return bool_value
+            else:
+                return False
+
+        # This resolver is used to use an OOD validation set only when applicable
+        def resolve_validate_in_and_out_domain(study, data_env, bool_value):
+            if study in ["sys-gen", "compositionality"] and data_env == "BEFOREARC":
+                return bool_value
+            else:
+                return False
+
+        # This resolver is used to check if an OOD validation set is used, in which case the monitored metric should be the one of the OOD validation set
+        def resolve_if_then_else_validate_in_and_out_domain(validate_in_and_out_domain, ood_monitored_metric, default_monitored_metric):
+            if validate_in_and_out_domain:
+                return ood_monitored_metric # e.g. gen_val_loss, gen_val_acc
+            else:
+                return default_monitored_metric # e.g. val_loss, val_acc
+
+        # This resolver is used to set the image size based on the data environment.
+        # For CVR, the image size is fixed to 128.
+        # For -ARC, it is set to the value provided in the config. If null, the value will be computed as the max. image size within the dataset.
         def resolve_data_env_img_size(data_env, img_size):
             if data_env == "CVR":
                 return 128
-            elif data_env == "REARC":
+            elif data_env in ["REARC", "BEFOREARC"]:
                 return img_size
 
-        # Register the resolvers. Use replace=True to not try to re-register the resolver which would raise an error during WandB sweeps
+        # Register the resolvers. Use replace=True to not try to register twice the resolver which would raise an error during WandB sweeps
         OmegaConf.register_new_resolver("resolve_if_then_else", resolve_if_then_else, replace=True)
         OmegaConf.register_new_resolver("resolve_if_then_else_sysgen", resolve_if_then_else_sysgen, replace=True)
+        OmegaConf.register_new_resolver("resolve_use_gen_test_set", resolve_use_gen_test_set, replace=True)
+        OmegaConf.register_new_resolver("resolve_if_then_else_validate_in_and_out_domain", resolve_if_then_else_validate_in_and_out_domain, replace=True)
+        OmegaConf.register_new_resolver("resolve_validate_in_and_out_domain", resolve_validate_in_and_out_domain, replace=True)
         OmegaConf.register_new_resolver("resolve_data_env_img_size", resolve_data_env_img_size, replace=True)
 
         # Merge all the non-specific configs into a single hierarchical object
@@ -101,7 +133,7 @@ def get_complete_config(sweep_config=None):
         # Merge the main config with the specific config into a single hierarchical object
         main_config = merge_and_resolve_configs([main_config, model_config, sweep_config, cli_config])
         
-        # Load backbone network-specific config
+        # Load backbone/encoder network-specific config
         backbone_network_name = main_config.model.get("backbone", None)
         if not backbone_network_name:
             raise ValueError("Error: 'model.backbone' is missing in model config.")
@@ -111,7 +143,7 @@ def get_complete_config(sweep_config=None):
             raise FileNotFoundError(f"Error: Backbone network config file '{backbone_network_config_path}' not found.")
         backbone_network_config = OmegaConf.load(backbone_network_config_path)
 
-        # Load head network-specific config
+        # Load head/decoder network-specific config
         head_network_name = main_config.model.get("head", None)
         if not head_network_name:
             raise ValueError("Error: 'model.head' is missing in model config.")
@@ -127,9 +159,8 @@ def get_complete_config(sweep_config=None):
         # Convert the complete config to a dict
         resolved_complete_config_dict = OmegaConf.to_container(main_config)
 
-        # Convert dict to OmegaConf object so that we can then use dot notation to access the keys
+        # Convert the config dict to an OmegaConf object so that we can then use dot notation to access the keys
         resolved_complete_config_oc = OmegaConf.create(resolved_complete_config_dict)
-
 
     except Exception as e:
         raise RuntimeError(f"Error loading or merging configurations: {e}")
@@ -146,20 +177,6 @@ def log_config_dict(config_dict, log_message=""):
     """
     dict_logs_message = OmegaConf.to_yaml(config_dict)
     logger.info(f"{log_message}\n\n{dict_logs_message}")
-
-def get_config_specific_args_from_args_dict(args_dict, specific_config_path):
-    # Load the YAML config to get config-specific keys
-    with open(specific_config_path, "r") as f:
-        specific_config_keys = yaml.safe_load(f).keys()
-
-    # Filter args to include only the arguments of the specific config file given
-    specific_config_args = {key: value for key, value in args_dict.items() if key in specific_config_keys}
-
-    return specific_config_args
-
-def save_config(cfg, path):
-    with open(path, 'w') as cfg_file:
-        yaml.dump(cfg, cfg_file)
 
 def generate_timestamped_experiment_name(exp_basename):
     now = datetime.datetime.now()
@@ -179,14 +196,15 @@ def save_model_metadata_for_ckpt(save_folder_path, model):
 
     metadata_for_ckpt = {
     "model_module_name": model.__class__.__name__,
-    "hparams": model.hparams    # in fact not necessary to load the hparams as they are already saved in the checkpoint
+    "hparams": model.hparams    # in fact, not necessary to load the hparams as they are already saved in the checkpoint
     }
 
     torch.save(metadata_for_ckpt, os.path.join(save_folder_path, "metadata_for_ckpt.pth"))
-    logger.info("Model metadata saved for future checkpoint use.")
+    logger.info("Model metadata saved for possible future checkpoint use.")
 
 def find_most_recent_experiment_folder(directory):
-    # Search for the the most recent "experiment_" folder in the given directory
+    """ Search for the the most recent "experiment_" folder in the given directory. """
+
     folders = [os.path.join(directory, d) for d in os.listdir(directory) if (os.path.isdir(os.path.join(directory, d)) and "experiment_" in d)]
     if not folders:
         return None
@@ -195,14 +213,7 @@ def find_most_recent_experiment_folder(directory):
     return most_recent_folder
 
 def get_latest_ckpt(directory):
-    """ Get the latest checkpoint file in the latest folder following the 
-
-    Args:
-        folder str: folder in which to search for the latest checkpoint file
-
-    Returns:
-        str: path of the latest checkpoint file
-    """
+    """ Get the latest checkpoint file within all the experiment folders in the given directory. """
 
     most_recent_folder = find_most_recent_experiment_folder(directory)
 
@@ -216,6 +227,8 @@ def get_latest_ckpt(directory):
     return latest_ckpt
 
 def get_model_from_ckpt(model_ckpt_path):
+    """ Load a (pre-trained) model from a checkpoint file. """
+
     import models   # import the models module here to avoid circular imports
 
     # Get the model class and hparams arguments from the metadata file
@@ -235,10 +248,14 @@ def get_model_from_ckpt(model_ckpt_path):
     return model
 
 def plot_lr_schedule(save_folder_path: str, lr_values: List) -> str:
+    """ Plot the learning rate schedule performed during training. """
+
+    # Create a general /figs folder
     figs_path = os.path.join(save_folder_path, "figs")
     os.makedirs(figs_path, exist_ok=True)
     fig_path = os.path.join(figs_path, "learning_rate_schedule.png")
 
+    # Plot the learning rate schedule
     plt.figure(figsize=(10, 5))
     plt.plot(lr_values, label="Learning Rate")
     plt.xlabel("Training Steps")
@@ -251,36 +268,45 @@ def plot_lr_schedule(save_folder_path: str, lr_values: List) -> str:
     plt.close()
     return fig_path
 
-def plot_absolute_positional_embeddings(pos_embed, num_prefix_tokens=None, viz_as_heatmap=False):
+def plot_absolute_positional_embeddings(pos_embed, num_prepended_tokens=0, num_appended_tokens=0, viz_as_heatmap=False, sample_index_in_batch=None):
     """ 
-    Plot the absolute positional embeddings (APE).
+    Plot the absolute positional embeddings (APE) for a sample sequence.
 
     Args:
-        pos_embed (torch.Tensor): Positional embedding tensor of shape [1, seq_len(+num_extra_tokens), embed_dim]
-        num_prefix_tokens (int): Number of extra/prefixed tokens (e.g., cls, register tokens)
+        pos_embed (torch.Tensor): Positional embedding tensor of shape [1, seq_len(+num_prepended_tokens + num_appended_tokens), embed_dim]
+        num_prepended_tokens (int): Number of extra prepended tokens (e.g., cls, register tokens)
+        num_appended_tokens (int): Number of extra appended tokens (e.g., task tokens, in-context example)
         viz_as_heatmap (bool): If True, plot a heatmap; otherwise, plot line plots per embedding dimension
+        sample_index_in_batch (int): Index of the sample in the batch for which to visualize the dynamic APE
     """
 
-    # Remove extra/prefix tokens if needed
-    if num_prefix_tokens is not None and num_prefix_tokens > 0:
-        embeddings = pos_embed[0, num_prefix_tokens:, :].detach().cpu().numpy()  # [seq_len, embed_dim]
-    else:
-        embeddings = pos_embed[0, :, :].detach().cpu().numpy()
+    if sample_index_in_batch is not None:   # visualize the dynamic APE for a sample of the batch
+        pos_embed = pos_embed[sample_index_in_batch, :, :].detach().cpu().numpy()    # [pe_length, embed_dim] <-- [B, pe_length, embed_dim]
+    else:   # visualize the static APE (same for any sample)
+        pos_embed = pos_embed[0, :, :].detach().cpu().numpy()    # [pe_length, embed_dim] <-- [1, pe_length, embed_dim]
 
+    # Remove extra prepended tokens for visualization
+    if num_prepended_tokens > 0:
+        pos_embed = pos_embed[num_prepended_tokens:, :]
+
+    # Remove extra appended tokens for visualization
+    if num_appended_tokens > 0:
+        pos_embed = pos_embed[:-num_appended_tokens, :]
+    
     plt.figure(figsize=(10, 5))
 
     if viz_as_heatmap:
         # Each row is a position in the sequence, each column is a dimension in the embedding
-        ims = plt.imshow(embeddings, aspect='auto', cmap='viridis')
+        ims = plt.imshow(pos_embed, aspect='auto', cmap='viridis')
         plt.colorbar(ims)
         plt.xlabel("Embedding dimension")
         plt.ylabel("Sequence position")
         plt.title("APE")
 
     else:
-        # Plot all embedding dimensions for each position in the sequence
-        for i in range(embeddings.shape[1]):  # for each embedding dim
-            plt.plot(embeddings[:, i], label=f"Dim {i}", alpha=0.5)  # dim-wise trace across sequence
+        # Plot each embedding dimensions for all positions in the sequence
+        for i in range(pos_embed.shape[1]):  # for each embedding dim
+            plt.plot(pos_embed[:, i], label=f"Dim {i}", alpha=0.5)  # dim-wise trace across sequence
 
         plt.xlabel("Sequence position")
         plt.ylabel("Embedding value")
@@ -290,7 +316,7 @@ def plot_absolute_positional_embeddings(pos_embed, num_prefix_tokens=None, viz_a
     # plt.tight_layout()
     save_folder_path = "./figs"
     os.makedirs(save_folder_path, exist_ok=True)
-    plt.savefig(f'{save_folder_path}/positional_embeddings.png')
+    plt.savefig(f'{save_folder_path}/absolute_positional_embeddings.png')
     plt.close()
 
 def timer_decorator(func):
@@ -327,74 +353,12 @@ def copy_folder(source_folder, destination_folder):
             # Copy files
             shutil.copy2(source_path, destination_path)
 
-
-def observe_input_output_images(save_folder_path, dataloader, batch_id=0, n_samples=4, split="test"):
-    """ 
-    Observe the input and output images of a batch from the dataloader.
-    
-    TODO: It only works for REARC. Update it or create another function for CVR as well if needed.
-    """
-    
-    # Get the batch batch_id from the dataloader
-    for i, batch in enumerate(dataloader):
-        if i == batch_id:
-            break
-    
-    # Get the input and output images
-    inputs, outputs = batch[0], batch[1]
-
-    # Number of samples to observe
-    n_samples = min(n_samples, len(inputs))
-
-    logger.debug(f"Observing {n_samples} samples from {split} batch {batch_id}.")
-
-    # Handle padding tokens. Replace the symbols for pad tokens with the background color
-    pad_token = 10
-    inputs[inputs == pad_token] = 0
-    outputs[outputs == pad_token] = 0
-
-    # Use the same color map as REARC
-    cmap = ListedColormap([
-        '#000', '#0074D9', '#FF4136', '#2ECC40', '#FFDC00',
-        '#AAAAAA', '#F012BE', '#FF851B', '#7FDBFF', '#870C25'
-    ])
-    
-    vmin = 0
-    vmax = 9
-
-    # Create a figure to plot the samples
-    fig, axs = plt.subplots(2, n_samples, figsize=(n_samples * 3, 6), dpi=150)
-
-    for i in range(n_samples):
-        input_img = inputs[i].cpu().numpy()
-        target_img = outputs[i].cpu().numpy()
-
-        for ax, img, title in zip([axs[0, i], axs[1, i]], 
-                                  [input_img, target_img], 
-                                  [f"Input {i} of batch {batch_id}", f"Output {i} of batch {batch_id}"]
-                                  ):
-            sns.heatmap(img, ax=ax, cbar=False, linewidths=0.05, linecolor='gray', square=True, cmap=cmap, vmin=vmin, vmax=vmax)
-            ax.set_title(title, fontsize=8)
-            ax.set_xticks([])
-            ax.set_yticks([])
-
-    fig.suptitle(f"{split} batch {batch_id}", fontsize=18)
-
-    plt.tight_layout()
-    # plt.show()
-
-    # Save the figure
-    fig.savefig(f"{save_folder_path}/{split}_image_input_output_batch{batch_id}.png")
-
-    plt.close(fig)
-
-
 def process_test_results(config, test_results, test_type="test", exp_logger=None):
     """
     Process the test results and log them.
 
     TODO:
-    Check if code ok and improve handling and display of the results, especially for multi-task experiments.
+    Improve handling and display of the results, especially for multi-task experiments.
         
     FIXME:
     For this code to work currently, the batch size should yield a number of elements in each key of results so that it is a multiple of the number of tasks, otherwise the reshape will fail.
