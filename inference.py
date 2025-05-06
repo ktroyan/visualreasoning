@@ -15,8 +15,7 @@ from pytorch_lightning.loggers.wandb import WandbLogger
 # Personal codebase dependencies
 import data
 import models
-from utility.utils import get_complete_config, log_config_dict, get_model_from_ckpt, observe_input_output_images, \
-    process_test_results, generate_timestamped_experiment_name, copy_folder
+from utility.utils import get_complete_config, log_config_dict, get_model_from_ckpt, generate_timestamped_experiment_name, copy_folder
 from utility.rearc.utils import observe_rearc_input_output_images, check_train_test_contamination as check_rearc_train_test_contamination
 from utility.logging import logger
 
