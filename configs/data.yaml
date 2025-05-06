@@ -1,6 +1,6 @@
 data:
   dataset_dir: './${base.data_env}/final_datasets/${experiment.study}/${experiment.setting}/${experiment.name}'
-  image_size: ${resolve_data_env_img_size:${base.data_env},null}  # if CVR, the default 128 is used. If REARC the set value is used (null means that the value is inferred from the data)
+  image_size: ${resolve_data_env_img_size:${base.data_env}, null}  # if CVR, the default 128 is used. If -ARC the set value is used (null means that the value is inferred from the data)
   num_workers: 10
   train_batch_size: 64
   val_batch_size: 50
@@ -8,5 +8,5 @@ data:
   shuffle_train_dl: true  # whether to shuffle the training data loader or not
   transform:
     enabled: true # whether to apply data transformation (e.g., normalization, augmentation). TODO: We can add a field to specify the type of transformation
-  use_gen_test_set: ${resolve_if_then_else_sysgen:${experiment.study},true} # whether to use a systematic generalization (i.e., OOD) test set as the main test set or not
-  validate_in_and_out_domain: ${resolve_if_then_else_sysgen:${experiment.study},true} # whether to validate OOD in addition to in-domain or not
+  use_gen_test_set: ${resolve_use_gen_test_set:${experiment.study}, ${base.data_env}, true} # whether to use an OOD test set in addition to the in-domain test set or not
+  validate_in_and_out_domain: ${resolve_validate_in_and_out_domain:${experiment.study}, ${base.data_env}, true} # whether to validate OOD in addition to in-domain or not

@@ -9,6 +9,14 @@ EXPERIMENT=""
 MAX_EPOCHS=""
 BACKBONE=""
 HEAD=""
+VISUAL_TOKENS_ENABLED=""
+APE_ENABLED=""
+APE_TYPE=""
+APE_MIXER=""
+OPE_ENABLED=""
+RPE_ENABLED=""
+RPE_TYPE=""
+NUM_REG_TOKENS=""
 USE_TASK_EMBEDDING=""
 USE_GEN_TEST_SET=""
 VALIDATE_IN_AND_OUT_DOMAIN=""
@@ -29,6 +37,14 @@ while [[ $# -gt 0 ]]; do
         --max_epochs) MAX_EPOCHS="$2"; shift 2 ;;
         --backbone) BACKBONE="$2"; shift 2 ;;
         --head) HEAD="$2"; shift 2 ;;
+        --visual_tokens_enabled) VISUAL_TOKENS_ENABLED="$2"; shift 2 ;;
+        --ape_enabled) APE_ENABLED="$2"; shift 2 ;;
+        --ape_type) APE_TYPE="$2"; shift 2 ;;
+        --ape_mixer) APE_MIXER="$2"; shift 2 ;;
+        --ope_enabled) OPE_ENABLED="$2"; shift 2 ;;
+        --rpe_enabled) RPE_ENABLED="$2"; shift 2 ;;
+        --rpe_type) RPE_TYPE="$2"; shift 2 ;;
+        --num_reg_tokens) NUM_REG_TOKENS="$2"; shift 2 ;;
         --use_task_embedding) USE_TASK_EMBEDDING="$2"; shift 2 ;;
         --sweep_enabled) WANDB_SWEEP_ENABLED="$2"; shift 2 ;;
         --sweep_config) WANDB_SWEEP_CONFIG="$2"; shift 2 ;;
@@ -72,6 +88,14 @@ CMD="nohup uv run experiment.py"
 [[ -n "$MAX_EPOCHS" ]] && CMD+=" training.max_epochs=\"${MAX_EPOCHS}\""
 [[ -n "$BACKBONE" ]] && CMD+=" model.backbone=\"${BACKBONE}\""
 [[ -n "$HEAD" ]] && CMD+=" model.head=\"${HEAD}\""
+[[ -n "$VISUAL_TOKENS_ENABLED" ]] && CMD+=" model.visual_tokens.enabled=\"${VISUAL_TOKENS_ENABLED}\""
+[[ -n "$APE_ENABLED" ]] && CMD+=" model.ape.enabled=\"${APE_ENABLED}\""
+[[ -n "$APE_TYPE" ]] && CMD+=" model.ape.ape_type=\"${APE_TYPE}\""
+[[ -n "$APE_MIXER" ]] && CMD+=" model.ape.mixer=\"${APE_MIXER}\""
+[[ -n "$OPE_ENABLED" ]] && CMD+=" model.ope.enabled=\"${OPE_ENABLED}\""
+[[ -n "$RPE_ENABLED" ]] && CMD+=" model.rpe.enabled=\"${RPE_ENABLED}\""
+[[ -n "$RPE_TYPE" ]] && CMD+=" model.rpe.rpe_type=\"${RPE_TYPE}\""
+[[ -n "$NUM_REG_TOKENS" ]] && CMD+=" model.num_reg_tokens=\"${NUM_REG_TOKENS}\""
 [[ -n "$USE_TASK_EMBEDDING" ]] && CMD+=" model.task_embedding.enabled=\"${USE_TASK_EMBEDDING}\""
 [[ -n "$WANDB_SWEEP_ENABLED" ]] && CMD+=" wandb.sweep.enabled=\"${WANDB_SWEEP_ENABLED}\""
 [[ -n "$WANDB_SWEEP_CONFIG" ]] && CMD+=" wandb.sweep.config=\"${WANDB_SWEEP_CONFIG}\""

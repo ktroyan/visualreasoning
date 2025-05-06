@@ -7,6 +7,7 @@ lightning_logs/
 requirements_backup.txt
 
 
+
 ### CVR ###
 /CVR/generated_data_128x128.zip
 /CVR/generated_data
@@ -26,19 +27,24 @@ requirements_backup.txt
 /REARC/generated_data_lb07_ub1
 /REARC/final_datasets
 /REARC/experiments
+/REARC/generated_data_lb0_ub1
+/REARC/check_data_experiment_1
 
 
 ### BEFOREARC ###
-
+/BEFOREARC/
 
 ## wandb sweeps
 /wandb
 
 ## figs
 /figs
+/data_contamination/figs
+# !/logs/positional_embeddings.png
 
 ## lab
 lab/
+
 
 ## configs
 

@@ -9,9 +9,9 @@ model:
   ape:
     enabled: true
     ape_type: '2dsincos'  # choices: 'learn', '2dsincos'; absolute positional encoding
-    mixer: 'weighted_sum'  # choices: 'default', 'weighted_sum'; how to mix the input embeddings and the positional embeddings
+    mixer: 'sum'  # choices: 'sum', 'weighted_sum', ...; how to mix the input embeddings and the positional embeddings
   ope:
-    enabled: true
+    enabled: false
   rpe:
     enabled: true
     rpe_type: 'rope'  # choices: 'rope', 'Two-slope-Alibi', 'Four-diag-slope-Alibi'; relative positional encoding
@@ -27,7 +27,7 @@ model:
   training_hparams:
     optimizer: 'AdamW' # choices: Adam, AdamW, SGD
     scheduler:
-      monitored_metric: 'val_loss' # choices: 'val_acc', 'val_loss'
+      monitored_metric: ${resolve_if_then_else_validate_in_and_out_domain:${data.validate_in_and_out_domain}, gen_val_loss, val_loss} # choices: 'gen_val_loss', 'gen_val_acc', 'val_acc', 'val_loss'
       type: 'CosineAnnealingLR' # choices: ReduceLROnPlateau, StepLR, CosineAnnealingLR
       interval: 'epoch' # choices: 'step', 'epoch'
       frequency: 1

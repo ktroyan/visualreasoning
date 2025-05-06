@@ -7,8 +7,8 @@ training:
   metrics_callback_verbose: 1 # verbosity level: 0 for no verbose, 1 for more verbose, 2 for most verbose
   early_stopping:
     enabled: true
-    monitored_metric: 'val_acc_grid_no_pad' # choices: 'val_acc', 'val_loss'
-    es_patience: ${resolve_if_then_else:${training.early_stopping.enabled}, 20} # number of epochs for patience of early stopping
+    monitored_metric: ${resolve_if_then_else_validate_in_and_out_domain:${data.validate_in_and_out_domain}, gen_val_acc_grid_no_pad, val_acc_grid_no_pad}  # choices: 'val_acc', 'val_loss'
+    es_patience: ${resolve_if_then_else:${training.early_stopping.enabled},20} # number of epochs for patience of early stopping
   progress_bar:
     enabled: false
     refresh_rate: ${resolve_if_then_else:${training.progress_bar.enabled},1} # every how many number of batches to refresh the TQDM. 0 for no refresh
@@ -18,6 +18,6 @@ training:
   log_every_n_steps: 5
   checkpointing:
     enabled: true
-    monitored_metric: 'val_acc_grid_no_pad' # choices: 'val_acc', 'val_loss'
+    monitored_metric: ${resolve_if_then_else_validate_in_and_out_domain:${data.validate_in_and_out_domain}, gen_val_acc_grid_no_pad, val_acc_grid_no_pad} # choices: 'gen_val_loss', 'gen_val_acc', 'val_acc', 'val_loss'
     ckpt_period: 1  # every how many epochs are the checkpoints saved when running the Trainer()
   # flush_logs_every_n_steps: 100

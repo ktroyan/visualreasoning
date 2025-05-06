@@ -39,7 +39,6 @@ class PatchEmbed(nn.Module):
     def __init__(self, base_config, img_size, patch_size, in_channels, embed_dim, num_token_categories=None):
         super().__init__()
 
-        # TODO: See if it is correct to create patches (in the forward pass) without the extra tokens (so not considered when creating the artificial channels)
         
         self.base_config = base_config
         if self.base_config.data_env in ['REARC', 'BEFOREARC']:
@@ -88,12 +87,12 @@ class AbsolutePositionalEncoding(nn.Module):
         - 'weighted_sum_vec'
         - 'weighted_sum_no_norm_vec'
         - 'layer_norm'
-        - 'default' (simple addition of the APE to the input embeddings)
+        - 'sum' (simple addition of the APE to the input embeddings)
 
     NOTE: Code for PEMixer adapted from the ViTARC repo. See their original class ViTARCEmbedding.
     """
 
-    def __init__(self, model_config, network_config, image_size, seq_len, patch_embed, embed_dim, num_prepended_extra_tokens, ape_type, mixer_strategy='default'):
+    def __init__(self, model_config, network_config, image_size, seq_len, patch_embed, embed_dim, num_prepended_extra_tokens, num_appended_extra_tokens, ape_type, mixer_strategy='sum'):
         super().__init__()
 
         self.model_config = model_config
@@ -114,6 +113,7 @@ class AbsolutePositionalEncoding(nn.Module):
                                               patch_embed=patch_embed,
                                               embed_dim=embed_dim,
                                               num_prepended_extra_tokens=num_prepended_extra_tokens,
+                                              num_appended_extra_tokens=0,
                                               ape_type=ape_type
                                               )
 
@@ -136,7 +136,7 @@ class AbsolutePositionalEncoding(nn.Module):
         self.ape_drop = nn.Dropout(p=self.network_config.ape_dropout_rate)
 
 
-    def create_ape(self, image_size, seq_len, patch_embed, embed_dim, num_prepended_extra_tokens, ape_type) -> nn.Parameter:
+    def create_ape(self, image_size, seq_len, patch_embed, embed_dim, num_prepended_extra_tokens, num_appended_extra_tokens, ape_type) -> nn.Parameter:
         """ 
         Create and return the desired APE (absolute positional embedding).
         The APE will be added to the input embeddings of the backbone/encoder mode (e.g., ViT) during the forward pass.
@@ -145,24 +145,27 @@ class AbsolutePositionalEncoding(nn.Module):
             However, the extra tokens (e.g., [cls] and register tokens) are not considered for the PE.
             The PE should still be of the correct size since it is added to the whole input embeddings which include the extra tokens.
 
-        TODO:
-        Check if 2D sin-cos APE is correctly implemented.
         """
         
-        num_pos_embeds = seq_len + num_prepended_extra_tokens
+        num_pos_embeds = seq_len + num_prepended_extra_tokens + num_appended_extra_tokens
 
-        if ape_type == 'learn':    # learned APE
+        if ape_type == 'learn': # learned APE
 
-            pos_embed_learned = nn.Parameter(torch.randn(1, seq_len, embed_dim))  # [1, seq_len, embed_dim]; by default requires_grad=True
+            # Create the learnable PE
+            pos_embed = nn.Parameter(torch.randn(1, seq_len, embed_dim))  # [1, seq_len, embed_dim]; by default requires_grad=True
 
+            # Handle prepended extra tokens (e.g., cls, register tokens)
             if num_prepended_extra_tokens > 0:
                 # Set the PE for the extra tokens to zero (i.e., no PE for the extra tokens since PE is added to the input embeddings and the PE is not learned)
-                pos_embed_extra_tokens = torch.zeros(1, num_prepended_extra_tokens, embed_dim, dtype=torch.float32, requires_grad=False)     # define the PE for the [cls] and register tokens to be concatenated at the beginning of the PE for the patches
-                pos_embed = torch.cat([pos_embed_extra_tokens, pos_embed_learned], dim=1)   # [1, num_pos_embeds, embed_dim]
+                prepended_pe = torch.zeros(1, num_prepended_extra_tokens, embed_dim, dtype=torch.float32, requires_grad=False)
+                pos_embed = torch.cat([prepended_pe, pos_embed], dim=1)   # [1, num_pos_embeds, embed_dim]
             
-            else:
-                pos_embed = pos_embed_learned
-
+            # Handle appended extra tokens (e.g., task tokens, in-context example)
+            if num_appended_extra_tokens > 0:
+                # Set the PE for the extra tokens to zero (i.e., no PE for the extra tokens since PE is added to the input embeddings and the PE is not learned)
+                appended_pe = torch.zeros(1, num_appended_extra_tokens, embed_dim, dtype=torch.float32, requires_grad=False)
+                pos_embed = torch.cat([pos_embed, appended_pe], dim=1)
+            
         elif ape_type == '2dsincos':    # fixed 2D sin-cos APE 
 
             # PE dimension per axis and sin/cos
@@ -193,25 +196,28 @@ class AbsolutePositionalEncoding(nn.Module):
             
             pos_embed = pos_embed.unsqueeze(0)  # [1, seq_len, embed_dim]; create a batch dimension so that it can be used for batched samples
 
-            # Handle extra tokens (e.g., cls, register tokens)
+            # Handle prepended extra tokens (e.g., cls, register tokens)
             if num_prepended_extra_tokens > 0:
-                extra_pe = torch.zeros([1, num_prepended_extra_tokens, embed_dim], dtype=torch.float32)
-                pos_embed = nn.Parameter(torch.cat([extra_pe, pos_embed], dim=1))  # [1, seq_len+num_prepended_extra_tokens, embed_dim]; concatenate along sequence dimension
-            else:
-                pos_embed = nn.Parameter(pos_embed) # [1, seq_len, embed_dim]
+                prepended_pe = torch.zeros([1, num_prepended_extra_tokens, embed_dim], dtype=torch.float32)
+                pos_embed = torch.cat([prepended_pe, pos_embed], dim=1)   # concatenate along sequence dimension
 
-            # Ensure PE is fixed/non-learnable
-            pos_embed.requires_grad = False
+            # Handle appended extra tokens (e.g., task tokens, in-context example)
+            if num_appended_extra_tokens > 0:
+                appended_pe = torch.zeros([1, num_appended_extra_tokens, embed_dim], dtype=torch.float32)
+                pos_embed = torch.cat([pos_embed, appended_pe], dim=1)    # concatenate along sequence dimension
+
+            # Create the PE as a (non-learnable) parameter
+            pos_embed = nn.Parameter(pos_embed, requires_grad=False) # [1, num_pos_embeds, embed_dim]; ensure PE is fixed/non-learnable
             
         else:
             raise ValueError(f"Invalid positional encoding type: {ape_type}. Choose from ['learn', '2dsincos']")
 
         # Visualize PE
-        plot_absolute_positional_embeddings(pos_embed, num_prefix_tokens=num_prepended_extra_tokens, viz_as_heatmap=False)
+        plot_absolute_positional_embeddings(pos_embed, num_prepended_tokens=num_prepended_extra_tokens, num_appended_tokens=num_appended_extra_tokens, viz_as_heatmap=False)
 
-        return pos_embed    # [1, seq_len(+num_prepended_extra_tokens), embed_dim]
+        return pos_embed    # [1, num_pos_embeds, embed_dim]
 
-    def create_ape_with_ope(self, image_size, seq_len, patch_embed, embed_dim, num_prepended_extra_tokens, x_grid_object_ids) -> nn.Parameter:
+    def create_ape_with_ope(self, image_size, seq_len, patch_embed, embed_dim, num_prepended_extra_tokens, num_appended_extra_tokens, x_grid_object_ids) -> nn.Parameter:
         """
         Dynamic PE.
         Build 2D Sin-Cos Absolute Positional Embeddings (APE) + Object Positional Encoding (OPE).
@@ -224,11 +230,9 @@ class AbsolutePositionalEncoding(nn.Module):
         Note that this method computes an APE (with OPE considered) for each input sample in the batch since
         it is a dynamic APE computed (i.e., computed during each forward pass, and for each sample of a given batch).
 
-        TODO:
-        Check if how I attribute the dimensions is correct.
         """
 
-        num_pos_embeds = seq_len + num_prepended_extra_tokens
+        num_pos_embeds = seq_len + num_prepended_extra_tokens + num_appended_extra_tokens
 
         # Check if x_grid_object_ids is flattened in the spatial dimensions
         assert x_grid_object_ids.ndim == 2, "x_grid_object_ids should be a 2D tensor [B, seq_len]"
@@ -274,20 +278,23 @@ class AbsolutePositionalEncoding(nn.Module):
         # Combined PE: APE with OPE
         pos_embed = torch.cat([obj_pe, x_pe, y_pe], dim=-1)  # [B, seq_len, embed_dim]; NOTE: ViTARC prepends the OPE
 
-        # Handle extra tokens (e.g., cls, register tokens). 
-        # We simply increase the number of positions in the PE, so we don't create a useful PE for the extra tokens
+        # Handle prepended extra tokens (e.g., cls, register tokens). 
         if num_prepended_extra_tokens > 0:
-            extra_pe = torch.zeros((B, num_prepended_extra_tokens, embed_dim), dtype=torch.float32, device=pos_embed.device)
-            pos_embed = torch.cat([extra_pe, pos_embed], dim=1)  # [B, num_prepended_extra_tokens + seq_len, embed_dim]
+            prepended_pe = torch.zeros((B, num_prepended_extra_tokens, embed_dim), dtype=torch.float32, device=pos_embed.device)
+            pos_embed = torch.cat([prepended_pe, pos_embed], dim=1)  # [B, num_prepended_extra_tokens + seq_len, embed_dim]
 
-        # Make sure the APE (with OPE) is fixed/non-learnable
-        pos_embed = nn.Parameter(pos_embed, requires_grad=False)  # [B, seq_len (+num_prepended_extra_tokens), embed_dim]; fixed/non-learnable
+        # Handle appended extra tokens (e.g., task tokens, in-context example)
+        if num_appended_extra_tokens > 0:
+            appended_pe = torch.zeros((B, num_appended_extra_tokens, embed_dim), dtype=torch.float32, device=pos_embed.device)
+            pos_embed = torch.cat([pos_embed, appended_pe], dim=1)
 
-        # Visualize PE
-        # NOTE: Should not uncomment this line if the goal is not to observe the PE, as this would plot for each batch during training
-        # plot_absolute_positional_embeddings(pos_embed, num_prefix_tokens=num_prepended_extra_tokens)
+        # Create the PE (APE with OPE) as a (non-learnable) parameter
+        pos_embed = nn.Parameter(pos_embed, requires_grad=False)  # [B, num_pos_embeds, embed_dim]; fixed/non-learnable
 
-        return pos_embed
+        # Visualize PE for a sample in the batch
+        # plot_absolute_positional_embeddings(pos_embed, num_prepended_tokens=num_prepended_extra_tokens, num_appended_tokens=num_appended_extra_tokens, viz_as_heatmap=False, sample_index_in_batch=0)
+
+        return pos_embed    # [1, num_pos_embeds, embed_dim]
 
 
     def forward(self, inputs_embeds, x_grid_object_ids):
@@ -298,6 +305,8 @@ class AbsolutePositionalEncoding(nn.Module):
 
         Returns:
             output_embeds (torch.Tensor): [batch_size, seq_len, embed_dim]
+
+        NOTE: Code for PEMixer adapted from the ViTARC repo.
         """
 
         # Get the APE
@@ -308,6 +317,7 @@ class AbsolutePositionalEncoding(nn.Module):
                                                        patch_embed=self.patch_embed,
                                                        embed_dim=self.embed_dim,
                                                        num_prepended_extra_tokens=self.num_prepended_extra_tokens,
+                                                       num_appended_extra_tokens=0,
                                                        x_grid_object_ids=x_grid_object_ids
                                                        )    # [batch_size, seq_len, embed_dim]; created for each sample in the batch
         else:
@@ -340,7 +350,7 @@ class AbsolutePositionalEncoding(nn.Module):
             combined_embeds = inputs_embeds + position_embeds
             output_embeds = self.layer_norm(combined_embeds)
 
-        elif strategy == 'default':
+        elif strategy == 'sum':
             output_embeds = inputs_embeds + position_embeds
 
         else:
@@ -404,7 +414,7 @@ class ViTARCMHSA(nn.Module):
     https://github.com/khalil-research/ViTARC/blob/effa665802946de83807143797247e81e8e7c4b3/vitarc/models/model.py#L195
 
     """
-    def __init__(self, model_config, image_size, embed_dim, num_heads, rpe_type, grid_2d_distance_matrix, qkv_bias=False, attn_drop=0., proj_drop=0., num_prepended_extra_tokens=0):
+    def __init__(self, model_config, image_size, embed_dim, num_heads, rpe_type, grid_2d_distance_matrix, qkv_bias=False, attn_drop=0., proj_drop=0., num_prepended_extra_tokens=0, num_appended_extra_tokens=0):
         super().__init__()
 
         self.model_config = model_config
@@ -428,28 +438,40 @@ class ViTARCMHSA(nn.Module):
         self.register_buffer("slopes_r", torch.Tensor(self.get_slopes(self.num_heads, start_exponent=0.5)) * -1)    # TODO: Why 0.5 and not 1 like the left slope?
 
         # Relative position
-        # Calculate relative positions for the 2D grid
+        # Calculate relative positions for the 2D grid. Assume square grid
         grid_height = self.image_size # VITARC wrote: 33
         grid_width = self.image_size # VITARC wrote: 34
+        num_grid_tokens = grid_height * grid_width
         
-        # TODO: Why + 10 ? Just an arbitrary large distance? Why not much more? when we observe the matrix during a run it also contains distance values such as 61 (which is greater than 44) ?
-        large_dist = self.image_size + 100 # VITARC wrote +10 and get 44
+        large_dist = self.image_size + 100  # define an arbitrary large distance for non-grid tokens
 
         ## Calculate matrix of x and y differences
-        total_length = grid_height * grid_width + num_prepended_extra_tokens
-        
+        total_length = grid_height * grid_width + num_prepended_extra_tokens + num_appended_extra_tokens
+
         distance_matrix = torch.full((total_length, total_length), fill_value=large_dist, dtype=torch.float)  # 100 as a large distance
 
         # Assign the 2D relative positions to the correct part of the matrix
-        distance_matrix[num_prepended_extra_tokens:total_length, num_prepended_extra_tokens:total_length] = grid_2d_distance_matrix
+        distance_matrix[num_prepended_extra_tokens:total_length-num_appended_extra_tokens, num_prepended_extra_tokens:total_length-num_appended_extra_tokens] = grid_2d_distance_matrix
 
-        # Handle extra tokens relative positions. Extra tokens are assumed to be far from everything
-        distance_matrix[num_prepended_extra_tokens, :] = large_dist
-        distance_matrix[:, num_prepended_extra_tokens] = large_dist
+        ## Assign the 2D relative distances to the correct slice
+        start_grid_tokens = num_prepended_extra_tokens
+        end_grid_tokens = start_grid_tokens + num_grid_tokens
+        distance_matrix[start_grid_tokens:end_grid_tokens, start_grid_tokens:end_grid_tokens] = grid_2d_distance_matrix
+
+        ## Handle extra tokens relative positions. Extra tokens are assumed to be far from everything
+        # Prepended tokens
+        if num_prepended_extra_tokens > 0:
+            distance_matrix[:start_grid_tokens, :] = large_dist
+            distance_matrix[:, :start_grid_tokens] = large_dist
+
+        # Appended tokens
+        if num_appended_extra_tokens > 0:
+            distance_matrix[end_grid_tokens:, :] = large_dist
+            distance_matrix[:, end_grid_tokens:] = large_dist
 
         self.register_buffer("distance_matrix", distance_matrix)   # [total_length, total_length]; distance matrix for the 2D grid with extra tokens
 
-        
+
     def get_slopes(self, n, start_exponent=1):
         """ ViTARC. Create the slopes for the relative position bias. """
         def get_geometric_slopes(n, start_exponent):
@@ -464,7 +486,6 @@ class ViTARCMHSA(nn.Module):
             closest_power_of_2 = 2 ** math.floor(math.log2(n))
             return (get_geometric_slopes(closest_power_of_2, start_exponent) +
                     self.get_slopes(2 * closest_power_of_2, start_exponent)[0::2][:n - closest_power_of_2])    
-
 
     def compute_bias(self, query_length, key_length, relative_position, device):
         """ ViTARC. Compute binned relative position bias. """
@@ -484,16 +505,24 @@ class ViTARCMHSA(nn.Module):
         values = torch.triu(alibi_right) + torch.tril(alibi_left)
 
         # Slice the relevant part of the bias before reshaping
-        values = values[:, :query_length, :key_length]  # Slicing the tensor before reshaping
-        values = values.view(1, self.num_heads, query_length, key_length)  # shape (1, num_heads, query_length, key_length)            
+        values = values[:, :query_length, :key_length]  # slicing the tensor before reshaping
+        values = values.view(1, self.num_heads, query_length, key_length)  # shape (1, num_heads, query_length, key_length)
 
         return values            
 
-    def forward(self, x):
+    def forward(self, x, num_appended_extra_tokens=0):
         
         ## As usual
         B, seq_len, embed_dim = x.shape
         device = x.device
+
+        # Handle extra tokens
+        if num_appended_extra_tokens > 0:
+            query_length = seq_len - num_appended_extra_tokens
+            key_length = seq_len - num_appended_extra_tokens
+        else:
+            query_length = seq_len
+            key_length = seq_len
         
         # Compute the Queries, Keys, Values from the input embeddings by a linear projection
         x_qkv = self.qkv_proj(x) # [B, seq_len, 3*embed_dim]
@@ -505,17 +534,40 @@ class ViTARCMHSA(nn.Module):
         # Get the Queries, Keys, Values for all heads
         x_q, x_k, x_v = x_qkv[0], x_qkv[1], x_qkv[2]    # ([B, num_heads, seq_len, head_embed_dim], [B, num_heads, seq_len, head_embed_dim], [B, num_heads, seq_len, head_embed_dim])
 
+        # TODO: See how to handle the extra tokens.
+        #       The issue is that the attention we compute and the bias we compute need to be of the same size,
+        #       which is the size of the full sequence. However, when we compute the bias we only compute it for the
+        #       original sequence, no? Also, why do we want to compute attention for the extra tokens anyway?
+        # Remove the extra tokens temporarily
+        # First store q,k extra tokens before removing them
+        prepended_extra_q = None
+        prepended_extra_k = None
+        appended_extra_q = None
+        appended_extra_k = None
+
+        if self.num_prepended_extra_tokens > 0:
+            prepended_extra_q = x_q[:, :, :self.num_prepended_extra_tokens, :]
+            prepended_extra_k = x_k[:, :, :self.num_prepended_extra_tokens, :]
+            x_q = x_q[:, :, self.num_prepended_extra_tokens:, :]
+            x_k = x_k[:, :, self.num_prepended_extra_tokens:, :]
+
+        if num_appended_extra_tokens > 0:
+            appended_extra_q = x_q[:, :, -num_appended_extra_tokens:, :]
+            appended_extra_k = x_k[:, :, -num_appended_extra_tokens:, :]
+            x_q = x_q[:, :, :-num_appended_extra_tokens, :]
+            x_k = x_k[:, :, :-num_appended_extra_tokens, :]
+
         # Compute the attention scores
         attn = (x_q @ x_k.transpose(-2, -1))    # [B, num_heads, seq_len, seq_len]; logits
         attn_scaled = attn * self.scale   # [B, num_heads, seq_len, seq_len]; scaled logits
 
         ## ViTARC. Compute relative bias and add it to the attention logits for RPE
         # TODO: Compute the RPE bias over all the sequence x, which possbily includes extra tokens
-        position_bias = self.compute_bias(seq_len, seq_len, relative_position=self.distance_matrix, device=device)  # [B, num_heads, seq_len, seq_len]
+        position_bias = self.compute_bias(query_length, key_length, relative_position=self.distance_matrix, device=device)  # [B, num_heads, seq_len, seq_len]
         
         # TODO:
         # See if correct to add the position bias to the unscaled logits and to never scale them?
-        # Alibi says we should scale but ViTARC code does not seem to do it?
+        # ViTARC paper says we should scale but their code does not seem to do it?
         attn += position_bias
 
         logits = attn   # [B, num_heads, seq_len, seq_len]
@@ -663,7 +715,7 @@ class FeedForward(nn.Module):
 
 class TransformerLayer(nn.Module):
     """ Transformer layer """
-    def __init__(self, model_config, image_size, embed_dim, num_heads, mlp_ratio=4., qkv_bias=False, attn_drop=0., attn_proj_drop=0., ff_drop=0., num_prepended_extra_tokens=0, rpe_type=None, grid_2d_distance_matrix=None):
+    def __init__(self, model_config, image_size, embed_dim, num_heads, mlp_ratio=4., qkv_bias=False, attn_drop=0., attn_proj_drop=0., ff_drop=0., num_prepended_extra_tokens=0, num_appended_extra_tokens=0, rpe_type=None, grid_2d_distance_matrix=None):
         super().__init__()
 
         self.first_norm = nn.LayerNorm(embed_dim)
@@ -692,6 +744,7 @@ class TransformerLayer(nn.Module):
                                    attn_drop=attn_drop,
                                    proj_drop=attn_proj_drop,
                                    num_prepended_extra_tokens=num_prepended_extra_tokens,
+                                   num_appended_extra_tokens=num_appended_extra_tokens
                                    )
 
         else:
@@ -715,6 +768,8 @@ class TransformerLayer(nn.Module):
     def forward(self, x, num_appended_extra_tokens=0):
         if self.rpe_type == 'rope':
             x = x + self.attn(self.first_norm(x), num_appended_extra_tokens)   # [B, seq_len, embed_dim]; this uses norm first and then attention
+        elif self.rpe_type in ["Four-diag-slope-Alibi", "Two-slope-Alibi"]:
+            x = x + self.attn(self.first_norm(x), num_appended_extra_tokens)
         else:
             x = x + self.attn(self.first_norm(x))   # [B, seq_len, embed_dim]; this uses norm first and then attention
 
@@ -853,6 +908,7 @@ class VisionTransformer(nn.Module):
                                                   patch_embed=self.patch_embed,
                                                   embed_dim=self.embed_dim,
                                                   num_prepended_extra_tokens=self.num_prepended_extra_tokens,
+                                                  num_appended_extra_tokens=self.num_appended_extra_tokens,
                                                   ape_type=model_config.ape.ape_type,
                                                   mixer_strategy=model_config.ape.mixer
                                                   )
@@ -884,6 +940,7 @@ class VisionTransformer(nn.Module):
                 attn_proj_drop=network_config.attn_proj_dropout_rate,
                 ff_drop=network_config.ff_dropout_rate,
                 num_prepended_extra_tokens=self.num_prepended_extra_tokens,
+                num_appended_extra_tokens=self.num_appended_extra_tokens,
                 rpe_type=rpe_type,
                 grid_2d_distance_matrix=grid_2d_distance_matrix
             )

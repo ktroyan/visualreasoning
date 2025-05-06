@@ -1,0 +1,64 @@
+*** Commands to run for Before-ARC sweeps ***
+
+NOTE:
+- We specify the relevant parameters based on the default configs.
+
+## ResNet
+# Compositionality
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es1.yaml" --gpu_id 0 --backbone resnet --visual_tokens_enabled false
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es2.yaml" --gpu_id 1 --backbone resnet --visual_tokens_enabled false
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es3.yaml" --gpu_id 2 --backbone resnet --visual_tokens_enabled false
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es4.yaml" --gpu_id 3 --backbone resnet --visual_tokens_enabled false
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es5.yaml" --gpu_id 4 --backbone resnet --visual_tokens_enabled false
+
+# Sys-Gen
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_es1.yaml" --gpu_id 0 --backbone resnet --visual_tokens_enabled false
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_es2.yaml" --gpu_id 1 --backbone resnet --visual_tokens_enabled false
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_es3.yaml" --gpu_id 2 --backbone resnet --visual_tokens_enabled false
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_es4.yaml" --gpu_id 3 --backbone resnet --visual_tokens_enabled false
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_es5.yaml" --gpu_id 4 --backbone resnet --visual_tokens_enabled false
+
+## ViT-vanilla
+# Compositionality
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es1.yaml" --gpu_id 0 --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es2.yaml" --gpu_id 1 --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es3.yaml" --gpu_id 2 --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es4.yaml" --gpu_id 3 --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es5.yaml" --gpu_id 4 --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false
+
+# Sys-Gen
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_es1.yaml" --gpu_id 0 --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_es2.yaml" --gpu_id 1 --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_es3.yaml" --gpu_id 2 --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_es4.yaml" --gpu_id 3 --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_es5.yaml" --gpu_id 4 --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false
+
+## ViT-vitarc
+# Compositionality
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es1.yaml" --gpu_id 0 --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum --ope_enabled true --rpe_enabled true --rpe_type Two-slope-Alibi
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es2.yaml" --gpu_id 1 --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum --ope_enabled true --rpe_enabled true --rpe_type Two-slope-Alibi
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es3.yaml" --gpu_id 2 --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum --ope_enabled true --rpe_enabled true --rpe_type Two-slope-Alibi
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es4.yaml" --gpu_id 3 --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum --ope_enabled true --rpe_enabled true --rpe_type Two-slope-Alibi
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es5.yaml" --gpu_id 4 --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum --ope_enabled true --rpe_enabled true --rpe_type Two-slope-Alibi
+
+# Sys-Gen
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_es1.yaml" --gpu_id 0 --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum --ope_enabled true --rpe_enabled true --rpe_type Two-slope-Alibi
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_es2.yaml" --gpu_id 1 --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum --ope_enabled true --rpe_enabled true --rpe_type Two-slope-Alibi
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_es3.yaml" --gpu_id 2 --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum --ope_enabled true --rpe_enabled true --rpe_type Two-slope-Alibi
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_es4.yaml" --gpu_id 3 --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum --ope_enabled true --rpe_enabled true --rpe_type Two-slope-Alibi
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_es5.yaml" --gpu_id 4 --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum --ope_enabled true --rpe_enabled true --rpe_type Two-slope-Alibi
+
+## ViT-ours
+# Compositionality
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es1.yaml" --gpu_id 0 --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --num_reg_tokens 6
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es2.yaml" --gpu_id 1 --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --num_reg_tokens 6
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es3.yaml" --gpu_id 2 --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --num_reg_tokens 6
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es4.yaml" --gpu_id 3 --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --num_reg_tokens 6
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es5.yaml" --gpu_id 4 --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --num_reg_tokens 6
+
+# Sys-Gen
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_es1.yaml" --gpu_id 0 --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --num_reg_tokens 6
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_es2.yaml" --gpu_id 1 --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --num_reg_tokens 6
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_es3.yaml" --gpu_id 2 --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --num_reg_tokens 6
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_es4.yaml" --gpu_id 3 --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --num_reg_tokens 6
+bash ./jobs/run_experiment_nohup.sh --max_epochs 10 --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_es5.yaml" --gpu_id 4 --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --num_reg_tokens 6
