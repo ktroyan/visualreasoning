@@ -111,9 +111,11 @@ class BEFOREARCDataset(Dataset):
         ## Task embedding
         if task_embedding_approach == 'task_tokens':
             self.max_transformation_depth = max_transformation_depth
-        
+
+            logger.info(f"Using task embedding (task tokens) of length: {self.max_transformation_depth}")            
+
             # Define all the possible elementary transformations
-            # NOTE: For now we only define those.
+            # TODO: For now we only define those as they are the ones that appear in the experiments
             self.elementary_transformations_to_token_ids = {'identity': max_token_id + 1,    # sort of transformation padding; used to handle variable composite transformation true depth
                                                             'translate_up': max_token_id + 2,
                                                             'rot90': max_token_id + 3,
@@ -270,7 +272,7 @@ class BEFOREARCDataset(Dataset):
             transformation_tokens_sequence += [self.elementary_transformations_to_token_ids['identity']] * (self.max_transformation_depth - len(transformation_tokens_sequence))
 
             # Convert the sequence of tokens to a tensor
-            task_tokens_seq = torch.tensor(transformation_tokens_sequence, dtype=torch.long)            
+            task_tokens_seq = torch.tensor(transformation_tokens_sequence, dtype=torch.long)
 
         elif self.task_embedding_approach == 'example_in_context':
             # Get the input-output pair of grids as an example of the transformation to perform
@@ -278,22 +280,12 @@ class BEFOREARCDataset(Dataset):
             example_output = self.convert_to_tensor(sample['demo_output'])
 
         ## Input image data-transform
-        # TODO: Should the potential transform be applied before the border and pad tokens added or after? Usually before?
         if self.transform is not None:
             x = self.transform(x)
 
         # Get the true (i.e., non-padded) size of the output tensor
         y_true_size = y.shape
         y_true_size = torch.tensor(y_true_size, dtype=torch.long)
-
-
-        # TODO: See the TODO below.
-        # if self.use_grid_object_ids:
-        #     x_grid_object_ids = create_object_grid(x, self.max_img_size, self.special_tokens)
-        # else:
-        #     # We cannot return None, so we create a grid of -1 values (as such value never appears) as it will not be used
-        #     x_grid_object_ids = torch.full((self.max_img_size * self.max_img_size,), -1, dtype=torch.long)  # [max_img_size * max_img_size]
-
 
         ## Visual tokens and padding
         if self.use_visual_tokens:
@@ -350,9 +342,9 @@ class BEFOREARCDataset(Dataset):
             # We cannot return None, so we create a grid of -1 values (as such value never appears) as it will not be used
             x_grid_object_ids = torch.full((self.max_img_size * self.max_img_size,), -1, dtype=torch.long)  # [max_img_size * max_img_size]
 
-        ## Noisy target (for debug)
+        ## Noisy target (for model performance sanity checks w.r.t. the data)
         # Add noise to the target grid y
-        # y = self.add_noise(y, noise_ratio=0.5)  # TODO: Remove after we have checked that the code is correct
+        # y = self.add_noise(y, noise_ratio=0.5)  # TODO: Remove after we have checked that the data are created as intended and there is no leakage
         
         return x, y, task_tokens_seq, example_in_context, y_true_size, x_grid_object_ids, self.special_grid_tokens
 
@@ -468,7 +460,8 @@ class BEFOREARCDataModule(DataModuleBase):
                 task_embedding_approach = 'task_tokens'
                 # Max. transformation depth
                 # Check the maximum transformation depth (i.e., how many elementary transformations at most compose the transformations part of the dataset splits)
-                max_transformation_depth = get_max_transformation_depth_across_dataset_splits(dataset_splits)
+                # max_transformation_depth = get_max_transformation_depth_across_dataset_splits(dataset_splits)
+                max_transformation_depth = 4    # TODO: Fix it to 4 for now as a fix to handling extra appended tokens more easily (e.g., in Alibi RPE)
             
             elif model_config.task_embedding.approach == 'example_in_context':
                 task_embedding_approach = 'example_in_context'

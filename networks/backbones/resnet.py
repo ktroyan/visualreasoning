@@ -8,6 +8,39 @@ from utility.rearc.utils import one_hot_encode
 
 __all__ = ['get_resnet']
 
+class PatchEmbed(nn.Module):
+    """ 
+    Input image to Patch Embeddings.
+
+    If patch_size=1, the input is essentially flattened (pixels) and projected linearly to the embedding dimension (by the convolutional layer).
+    If patch_size>1, the input is divided into patches and each patch is projected to the embedding dimension using a convolutional layer.
+
+    If num_token_categories is given (not None), the input is a 2D Tensor with possible token values that are represented as OHE artificial channels so that the tensor can be flattened and projected linearly (1x1 conv) to the embedding dimension.
+    If num_token_categories is None, the input is a 2D Tensor for which we create an artificial single channel so that the tensor can be flattened and projected linearly (1x1 conv) to the embedding dimension.
+    
+    Eseentially, giving num_token_categories is for REARC and BEFOREARC, not for CVR (as it is a continuous image space and not categorical values)
+    """
+    def __init__(self, base_config, img_size, patch_size, in_channels, embed_dim, num_token_categories=None):
+        super().__init__()
+        
+        self.base_config = base_config
+
+        # NOTE: The image is assumed to be square
+        self.img_size = img_size
+        self.patch_size = patch_size
+        self.grid_size = img_size // patch_size
+        self.num_patches = (self.grid_size) ** 2
+
+        self.patch_proj = nn.Conv2d(in_channels=in_channels, out_channels=embed_dim, kernel_size=patch_size, stride=patch_size)
+
+    def forward(self, x):
+        if self.base_config.data_env in ['REARC', 'BEFOREARC']:
+            x = x.unsqueeze(1).float()  # add a channel dimension for the input image: [B, C=1, H, W] <-- [B, H, W]; x is int64, so we need to convert it to float32 for the Conv2d layer (otherwise issue with the conv bias)
+
+        x = self.patch_proj(x)    # [B, embed_dim, H_out//patch_size, W_out//patch_size], where H_out = ((H-1)/1)+1) = H and W_out = ((W-1)/1)+1) = W if the spatial dimensions have not been reduced, by having patch_size=1 and stride=patch_size
+        x = x.flatten(2) # [B, embed_dim, num_patches]; flatten the spatial dimensions to get a sequence of patches
+        x = x.transpose(1, 2)  # [B, num_patches, embed_dim], where num_patches = H*W = seq_len
+        return x
 
 class ResNet(nn.Module):
     """
@@ -24,15 +57,14 @@ class ResNet(nn.Module):
 
         self.image_size = image_size
 
+        self.patch_size = self.model_config.patch_size
+        self.embed_dim = network_config.embed_dim
+
         self.original_num_out_features = resnet.fc.in_features   # get the original number of output features of the backbone
 
         if self.base_config.data_env in ['REARC', 'BEFOREARC']:
             patch_size = 1
-            if self.model_config.use_ohe_repr:
-                self.num_channels = num_classes
-            else:
-                self.num_channels = 1
-
+            self.num_channels = 1
             self.input_projection = nn.Conv2d(in_channels=self.num_channels, out_channels=3, kernel_size=patch_size, stride=patch_size)  # 10 channels (from the one-hot encoding) to 3 channels
             
             # Modify the original Resnet network from torchvision in order to output the required dimensions
@@ -54,8 +86,19 @@ class ResNet(nn.Module):
         # Projection layer to go from the embedding dimension of the original ResNet to the embedding dimension specified for our network
         self.projection_to_embed_dim = nn.Linear(self.original_num_out_features, self.network_config.embed_dim)
 
+        ## Patch Embeddings
+        if base_config.data_env == 'CVR':
+            # We are in CVR and we want to use the RGB channels for the input image, so we create patches using convolutions
+            # Using channels: input x is [B, C=3, H, W] and we should get [B, seq_len=num_patches, embed_dim]
+            self.patch_embed = PatchEmbed(base_config, img_size=self.image_size, patch_size=self.patch_size, in_channels=self.num_channels, embed_dim=self.embed_dim)
+        
+        elif base_config.data_env in ['REARC', 'BEFOREARC']:
+            # NOTE: When patch_size=1 (i.e., consider pixels), this is equivalent to flattening the input image and projecting it to the embedding dimension
+            self.patch_embed = PatchEmbed(base_config, img_size=self.image_size, patch_size=self.patch_size, in_channels=self.num_channels, embed_dim=self.embed_dim)
 
-    def forward(self, x, *args, **kwargs):
+
+
+    def forward(self, x, task_tokens=None, example_in_context=None, *args, **kwargs):
         """
         NOTE:
         For REARC, we need to transform our input so that it has 3 channels as expected by the torchvision ResNet model.
@@ -67,12 +110,8 @@ class ResNet(nn.Module):
 
         if self.base_config.data_env in ['REARC', 'BEFOREARC']:
             # Prepare REARC input data to be used by a ResNet network
-            if self.model_config.use_ohe_repr:
-                # One-hot encode the input to add an artificial channel dimension (of size equal to the number of classes) to the input
-                x = one_hot_encode(x, num_token_categories=self.num_channels)   # [B, C=num_classes, H, W] <-- [B, H, W]
-            else:
-                # Add an artificial channel dimension (of size 1) to the input
-                x = x.unsqueeze(1)   # [B, C=1, H, W] <-- [B, H, W]
+            # Add an artificial channel dimension (of size 1) to the input
+            x = x.unsqueeze(1).float()   # [B, C=1, H, W] <-- [B, H, W]
 
             # Use a 1x1 convolution to transform the input (with some number of channels) to an "image" with the expected number of channels
             x = self.input_projection(x)    # [B, C=3, H, W] <-- [B, C, H, W]
@@ -133,6 +172,17 @@ class ResNet(nn.Module):
             x = self.resnet(x)  # [B, C=self.original_num_out_features] <-- [B, C=3, H, W]
             x = self.projection_to_embed_dim(x)  # [B, C=self.network_config.embed_dim] <-- [B, C=self.original_num_out_features]
 
+        # Handle the task embedding for the task_tokens approach
+        if task_tokens is not None and self.base_config.data_env in ['REARC', 'BEFOREARC']:
+            x = torch.cat((x, task_tokens), dim=1)  # [B, seq_len + num_task_tokens, embed_dim]
+            
+        # Handle the task embedding for the example_in_context approach
+        if example_in_context is not None and self.base_config.data_env in ['REARC', 'BEFOREARC']:
+            example_input = self.patch_embed(example_in_context[0])
+            example_output = self.patch_embed(example_in_context[1])
+
+            # Append the example input and output to the input sequence
+            x = torch.cat((x, example_input, example_output), dim=1)    # [B, 3*seq_len, embed_dim]
 
         return x
 
