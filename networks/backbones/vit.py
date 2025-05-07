@@ -313,6 +313,7 @@ class AbsolutePositionalEncoding(nn.Module):
             position_embeds = self.static_ape   # [1, seq_len, embed_dim]; create for a single sample, so need to be expanded to the batch size
             position_embeds = position_embeds.expand(inputs_embeds.shape[0], -1, -1)  # [batch_size, seq_len, embed_dim]
 
+        position_embeds = position_embeds.to(inputs_embeds.device)  # make sure the PE is on the same device as the input embeddings
 
         # PE Mixer strategy
         strategy = self.mixer_strategy
