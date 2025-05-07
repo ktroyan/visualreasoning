@@ -365,12 +365,9 @@ def process_test_results(config, test_results, test_type="test", exp_logger=None
     """
     Process the test results and log them.
 
-    TODO:
-    Improve handling and display of the results, especially for multi-task experiments.
-        
-    FIXME:
-    For this code to work currently, the batch size should yield a number of elements in each key of results so that it is a multiple of the number of tasks, otherwise the reshape will fail.
-    Also see how to handle the case where the results are for multiple test dataloaders
+    TODO / FIXME:
+    Handle and display of the results, especially for multi-task experiments.
+    See how to handle the case where the results are for multiple test dataloaders
     """
 
     test_set_path = f"{config.data.dataset_dir}/{test_type}"
@@ -401,39 +398,57 @@ def process_test_results(config, test_results, test_type="test", exp_logger=None
     per_task = {}
     per_task_avg = {}
 
-    # nb_of_tasks = len(tasks_considered)
+    return None
 
-    for metric_key, r in test_results.items():
-        logger.debug(f"Processing results for metric key: {metric_key}, and result with shape: {r.shape}")
-        k_result = r.reshape([len(tasks_considered), -1])
-        for i, task in enumerate(tasks_considered):
-            if 'task' not in task:
-                per_task[f'{metric_key}_task_{task}'] = k_result[i]
-                per_task_avg[f'{metric_key}_task_{task}'] = k_result[i].mean()
-                
-            else:
-                per_task[f'{metric_key}_{task}'] = k_result[i]
-                per_task_avg[f'{metric_key}_{task}'] = k_result[i].mean()
+def get_paper_model_name(config):
+    """ Prepare model name for logging """
+    model_name = None
+
+    if config.model.backbone == "vit":
+        if (
+            (not config.model.visual_tokens.enabled) and
+            (config.model.ape.enabled) and
+            (config.model.ape.ape_type == "learn") and
+            (not config.model.rpe.enabled) and
+            (not config.model.ope.enabled) and
+            (config.model.num_reg_tokens == 0)
+        ):
+            model_name = "ViT-vanilla"
+        
+        elif (
+            (config.model.visual_tokens.enabled) and 
+            (config.model.ape.enabled) and 
+            (config.model.ape.ape_type == "2dsincos") and
+            (config.model.ape.mixer != "sum") and
+            (config.model.ope.enabled) and
+            (config.model.rpe.enabled) and 
+            ("Alibi" in config.model.rpe.rpe_type)
+        ):
+            model_name = "ViT-vitarc"
+        
+        elif (
+            (config.model.visual_tokens.enabled) and 
+            (config.model.ape.enabled) and 
+            (config.model.ape.ape_type == "2dsincos") and
+            (config.model.rpe.enabled) and
+            (config.model.rpe.rpe_type == "rope")
+        ):
+            model_name = "ViT"
+
+    elif (
+        (config.model.backbone == "resnet") and
+        (not config.model.visual_tokens.enabled)
+    ):
+        model_name = "ResNet"
     
-    logger.info(f"Global average results:\n{global_avg}")
+    elif config.model.backbone == "diffusion_vit":
+        model_name = "ViT-diffusion"
     
-    log_message = "Per task results for each batch/step:\n"
-    for key, value in per_task.items():
-        log_message += f"{key}: {value}\n"
-    logger.info(log_message)
+    elif config.model.backbone == "looped_vit":
+        model_name = "ViT-looped"
     
-    logger.info(f"Per task average results:\n{per_task_avg}")
+    if model_name is None:
+        logger.warning(f"Model backbone was not recognized. Simply using the backbone network name ({config.model.backbone}) from the config for the model name.")
+        model_name = config.model.backbone
 
-    if exp_logger is not None:
-        exp_logger.experiment.log({f"{test_type}_results_global_avg/{k}": v for k, v in global_avg.items()})
-        exp_logger.experiment.log({f"{test_type}_results_per_task_avg/{k}": v for k, v in per_task_avg.items()})
-        # exp_logger.experiment.log({f"{test_type}_results_per_task/{k}": v for k, v in per_task.items()})   # TODO: check how to to log it properly if needed
-        exp_logger.save()
-
-    processed_test_results = {
-        f"{test_type}_results_global_avg": global_avg,
-        f"{test_type}_results_per_task": per_task,
-        f"{test_type}_results_per_task_avg": per_task_avg
-    }
-
-    return processed_test_results
+    return model_name

@@ -16,58 +16,12 @@ import data
 import models
 import training
 import inference
-from utility.utils import log_config_dict, get_complete_config, generate_timestamped_experiment_name, save_model_metadata_for_ckpt
+from utility.utils import log_config_dict, get_complete_config, generate_timestamped_experiment_name, save_model_metadata_for_ckpt, get_paper_model_name
 from utility.logging import logger
 
 torch.backends.cudnn.benchmark = False
 torch.backends.cudnn.deterministic = False
 torch.set_float32_matmul_precision('medium')    # 'high'
-
-
-def get_paper_model_name(config):
-    """ Prepare model name (as per the paper convention) for logging """
-    
-    # Prepare the specific model name (to report in the paper)
-    if config.model.backbone == "vit":
-        if (
-            (config.model.visual_tokens.enabled) and 
-            (config.model.ape.enabled) and 
-            (config.model.ape.ape_type == "2dsincos") and
-            (config.model.ape.mixer != "default") and
-            (config.model.ope.enabled) and
-            (config.model.rpe.enabled) and 
-            ("Alibi" in config.model.rpe.rpe_type)
-        ):
-            model_name = "ViT-vitarc"
-        
-        elif (
-            (config.model.visual_tokens.enabled) and 
-            (config.model.ape.enabled) and 
-            (config.model.ape.ape_type == "2dsincos") and
-            (config.model.rpe.enabled) and
-            (config.model.rpe.rpe_type == "rope")
-        ):
-            model_name = "ViT"
-        
-        elif (
-            (not config.model.visual_tokens.enabled) and
-            (config.model.ape.enabled) and
-            (config.model.ape.ape_type == "learn") and
-            (not config.model.rpe.enabled) and
-            (not config.model.ope.enabled)
-        ):
-            model_name = "ViT-vanilla"
-
-    elif config.model.backbone == "resnet":
-        model_name = "ResNet"
-    elif config.model.backbone == "diffusion_vit":
-        model_name = "ViT-diffusion"
-    elif config.model.backbone == "looped_vit":
-        model_name = "ViT-looped"
-    else:
-        raise ValueError(f"Model {config.model.backbone} not recognized. Please check the model name.")
-
-    return model_name
 
 def write_experiment_results_logs(config, experiment_folder, paper_experiment_results, paper_model_name):
     # Save the experiment results relevant to the paper

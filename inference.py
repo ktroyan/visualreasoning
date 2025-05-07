@@ -11,7 +11,7 @@ import pytorch_lightning as pl
 # Personal codebase dependencies
 import data
 import models
-from utility.utils import get_complete_config, log_config_dict, get_model_from_ckpt, process_test_results
+from utility.utils import get_complete_config, log_config_dict, get_model_from_ckpt, get_paper_model_name, process_test_results
 from utility.rearc.utils import observe_rearc_input_output_images, check_train_test_contamination as check_rearc_train_test_contamination
 from utility.logging import logger
 
@@ -20,46 +20,6 @@ torch.set_float32_matmul_precision('medium')    # 'high'
 torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.deterministic = True
 
-
-def get_paper_model_name(config):
-    """ Prepare model name for logging """
-    if config.model.backbone == "vit":
-        if (
-            (config.model.visual_tokens.enabled) and 
-            (config.model.ape.enabled) and 
-            (config.model.ape.ape_type == "2dsincos") and
-            (config.model.ape.mixer != "default") and
-            (config.model.ope.enabled) and
-            (config.model.rpe.enabled) and 
-            ("Alibi" in config.model.rpe.rpe_type)
-        ):
-            model_name = "ViT-vitarc"
-        elif (
-            (config.model.visual_tokens.enabled) and 
-            (config.model.ape.enabled) and 
-            (config.model.ape.ape_type == "2dsincos") and
-            (config.model.rpe.enabled) and
-            (config.model.rpe.rpe_type == "rope")
-        ):
-            model_name = "ViT"
-        elif (
-            (not config.model.visual_tokens.enabled) and
-            (config.model.ape.enabled) and
-            (config.model.ape.ape_type == "learn") and
-            (not config.model.rpe.enabled) and
-            (not config.model.ope.enabled)
-        ):
-            model_name = "ViT-vanilla"
-    elif config.model.backbone == "resnet":
-        model_name = "ResNet"
-    elif config.model.backbone == "diffusion_vit":
-        model_name = "ViT-diffusion"
-    elif config.model.backbone == "looped_vit":
-        model_name = "ViT-looped"
-    else:
-        raise ValueError(f"Model {config.model.backbone} not recognized. Please check the model name.")
-
-    return model_name
 
 def write_inference_results_logs(config, inference_folder, all_test_results, paper_model_name):
     # Format filename
