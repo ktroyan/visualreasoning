@@ -2,7 +2,6 @@ import math
 import os
 import time
 from omegaconf import OmegaConf
-import pandas as pd
 import torch
 import pytorch_lightning as pl
 from pytorch_lightning.loggers.wandb import WandbLogger
@@ -68,6 +67,8 @@ def write_experiment_results_logs(config, experiment_folder, paper_experiment_re
         f.write("\n")
     
     logger.info(f"Experiment results saved to: {experiment_results_file_path}")
+
+    return experiment_results_file_path
 
 def main() -> None:
     """ Main function to run an experiment """
@@ -149,10 +150,7 @@ def main() -> None:
                                       model_ckpt_path=None, # we use the best model obtained during training, so no need to specify a checkpoint path
                                       exp_logger=exp_logger
                                       )
-    
 
-    # End the wandb run
-    run.finish()
 
     ## Training results
     # Get the value for each epoch key (in the dict "/metrics")
@@ -172,9 +170,14 @@ def main() -> None:
 
     # Get the model name for the paper
     paper_model_name = get_paper_model_name(config)
+    exp_logger.experiment.log({"paper_model_name": paper_model_name})  # log the model name for the paper to wandb
 
     # Save the experiment results relevant to the paper
-    write_experiment_results_logs(config, experiment_folder, paper_experiment_results, paper_model_name)
+    experiment_results_file_path = write_experiment_results_logs(config, experiment_folder, paper_experiment_results, paper_model_name)
+    exp_logger.experiment.save(experiment_results_file_path)    # save the experiment results file to wandb; similar to wandb.save()
+
+    # End the wandb run
+    run.finish()
 
     # Time taken for the experiment
     log_message = "*** Experiment ended ***\n"
@@ -182,28 +185,6 @@ def main() -> None:
     log_message += f"\nTotal experiment time: \n{exp_elapsed_time} seconds ~=\n{exp_elapsed_time/60} minutes ~=\n{exp_elapsed_time/(60*60)} hours"
     logger.info(log_message)
 
-    # # Save the results and config arguments that we are the most interested to check quickly when experimenting
-    # exp_results_dict = {
-    #     'experiments_dir': config.experiment.experiments_dir,
-    #     'exp_name': experiment_name_timestamped,
-    #     'dataset_dir': config.data.dataset_dir,
-    #     'exp_duration': exp_elapsed_time,
-    #     'data_module': config.base.data_module,
-    #     'model_module': config.base.model_module,
-    #     'network_backbone': config.model.backbone,
-    #     'network_head': config.model.head,
-    #     'model_ckpt': config.training.model_ckpt_path,
-    #     'max_epochs': config.training.max_epochs,
-    #     'train_batch_size': config.data.train_batch_size,
-    #     'val_batch_size': config.data.val_batch_size,
-    #     'test_batch_size': config.data.test_batch_size,
-    #     'lr': config.model.training_hparams.lr,
-    #     'optimizer': config.model.training_hparams.optimizer,
-    #     'scheduler_type': config.model.training_hparams.scheduler.type,
-    #     'scheduler_interval': config.model.training_hparams.scheduler.interval,
-    #     'scheduler_frequency': config.model.training_hparams.scheduler.frequency,
-    #     'seed': config.base.seed,
-    # }
 
 
 def count_grid_combinations_for_sweep_jobs(sweep_config):
@@ -244,6 +225,10 @@ if __name__ == '__main__':
     # Get all the config arguments.
     # This is needed to get the arguments that decide on whether to run sweeps or not
     config, _ = get_complete_config()
+
+    if config.experiment.dev_run:
+        os.environ["WANDB_MODE"] = "disabled"
+        logger.info("WandB disabled for this (development) run.")
 
     if config.wandb.sweep.enabled:
         # Multiple experiment runs (i.e., experiments sweep)

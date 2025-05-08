@@ -67,6 +67,8 @@ def write_inference_results_logs(config, inference_folder, all_test_results, pap
 
     logger.info(f"Test results saved to: {test_results_file_path}")
 
+    return test_results_file_path
+
 def main(config, inference_folder, datamodule, model=None, model_ckpt_path=None, exp_logger=None):
 
     logger.info("*** Inference started ***")
@@ -151,7 +153,10 @@ def main(config, inference_folder, datamodule, model=None, model_ckpt_path=None,
     paper_model_name = get_paper_model_name(config)
 
     # Save test results relevant to the paper in a log file
-    write_inference_results_logs(config, inference_folder, all_test_results, paper_model_name)
+    test_results_file_path = write_inference_results_logs(config, inference_folder, all_test_results, paper_model_name)
+    if exp_logger is not None:
+        exp_logger.experiment.save(test_results_file_path)
+
 
     # End of inference
     log_message = "*** Inference ended ***\n"

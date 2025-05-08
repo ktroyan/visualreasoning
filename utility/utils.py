@@ -188,7 +188,7 @@ def log_config_dict(config_dict, log_message=""):
 
 def generate_timestamped_experiment_name(exp_basename):
     now = datetime.datetime.now()
-    timestamp = now.strftime("%d_%m_%H_%M")
+    timestamp = now.strftime("%d_%m_%H_%M_%S")
     experiment_name = f"{exp_basename}_{timestamp}"
     return experiment_name
 
