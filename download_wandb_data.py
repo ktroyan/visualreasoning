@@ -6,8 +6,9 @@ import warnings
 import json
 import ast
 import numpy as np
+import math
 
-warnings.filterwarnings("ignore")
+# warnings.filterwarnings("ignore")
 
 api = wandb.Api(api_key=os.getenv("WANDB_API_KEY"))
 
@@ -17,6 +18,9 @@ EXTRACTED_METRICS = ['test_acc_epoch', 'test_acc_grid_epoch', 'test_acc_grid_no_
                      'gen_test_acc_grid_epoch', 'gen_test_acc_grid_no_pad_epoch', 'gen_test_acc_step',
                      'gen_test_acc_grid_step', 'gen_test_acc_grid_no_pad_step', 'metrics/gen_val_acc_epoch',
                      'metrics/gen_val_acc_grid_epoch', 'metrics/gen_val_acc_grid_no_pad_epoch']
+
+
+EXTRACTED_METRICS = ['test_acc_grid_no_pad_epoch', 'gen_test_acc_grid_no_pad_epoch']
 
 
 def download_data(entity: str, project: str) -> pd.DataFrame:
@@ -39,6 +43,8 @@ def download_data(entity: str, project: str) -> pd.DataFrame:
             run_infos['study'] = config["experiment"]["value"]["study"]
             run_infos['name'] = config["experiment"]["value"]["name"]
             run_infos['setting'] = config["experiment"]["value"]["setting"]
+            has_gen_test_data = ast.literal_eval(config["data_config"]["value"])["use_gen_test_set"]
+            has_gen_val_data = ast.literal_eval(config["data_config"]["value"])["validate_in_and_out_domain"]
 
             if "backbone_network_config" in config:
                 run_infos['backbone'] = ast.literal_eval(config["backbone_network_config"]["value"])["name"]
@@ -50,12 +56,15 @@ def download_data(entity: str, project: str) -> pd.DataFrame:
             else:
                 run_infos['head'] = config["model"]["value"]["head"]
 
-            # TODO: "use_task_embeddings" will not be needed anymore in the future
-            run_infos['use_task_embeddings'] = ast.literal_eval(config['model_config']['value'])['task_embedding']['enabled']
-
             # Get required results
             summary = run.summary._json_dict
             for key in EXTRACTED_METRICS:
+
+                if "gen" in key and "test" in key and not has_gen_test_data:
+                    continue
+
+                if "gen" in key and "val" in key and not has_gen_val_data:
+                    continue
 
                 r = summary.get(key, None)
                 if r is None:
@@ -82,7 +91,7 @@ def pretty_print_run_data(run_data_df: pd.DataFrame) -> None:
     filtered_df = filtered_df.sort_values(by=['study', 'setting', 'name', 'use_task_embeddings'])
 
     # Hierarchical print including task embedding flag
-    for study in filtered_df['study'].unique():
+    for study in ['comp', 'sysgen']: # filtered_df['study'].unique():
         print(f"Study: {study}")
         study_df = filtered_df[filtered_df['study'] == study]
 
@@ -107,13 +116,10 @@ def pretty_print_run_data(run_data_df: pd.DataFrame) -> None:
 def create_latex_tables(run_data_df: pd.DataFrame) -> None:
     metrics = [
         {'key': 'test_acc_grid_no_pad_epoch',
-         'col': 'Test Acc. Grid',
-         },
-        {'key': 'metrics/val_acc_grid_no_pad_epoch',
-         'col': 'Eval Acc. Grid',
+         'col': 'IID',
          },
         {'key': 'gen_test_acc_grid_no_pad_epoch',
-         'col': 'Gen. Test Acc. Grid',
+         'col': 'OOD',
          },
     ]
 
@@ -122,86 +128,20 @@ def create_latex_tables(run_data_df: pd.DataFrame) -> None:
          'conditions': {
              'backbone': 'llada',
              'head': 'mlp',
-             'use_task_embeddings': False,
-         },
-         },
-        {'name': 'LlADA TE',
-         'conditions': {
-             'backbone': 'llada',
-             'head': 'mlp',
-             'use_task_embeddings': True,
          },
          },
         {'name': 'Looped ViT',
          'conditions': {
              'backbone': 'looped_vit',
              'head': 'mlp',
-             'use_task_embeddings': False,
-         },
-         },
-        {'name': 'Looped ViT TE',
-         'conditions': {
-             'backbone': 'looped_vit',
-             'head': 'mlp',
-             'use_task_embeddings': True,
          },
          },
         {'name': 'ResNet',
          'conditions': {
              'backbone': 'resnet',
              'head': 'mlp',
-             'use_task_embeddings': False,
          },
          },
-        {'name': 'ResNet TE',
-         'conditions': {
-             'backbone': 'resnet',
-             'head': 'mlp',
-             'use_task_embeddings': True,
-         },
-         },
-        # {'name': 'Transformer',
-        #  'conditions': {
-        #      'backbone': 'transformer',
-        #      'head': 'mlp',
-        #      'use_task_embeddings': False,
-        #  },
-        #  },
-        # {'name': 'Transformer TE',
-        #  'conditions': {
-        #      'backbone': 'transformer',
-        #      'head': 'mlp',
-        #      'use_task_embeddings': True,
-        #  },
-        #  },
-        # {'name': 'ViT',
-        #  'conditions': {
-        #      'backbone': 'vit',
-        #      'head': 'mlp',
-        #      'use_task_embeddings': False,
-        #  },
-        #  },
-        # {'name': 'ViT TE',
-        #  'conditions': {
-        #      'backbone': 'vit',
-        #      'head': 'mlp',
-        #      'use_task_embeddings': True,
-        #  },
-        #  },
-        # {'name': 'ViT Timm',
-        #  'conditions': {
-        #      'backbone': 'vit_timm',
-        #      'head': 'mlp',
-        #      'use_task_embeddings': False,
-        #  },
-        #  },
-        # {'name': 'ViT Timm TE',
-        #  'conditions': {
-        #      'backbone': 'vit_timm',
-        #      'head': 'mlp',
-        #      'use_task_embeddings': True,
-        #  },
-        #  },
     ]
 
     for data_env in run_data_df['data_env'].unique():
@@ -246,6 +186,8 @@ def create_latex_tables(run_data_df: pd.DataFrame) -> None:
                                 warnings.warn(f"Multiple values found for {metric['key']} with {study}, {setting}, {experiment}, {model['name']}")
                                 warnings.warn(f"Found these values {str(value.values)}")
                             if not value.empty:
+                                if math.isnan(value.values[0]):
+                                    warnings.warn(f"No data found for {metric['key']}")
                                 row.append(f"{value.values[0]:.2f}")
                             else:
                                 row.append("N/A")
@@ -262,21 +204,49 @@ def create_latex_tables(run_data_df: pd.DataFrame) -> None:
                 print("\n".join(table))
 
 
+
+
+
+
+def calc_table_averages(run_data_df: pd.DataFrame) -> None:
+    metrics = ["test_acc_grid_no_pad_epoch", "gen_test_acc_grid_no_pad_epoch"]
+    grouping = ["data_env", "study", "setting", "backbone", "head"]
+
+    # Filter runs
+    run_data_df = run_data_df[(run_data_df.state == "finished") & (run_data_df["data_env"] == "BEFOREARC")]
+
+    # Check Completeness
+    expected_runs = 23
+    counts = run_data_df.groupby(["backbone", "head"]).count()["id"]
+    for key, count in counts.items():
+        if count != expected_runs:
+            print(f"Warning: {key} has {count} runs instead of {expected_runs}")
+
+    # TODO; Check for NaN values
+
+    # TODO; Check for duplicate runs
+
+    # Output values
+    aggregated = run_data_df.groupby(grouping)[metrics].mean().reset_index()
+
+    print(aggregated)
+
+    # TODO; make it nicer
+
+
 def main():
-    data_beforearc_sage_df = download_data(entity="sagerpascal", project="VisReas-project-BEFOREARC-sweep")
-    # pretty_print_run_data(data_beforearc_sage_df)
+    rearc_llada_df = download_data(entity="VisReas-ETHZ", project="VisReas-project-REARC-llada")
+    # pretty_print_run_data(rearc_llada_df)
 
-    data_rearc_sage_df = download_data(entity="sagerpascal", project="VisReas-project-REARC-sweep")
-    # pretty_print_run_data(data_rearc_sage_df)
+    beforearc_llada_df = download_data(entity="VisReas-ETHZ", project="VisReas-project-BEFOREARC-llada")
+    # pretty_print_run_data(beforearc_llada_df)
 
-    # data_klim_df = download_data(entity="klim-t", project="VisReas-project")
-    # pretty_print_run_data(data_klim_df)
+    klim_df = download_data(entity="VisReas-ETHZ", project="VisReas-project")
+    # pretty_print_run_data(klim_df)
 
-    # data_eth_df = download_data(entity="VisReas-ETHZ", project="VisReas-project")
-    # pretty_print_run_data(data_eth_df)
-
-    data_df = pd.concat([data_beforearc_sage_df, data_rearc_sage_df])
-    create_latex_tables(data_df)
+    data_df = pd.concat([rearc_llada_df, beforearc_llada_df, klim_df])
+    # create_latex_tables(data_df)
+    calc_table_averages(data_df)
 
 
 if __name__ == "__main__":
