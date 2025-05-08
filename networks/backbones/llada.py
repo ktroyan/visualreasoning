@@ -1144,8 +1144,8 @@ class LLaDAModel(nn.Module):
             self.config.vocab_size = num_classes + special_tokens
             self.config.pad_token_id = 10
             self.config.nlgrid_token_id = 14
-            self.config.mask_token_id = 15
-            self.config.thinking_token_id = 16
+            self.config.mask_token_id = self.config.vocab_size - 1
+            self.config.thinking_token_id = self.config.vocab_size - 2
             self.config.eos_token_id = None  # there is no BOS and EOS tokens in REARC
             self.config.embedding_size = self.config.vocab_size
 
@@ -1157,9 +1157,9 @@ class LLaDAModel(nn.Module):
             self.config.vocab_size = num_classes + special_tokens
             self.config.pad_token_id = 10
             self.config.nlgrid_token_id = 14
-            self.config.mask_token_id = 15
-            self.config.thinking_token_id = 16
-            self.config.eos_token_id = None # there is no BOS and EOS tokens in REARC
+            self.config.mask_token_id = self.config.vocab_size - 1
+            self.config.thinking_token_id = self.config.vocab_size - 2
+            self.config.eos_token_id = None # there is no BOS and EOS tokens in BEFOREARC
             self.config.embedding_size = self.config.vocab_size
 
             self.ignored_tokens = [self.config.pad_token_id, self.config.nlgrid_token_id]

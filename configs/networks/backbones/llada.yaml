@@ -39,7 +39,7 @@ backbone_network:
   rope_theta: 500000.0
   scale_logits: false
   use_cache: false
-  vocab_size: 15
+  vocab_size: 12
   weight_tying: false
   diffusion:
     steps: 32
