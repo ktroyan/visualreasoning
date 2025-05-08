@@ -9,7 +9,6 @@ from networks.backbones.resnet import get_resnet
 from networks.backbones.transformer import get_transformer_encoder
 from networks.backbones.vit import get_vit
 from networks.backbones.looped_vit import get_looped_vit
-from networks.backbones.llada import get_llada_encoder, LLaDAModel
 from networks.heads.mlp import get_mlp_head
 from networks.heads.transformer import get_transformer_decoder
 from networks.heads.xtransformer import get_xtransformer_decoder
@@ -132,7 +131,7 @@ class VisReasModel(pl.LightningModule):
         However, we still do it, so the purpose of this shared_step() is lesser.
         """
 
-        x, y, task_tokens_seq, example_in_context, y_true_size, x_grid_object_ids, special_grid_tokens_dict = batch   # [B, H, W], [B, H, W], [B], [B, 2], [B, seq_len], Dict
+        x, y, task_tokens, example_in_context, y_true_size, x_grid_object_ids, special_grid_tokens_dict = batch   # [B, H, W], [B, H, W], [B], [B, 2], [B, seq_len], Dict
 
         B, H, W = x.shape
 
@@ -145,12 +144,12 @@ class VisReasModel(pl.LightningModule):
 
         # Handle task embedding
         if not self.model_config.task_embedding.enabled:
-            task_tokens_seq = None
+            task_tokens = None
             example_in_context = None
-
+        
         elif self.model_config.task_embedding.approach == 'example_in_context':
-            task_tokens_seq = None
-
+            task_tokens = None
+        
         elif self.model_config.task_embedding.approach == 'task_tokens':
             example_in_context = None
 
@@ -247,7 +246,7 @@ class VisReasModel(pl.LightningModule):
         This method is called for each batch during the training phase.
         This is a default PyTorch Lightning method that we override to define the training logic.
         """
-        x, y, task_tokens_seq, example_in_context, y_true_size, x_grid_object_ids, special_grid_tokens_dict = batch
+        x, y, task_tokens, example_in_context, y_true_size, x_grid_object_ids, special_grid_tokens_dict = batch
 
         B, H, W = x.shape
 
@@ -301,7 +300,7 @@ class VisReasModel(pl.LightningModule):
         NOTE: Currently val_loss is the monitored metric during training
         """
 
-        x, y, task_tokens_seq, example_in_context, y_true_size, x_grid_object_ids, special_grid_tokens_dict = batch
+        x, y, task_tokens, example_in_context, y_true_size, x_grid_object_ids, special_grid_tokens_dict = batch
 
         B, H, W = x.shape
 
@@ -792,10 +791,10 @@ class BEFOREARCModel(VisReasModel):
         self.head_input_embed_dim = head_network_config.embed_dim   # dimension of the input that should be passed to the head network; initially assumed to be of dimension equal to the embedding dimension of the backbone/encoder network
 
         ## Task embedding
+        # For Transformer-based backbones
         # Task tokens approach
         if model_config.task_embedding.enabled and model_config.task_embedding.approach == "task_tokens":
             self.embed_task_tokens_seq = nn.Embedding(self.num_classes + model_config.num_elementary_tasks, embedding_dim=backbone_network_config.embed_dim, device=self.device)
-
 
         ## Encoder to Decoder projection layer; useful to handle the task embedding that is concatenated
         # TODO: We could handle the task embedding differently than by a simple concatenation. For example using FiLM. See later.
@@ -876,16 +875,16 @@ class BEFOREARCModel(VisReasModel):
         logger.warning(log_message)
 
 
-    def forward(self, x, y, task_tokens_seq=None, example_in_context=None, x_grid_object_ids=None):
+    def forward(self, x, y, task_tokens=None, example_in_context=None, x_grid_object_ids=None):
 
         device = x.device
 
-        # Handle the task embedding if applicable
-        if self.model_config.task_embedding.enabled and (task_tokens_seq is not None):
-            task_embedding = self.embed_task_tokens_seq(task_tokens_seq.to(device))  # [B, num_tasks, embed_dim]
+        # Use task tokens as task embedding if applicable
+        if self.model_config.task_embedding.enabled and (task_tokens is not None):
+            task_tokens = self.embed_task_tokens_seq(task_tokens.to(device))  # [B, num_tasks, embed_dim]
         else:
-            task_embedding = None
-
+            task_tokens = None
+        
         # Use grid object ids for the OPE (which is used within the APE)
         if not (self.model_config.ope.enabled and (x_grid_object_ids is not None) and self.model_config.backbone in ["vit", "looped_vit", "transformer", "llada"]):
             x_grid_object_ids = None
@@ -923,20 +922,24 @@ class BEFOREARCModel(VisReasModel):
             logits = logits[:, x.shape[1]:]
 
         else:
-            logits = self.forward_sample(x, y, task_embedding, example_in_context, x_grid_object_ids)
+            logits = self.forward_sample(x, y, task_tokens, example_in_context, x_grid_object_ids)
             mask = None
 
         return logits, mask
 
-    def forward_sample(self, x, y, task_embedding=None, example_in_context=None, x_grid_object_ids=None):
+    def forward_sample(self, x, y, task_tokens=None, example_in_context=None, x_grid_object_ids=None):
 
         # Encode the input sequence
         if self.model_config.backbone in ["vit", "looped_vit", "llada"]:
-            x_encoded = self.encoder(x, task_embeddings=task_embedding, example_in_context=example_in_context, x_grid_object_ids=x_grid_object_ids)  # [B, seq_len, embed_dim]; NOTE: the extra tokens will have been truncated so the encoded sequence will also have a dim seq_len
+            x_encoded = self.encoder(x, task_embeddings=task_tokens, example_in_context=example_in_context, x_grid_object_ids=x_grid_object_ids)  # [B, seq_len, embed_dim]; NOTE: the extra tokens will have been truncated so the encoded sequence will also have a dim seq_len
 
         elif self.model_config.backbone in ["resnet"]:
-            # TODO: How to handle the task embedding, etc. for ResNet?
-            x_encoded = self.encoder(x)
+            # NOTE: The task embedding is handled below for ResNet as it is not used at encoding time
+            x_encoded = self.encoder(x, task_tokens, example_in_context) # [B, seq_len, embed_dim]
+
+            if self.head_input_dim != self.head_input_embed_dim:
+                # Map the encoded input sequence to the same embedding dimension as the decoder's
+                x_encoded = self.enc_to_dec_proj(x_encoded)  # [B, seq_len, head_input_embed_dim]
 
         # Decode the encoded input sequence
         if self.model_config.head in ["transformer", "xtransformer", "mytransformer"]:
@@ -955,5 +958,15 @@ class BEFOREARCModel(VisReasModel):
             # We can treat each pixel/token independently as part of a sequence, so we can directly apply a Linear layer 
             # where the last dimension is the features dimension, instead of reshaping the tensor
             logits = self.decoder(x_encoded)   # [B, seq_len, num_classes] <-- [B, seq_len=H*W, C=self.network_config.embed_dim]
+
+            if self.model_config.backbone in ["resnet"]:
+                if task_tokens is not None:
+                    # Discard the appended task tokens
+                    logits = logits[:, :-task_tokens.shape[1], :]
+
+                if example_in_context is not None:
+                    # Discard the appended input-output example
+                    logits = logits[:, :-2*seq_len, :]
+
 
         return logits

@@ -15,7 +15,7 @@ from pytorch_lightning.loggers.wandb import WandbLogger
 # Personal codebase dependencies
 import data
 import models
-from utility.utils import get_complete_config, log_config_dict, get_model_from_ckpt, generate_timestamped_experiment_name, copy_folder
+from utility.utils import get_complete_config, log_config_dict, get_model_from_ckpt, get_paper_model_name, process_test_results, generate_timestamped_experiment_name, copy_folder
 from utility.rearc.utils import observe_rearc_input_output_images, check_train_test_contamination as check_rearc_train_test_contamination
 from utility.logging import logger
 
@@ -24,48 +24,6 @@ torch.set_float32_matmul_precision('medium')    # 'high'
 torch.backends.cudnn.benchmark = True
 torch.backends.cudnn.deterministic = True
 
-
-def get_paper_model_name(config):
-    """ Prepare model name for logging """
-    if config.model.backbone == "vit":
-        if (
-            (config.model.visual_tokens.enabled) and
-            (config.model.ape.enabled) and
-            (config.model.ape.ape_type == "2dsincos") and
-            (config.model.ape.mixer != "default") and
-            (config.model.ope.enabled) and
-            (config.model.rpe.enabled) and
-            ("Alibi" in config.model.rpe.rpe_type)
-        ):
-            model_name = "ViT-vitarc"
-        elif (
-            (config.model.visual_tokens.enabled) and
-            (config.model.ape.enabled) and
-            (config.model.ape.ape_type == "2dsincos") and
-            (config.model.rpe.enabled) and
-            (config.model.rpe.rpe_type == "rope")
-        ):
-            model_name = "ViT"
-        elif (
-            (not config.model.visual_tokens.enabled) and
-            (config.model.ape.enabled) and
-            (config.model.ape.ape_type == "learn") and
-            (not config.model.rpe.enabled) and
-            (not config.model.ope.enabled)
-        ):
-            model_name = "ViT-vanilla"
-    elif config.model.backbone == "resnet":
-        model_name = "ResNet"
-    elif config.model.backbone == "diffusion_vit":
-        model_name = "ViT-diffusion"
-    elif config.model.backbone == "looped_vit":
-        model_name = "ViT-looped"
-    elif config.model.backbone == "llada":
-        model_name = "LLaDA"
-    else:
-        raise ValueError(f"Model {config.model.backbone} not recognized. Please check the model name.")
-
-    return model_name
 
 def write_inference_results_logs(config, inference_folder, all_test_results, paper_model_name):
     # Format filename
@@ -112,6 +70,8 @@ def write_inference_results_logs(config, inference_folder, all_test_results, pap
         f.write("\n")
 
     logger.info(f"Test results saved to: {test_results_file_path}")
+
+    return test_results_file_path
 
 def main(config, inference_folder, datamodule, model=None, model_ckpt_path=None, exp_logger=None):
 
@@ -197,7 +157,10 @@ def main(config, inference_folder, datamodule, model=None, model_ckpt_path=None,
     paper_model_name = get_paper_model_name(config)
 
     # Save test results relevant to the paper in a log file
-    write_inference_results_logs(config, inference_folder, all_test_results, paper_model_name)
+    test_results_file_path = write_inference_results_logs(config, inference_folder, all_test_results, paper_model_name)
+    if exp_logger is not None:
+        exp_logger.experiment.save(test_results_file_path)
+
 
     # End of inference
     log_message = "*** Inference ended ***\n"
