@@ -9,6 +9,7 @@ from networks.backbones.resnet import get_resnet
 from networks.backbones.transformer import get_transformer_encoder
 from networks.backbones.vit import get_vit
 from networks.backbones.looped_vit import get_looped_vit
+from networks.backbones.llada import get_llada_encoder, LLaDAModel
 from networks.heads.mlp import get_mlp_head
 from networks.heads.transformer import get_transformer_decoder
 from networks.heads.xtransformer import get_xtransformer_decoder
@@ -155,7 +156,7 @@ class VisReasModel(pl.LightningModule):
 
         
         # Forward pass through the whole model
-        y_hat, prediction_mask  = self(x, y, task_tokens_seq=task_tokens_seq, example_in_context=example_in_context, x_grid_object_ids=x_grid_object_ids)  # computed logits
+        y_hat, prediction_mask  = self(x, y, task_tokens_seq=task_tokens, example_in_context=example_in_context, x_grid_object_ids=x_grid_object_ids)  # computed logits
 
         if len(y_hat.shape) > 2:
             # Permute the dimensions of y_hat to be [B, num_classes, seq_len] instead of [B, seq_len, num_classes] to match PyTorch's cross_entropy function format
@@ -248,8 +249,6 @@ class VisReasModel(pl.LightningModule):
         """
         x, y, task_tokens, example_in_context, y_true_size, x_grid_object_ids, special_grid_tokens_dict = batch
 
-        B, H, W = x.shape
-
         loss, logs, preds = self.step(batch, batch_idx)
 
         # Logging
@@ -301,8 +300,6 @@ class VisReasModel(pl.LightningModule):
         """
 
         x, y, task_tokens, example_in_context, y_true_size, x_grid_object_ids, special_grid_tokens_dict = batch
-
-        B, H, W = x.shape
 
         loss, logs, preds = self.step(batch, batch_idx)
 
@@ -472,9 +469,6 @@ class VisReasModel(pl.LightningModule):
         x, y_hat, y, mask, prediction_mask, special_grid_tokens_dict = self.shared_step(batch)
 
         assert prediction_mask is None, "Prediction mask should be None during testing as we generate all the tokens."
-
-        B, H, W = x.shape
-        B, seq_len = y.shape
 
         # TODO: See exactly how we want to compute the loss and metrics. What types of tokens we want to consider.
         # Also, convert the non-data tokens to background tokens (i.e., 0) when computing the loss and metrics, no?
@@ -907,12 +901,12 @@ class BEFOREARCModel(VisReasModel):
                 # Optional, ignore padding and NL Token
                 # attention_mask = self.encoder.get_attention_mask(xy_masked)
 
-                logits = self.forward_sample(xy_masked, xy, task_embedding, example_in_context, x_grid_object_ids)
+                logits = self.forward_sample(xy_masked, xy, task_tokens, example_in_context, x_grid_object_ids)
 
             else:
                 # inference -> LLaDA Diffusion Process
                 logits = self.encoder.generate_masked_sequence(self.forward_sample, x, y, forward_sample_params = {
-                    'task_embedding': task_embedding,
+                    'task_embedding': task_tokens,
                     'example_in_context': example_in_context,
                     'x_grid_object_ids': x_grid_object_ids
                 })
@@ -928,6 +922,7 @@ class BEFOREARCModel(VisReasModel):
         return logits, mask
 
     def forward_sample(self, x, y, task_tokens=None, example_in_context=None, x_grid_object_ids=None):
+        B, seq_len = y.shape
 
         # Encode the input sequence
         if self.model_config.backbone in ["vit", "looped_vit", "llada"]:
