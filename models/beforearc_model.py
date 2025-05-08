@@ -156,7 +156,7 @@ class VisReasModel(pl.LightningModule):
 
         
         # Forward pass through the whole model
-        y_hat, prediction_mask  = self(x, y, task_tokens_seq=task_tokens, example_in_context=example_in_context, x_grid_object_ids=x_grid_object_ids)  # computed logits
+        y_hat, prediction_mask  = self(x, y, task_tokens=task_tokens, example_in_context=example_in_context, x_grid_object_ids=x_grid_object_ids)  # computed logits
 
         if len(y_hat.shape) > 2:
             # Permute the dimensions of y_hat to be [B, num_classes, seq_len] instead of [B, seq_len, num_classes] to match PyTorch's cross_entropy function format
@@ -906,7 +906,7 @@ class BEFOREARCModel(VisReasModel):
             else:
                 # inference -> LLaDA Diffusion Process
                 logits = self.encoder.generate_masked_sequence(self.forward_sample, x, y, forward_sample_params = {
-                    'task_embedding': task_tokens,
+                    'task_tokens': task_tokens,
                     'example_in_context': example_in_context,
                     'x_grid_object_ids': x_grid_object_ids
                 })

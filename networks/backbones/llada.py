@@ -1144,8 +1144,8 @@ class LLaDAModel(nn.Module):
             self.config.vocab_size = num_classes + special_tokens
             self.config.pad_token_id = 10
             self.config.nlgrid_token_id = 14
-            self.config.mask_token_id = self.config.vocab_size - 1
-            self.config.thinking_token_id = self.config.vocab_size - 2
+            self.config.mask_token_id = 15
+            self.config.thinking_token_id = 16
             self.config.eos_token_id = None  # there is no BOS and EOS tokens in REARC
             self.config.embedding_size = self.config.vocab_size
 
@@ -1157,8 +1157,8 @@ class LLaDAModel(nn.Module):
             self.config.vocab_size = num_classes + special_tokens
             self.config.pad_token_id = 10
             self.config.nlgrid_token_id = 14
-            self.config.mask_token_id = self.config.vocab_size - 1
-            self.config.thinking_token_id = self.config.vocab_size - 2
+            self.config.mask_token_id = 15
+            self.config.thinking_token_id = 16
             self.config.eos_token_id = None # there is no BOS and EOS tokens in REARC
             self.config.embedding_size = self.config.vocab_size
 
@@ -1758,4 +1758,4 @@ if __name__ == "__main__":
     from utility.utils import  get_complete_config
 
     config, _ = get_complete_config()
-    get_llada_encoder(config.base, config.model, config.backbone_network, 100, 3, 10)
+    print(get_llada_encoder(config.base, config.model, config.backbone_network, 100, 3, 10))

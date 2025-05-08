@@ -7,10 +7,10 @@ backbone_network:
   bias_for_layer_norm: false
   block_group_size: 1
   block_type: llama
-  embed_dim: 128 # 384 # 4096
+  embed_dim: 128
   embedding_dropout: 0.0
-  embedding_size: 126464
-  eos_token_id: 126081
+  embedding_size: 15
+  eos_token_id: null
   flash_attention: false
   include_bias: false
   include_qkv_bias: false
@@ -21,16 +21,16 @@ backbone_network:
   input_emb_norm: false
   layer_norm_type: rms
   layer_norm_with_affine: true
-  mask_token_id: 126336
+  mask_token_id: 15
   max_sequence_length: 4096
-  mlp_hidden_size: 1152
+  mlp_hidden_size: 384
   mlp_ratio: 4
   model_type: llada
   multi_query_attention: null
-  n_heads: 4 # 8 # 32
-  n_kv_heads: 4 # 8 # 32
-  n_layers: 6 # 8 # 32
-  pad_token_id: 126081
+  n_heads: 4
+  n_kv_heads: 4
+  n_layers: 6
+  pad_token_id: 10
   precision: amp_bf16
   residual_dropout: 0.0
   rms_norm_eps: 1e-05
@@ -39,10 +39,10 @@ backbone_network:
   rope_theta: 500000.0
   scale_logits: false
   use_cache: false
-  vocab_size: 126464
+  vocab_size: 15
   weight_tying: false
   diffusion:
-    steps: 8
+    steps: 32
     cfg_scale: 0.0
     temperature: 0.0
     remasking: low_confidence
