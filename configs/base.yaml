@@ -2,6 +2,6 @@ base:
   seed: 1997
   n_gpus: 1 # number of GPUs to use
   gpu_id: 0 # GPU to use
-  data_env: 'BEFOREARC' # choices: 'BEFOREARC', 'REARC', 'CVR'
+  data_env: 'REARC' # choices: 'BEFOREARC', 'REARC', 'CVR'
   data_module: "${base.data_env}DataModule"
   model_module: "${base.data_env}Model"
