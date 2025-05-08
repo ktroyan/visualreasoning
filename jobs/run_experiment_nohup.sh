@@ -22,6 +22,7 @@ USE_GEN_TEST_SET=""
 VALIDATE_IN_AND_OUT_DOMAIN=""
 WANDB_SWEEP_ENABLED=""
 WANDB_SWEEP_CONFIG=""
+DEV_RUN=""
 ADDI_LOG_NAME=""
 
 # Parse CLI arguments
@@ -48,6 +49,7 @@ while [[ $# -gt 0 ]]; do
         --use_task_embedding) USE_TASK_EMBEDDING="$2"; shift 2 ;;
         --sweep_enabled) WANDB_SWEEP_ENABLED="$2"; shift 2 ;;
         --sweep_config) WANDB_SWEEP_CONFIG="$2"; shift 2 ;;
+        --dev_run) DEV_RUN="$2"; shift 2 ;;
         --add_log_name) ADDI_LOG_NAME="$2"; shift 2 ;;
         *)
             echo "Unknown option: $1"
@@ -62,7 +64,7 @@ if [[ -n "$GPU_ID" ]]; then
 fi
 
 # Generate timestamp: format day-month-hour_min
-TIMESTAMP=$(date +"%d-%m-%H_%M")
+TIMESTAMP=$(date +"%d-%m-%H_%M_%S")
 
 # Determine log file name
 if [[ -n "$WANDB_SWEEP_CONFIG" ]]; then
@@ -70,7 +72,7 @@ if [[ -n "$WANDB_SWEEP_CONFIG" ]]; then
     SWEEP_NO_EXT="${SWEEP_BASENAME%%.*}"                    # remove file extension
     SWEEP_SAFE_NAME="${WANDB_SWEEP_CONFIG//\//_}"           # replace "/" with "_"
     SWEEP_SAFE_NAME="${SWEEP_SAFE_NAME%%.*}"                # remove extension from whole path
-    LOG_FILE="output_${SWEEP_SAFE_NAME}_${TIMESTAMP}.log"
+    LOG_FILE="output_${SWEEP_SAFE_NAME}_${ADDI_LOG_NAME}_${TIMESTAMP}.log"
 else
     LOG_FILE="output_${DATA_ENV}_${STUDY}_${SETTING}_${EXPERIMENT}_${BACKBONE}_${HEAD}_${ADDI_LOG_NAME}_${TIMESTAMP}.log"
 fi
@@ -99,6 +101,7 @@ CMD="nohup uv run experiment.py"
 [[ -n "$USE_TASK_EMBEDDING" ]] && CMD+=" model.task_embedding.enabled=\"${USE_TASK_EMBEDDING}\""
 [[ -n "$WANDB_SWEEP_ENABLED" ]] && CMD+=" wandb.sweep.enabled=\"${WANDB_SWEEP_ENABLED}\""
 [[ -n "$WANDB_SWEEP_CONFIG" ]] && CMD+=" wandb.sweep.config=\"${WANDB_SWEEP_CONFIG}\""
+[[ -n "$DEV_RUN" ]] && CMD+=" experiment.dev_run=\"${DEV_RUN}\""
 
 CMD+=" > \"${LOG_FILE}\" 2>&1 &"
 
