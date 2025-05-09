@@ -14,7 +14,7 @@ configs=(
 for config in "${configs[@]}"; do
   read -r data_env study setting name <<< "$config"
 
-  echo sbatch run_experiment.submit \
+  sbatch run_experiment.submit \
     wandb.sweep.enabled=false \
     wandb.wandb_entity_name=VisReas-ETHZ \
     wandb.wandb_project_name=VisReas-project-${data_env}-llada-2 \
