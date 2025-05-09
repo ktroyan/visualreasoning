@@ -3,7 +3,7 @@
 wandb_entity="VisReas-ETHZ"
 data_env="BEFOREARC"
 data_env_lc=$(echo "$data_env" | tr '[:upper:]' '[:lower:]')
-wandb_project="VisReas-project-${data_env}-llada-2"
+wandb_project="VisReas-project-${data_env}-llada-final"
 
 sweep_type="comp"
 experiment_settings=("es3" "es4" "es5")
