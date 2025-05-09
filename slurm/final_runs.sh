@@ -6,7 +6,7 @@ data_env_lc=$(echo "$data_env" | tr '[:upper:]' '[:lower:]')
 wandb_project="VisReas-project-${data_env}-llada-final"
 
 sweep_type="comp"
-experiment_settings=("es3" "es4" "es5")
+experiment_settings=("es1" "es2" "es3")
 for setting in "${experiment_settings[@]}"; do
   config="base.data_env=${data_env} \
 wandb.sweep.config=configs/sweeps/${data_env_lc}/${sweep_type}_${setting}.yaml \
