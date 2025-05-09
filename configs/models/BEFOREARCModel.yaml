@@ -42,5 +42,5 @@ model:
     layer: -1  # layer to use for the attention map (-1 for the last, 0 for the first layer, 1 for the second layer, etc.)
     n_samples: 2  # number of samples to consider for the attention map
   observe_preds:
-    enabled: true
+    enabled: false
     n_samples: 4
