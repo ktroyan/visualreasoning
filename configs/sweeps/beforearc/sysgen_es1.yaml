@@ -31,4 +31,5 @@ parameters:
       setting:
         values: ['exp_setting_1']
       name:
-        values: ['experiment_1', 'experiment_2', 'experiment_3', 'experiment_4']
+        values: ['experiment_1', 'experiment_2', 'experiment_3', 'experiment_4', 
+                 'experiment_5']

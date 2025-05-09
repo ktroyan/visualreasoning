@@ -27,8 +27,10 @@ parameters:
   experiment:
     parameters:
       study:
-        values: ['compositionality']
+        values: ['sys-gen']
       setting:
-        values: ['exp_setting_5']
+        values: ['exp_setting_1', 'exp_setting_2', 'exp_setting_3', 'exp_setting_4',
+                 'exp_setting_5']
       name:
-        values: ['experiment_1']
+        values: ['experiment_1', 'experiment_2', 'experiment_3', 'experiment_4',
+                 'experiment_5']

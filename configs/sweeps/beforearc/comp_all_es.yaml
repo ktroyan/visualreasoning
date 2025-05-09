@@ -29,6 +29,7 @@ parameters:
       study:
         values: ['compositionality']
       setting:
-        values: ['exp_setting_4']
+        values: ['exp_setting_1', 'exp_setting_2', 'exp_setting_3']
       name:
-        values: ['experiment_1']
+        values: ['experiment_1', 'experiment_2', 'experiment_3', 'experiment_4',
+                 'experiment_5']
