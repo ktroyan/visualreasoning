@@ -7,6 +7,7 @@ import json
 import ast
 import numpy as np
 import math
+import itertools
 
 # warnings.filterwarnings("ignore")
 
@@ -30,8 +31,7 @@ def download_data(entity: str, project: str) -> pd.DataFrame:
     print("Number of runs:", len(runs))
 
     for run in runs:
-        if run.state == "running":
-            print(run.name, "running")
+        if run.state != "finished":
             continue
 
         try:
@@ -39,12 +39,18 @@ def download_data(entity: str, project: str) -> pd.DataFrame:
 
             # Load required config
             config = json.loads(run.json_config)
-            run_infos['data_env'] = config["base"]["value"]["data_env"]
-            run_infos['study'] = config["experiment"]["value"]["study"]
-            run_infos['name'] = config["experiment"]["value"]["name"]
-            run_infos['setting'] = config["experiment"]["value"]["setting"]
+            run_infos['data_env'] = ast.literal_eval(config["base_config"]["value"])["data_env"]
             has_gen_test_data = ast.literal_eval(config["data_config"]["value"])["use_gen_test_set"]
             has_gen_val_data = ast.literal_eval(config["data_config"]["value"])["validate_in_and_out_domain"]
+            if "experiment" in config:
+                run_infos['study'] = config["experiment"]["value"]["study"]
+                run_infos['setting'] = config["experiment"]["value"]["setting"]
+                run_infos['name'] = config["experiment"]["value"]["name"]
+            else:
+                exp_infos = ast.literal_eval(config["data_config"]["value"])['dataset_dir'].split("/")
+                run_infos['study'] = exp_infos[-3]
+                run_infos['setting'] =exp_infos[-2]
+                run_infos['name'] = exp_infos[-1]
 
             if "backbone_network_config" in config:
                 run_infos['backbone'] = ast.literal_eval(config["backbone_network_config"]["value"])["name"]
@@ -206,45 +212,78 @@ def create_latex_tables(run_data_df: pd.DataFrame) -> None:
 
 
 
+def check_completeness(run_data_df: pd.DataFrame) -> None:
+    compositionality_settings = ['exp_setting_1', 'exp_setting_2', 'exp_setting_3']
+    compositionality_names = ['experiment_1', 'experiment_2', 'experiment_3', 'experiment_4', 'experiment_5']
+
+    sysgen_settings = ['exp_setting_1', 'exp_setting_2', 'exp_setting_3', 'exp_setting_4', 'exp_setting_5']
+    sysgen_names = ['experiment_1', 'experiment_2', 'experiment_3', 'experiment_4', 'experiment_5']
+
+    compositionality_combos = list(itertools.product(['compositionality'], compositionality_settings, compositionality_names))
+    sysgen_combos = list(itertools.product(['sys-gen'], sysgen_settings, sysgen_names))
+
+    target_combos = compositionality_combos + sysgen_combos
+
+    # Filter the DataFrame
+    filtered_df = run_data_df[run_data_df[['study', 'setting', 'name']].apply(tuple, axis=1).isin(target_combos)]
+    grouped = filtered_df.groupby(['model', 'study', 'setting', 'name']).size().reset_index(name='count')
+
+    # Identify issues
+    # a) Missing combinations
+    all_models = run_data_df['model'].unique()
+    all_expected = pd.MultiIndex.from_tuples(
+        [(model, study, setting, name) for model in all_models for (study, setting, name) in target_combos],
+        names=['model', 'study', 'setting', 'name']
+    )
+    actual = pd.MultiIndex.from_frame(grouped[['model', 'study', 'setting', 'name']])
+    missing = all_expected.difference(actual)
+
+    # Duplicate runs
+    duplicates = grouped[grouped['count'] > 1]
+
+    # Just keep model-identifying columns for NaN rows
+    nan_rows = filtered_df[
+        filtered_df['test_acc_grid_no_pad_epoch'].isna() |
+        filtered_df['gen_test_acc_grid_no_pad_epoch'].isna()
+        ]
+    nan_models_info = nan_rows[['id', 'model', 'study', 'setting', 'name', 'test_acc_grid_no_pad_epoch', 'gen_test_acc_grid_no_pad_epoch']]
+
+    # Output results
+    print("=== Missing combinations ===")
+    print(missing)
+
+    print("\n=== Duplicate runs ===")
+    print(duplicates)
+
+    print("\n=== Models with NaN values in performance columns ===")
+    print(nan_models_info)
 
 
 def calc_table_averages(run_data_df: pd.DataFrame) -> None:
     metrics = ["test_acc_grid_no_pad_epoch", "gen_test_acc_grid_no_pad_epoch"]
-    grouping = ["data_env", "study", "setting", "backbone", "head"]
+    grouping = ["data_env", "model", "study", "setting"]
+
+    # Model names
+    run_data_df['model'] = run_data_df['backbone'] + '+' + run_data_df['head']
 
     # Filter runs
     run_data_df = run_data_df[(run_data_df.state == "finished") & (run_data_df["data_env"] == "BEFOREARC")]
-
-    # Check Completeness
-    expected_runs = 23
-    counts = run_data_df.groupby(["backbone", "head"]).count()["id"]
-    for key, count in counts.items():
-        if count != expected_runs:
-            print(f"Warning: {key} has {count} runs instead of {expected_runs}")
-
-    # TODO; Check for NaN values
-
-    # TODO; Check for duplicate runs
+    check_completeness(run_data_df)
 
     # Output values
     aggregated = run_data_df.groupby(grouping)[metrics].mean().reset_index()
-
     print(aggregated)
 
-    # TODO; make it nicer
 
 
 def main():
-    rearc_llada_df = download_data(entity="VisReas-ETHZ", project="VisReas-project-REARC-llada")
-    # pretty_print_run_data(rearc_llada_df)
-
-    beforearc_llada_df = download_data(entity="VisReas-ETHZ", project="VisReas-project-BEFOREARC-llada")
+    beforearc_llada_df = download_data(entity="VisReas-ETHZ", project="VisReas-project-BEFOREARC-llada-final")
     # pretty_print_run_data(beforearc_llada_df)
 
-    klim_df = download_data(entity="VisReas-ETHZ", project="VisReas-project")
+    #klim_df = download_data(entity="VisReas-ETHZ", project="VisReas-project")
     # pretty_print_run_data(klim_df)
 
-    data_df = pd.concat([rearc_llada_df, beforearc_llada_df, klim_df])
+    data_df = pd.concat([beforearc_llada_df])
     # create_latex_tables(data_df)
     calc_table_averages(data_df)
 
