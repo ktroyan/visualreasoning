@@ -127,7 +127,7 @@ class BEFOREARCDataset(Dataset):
                                                             'crop_bottom_side': max_token_id + 9,
                                                             'extend_contours_different_color': max_token_id + 10,
                                                             'translate_down': max_token_id + 11,
-                                                            'extend_contours_same_color:': max_token_id + 12,
+                                                            'extend_contours_same_color': max_token_id + 12,
                                                             'pad_left': max_token_id + 13,
                                                             'mirror_vertical': max_token_id + 14,
                                                             'crop_top_side': max_token_id + 15,
