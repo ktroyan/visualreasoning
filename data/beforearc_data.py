@@ -123,13 +123,14 @@ class BEFOREARCDataset(Dataset):
                                                             'pad_right': max_token_id + 5,
                                                             'fill_holes_different_color': max_token_id + 6,
                                                             'change_shape_color': max_token_id + 7,
-                                                            'crop_bottom_side': max_token_id + 8,
-                                                            'pad_top': max_token_id + 9,
+                                                            'pad_top': max_token_id + 8,
+                                                            'crop_bottom_side': max_token_id + 9,
                                                             'extend_contours_different_color': max_token_id + 10,
                                                             'translate_down': max_token_id + 11,
-                                                            'extend_contours_different_color:': max_token_id + 12,
+                                                            'extend_contours_same_color:': max_token_id + 12,
                                                             'pad_left': max_token_id + 13,
                                                             'mirror_vertical': max_token_id + 14,
+                                                            'crop_top_side': max_token_id + 15,
                                                             }
 
             logger.info(f"The token IDs for the transformations are:\n{self.elementary_transformations_to_token_ids}")
