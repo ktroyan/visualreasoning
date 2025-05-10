@@ -442,7 +442,7 @@ def get_paper_model_name(config):
             (config.model.ape.mixer != "sum") and
             (config.model.ope.enabled) and
             (config.model.rpe.enabled) and
-            (config.model.rpe.rpe_type == "rope")
+            (config.model.rpe.rpe_type == "rope") and
             (config.model.num_reg_tokens > 0)
         ):
             model_name = "ViT"
