@@ -4,7 +4,7 @@
 configs=(
   "BEFOREARC compositionality exp_setting_1 experiment_5"
   "BEFOREARC compositionality exp_setting_2 experiment_5"
-  "BEFOREARC compositionality exp_setting_2 experiment_4"
+  # "BEFOREARC compositionality exp_setting_2 experiment_4"
   # "BEFOREARC compositionality exp_setting_1 experiment_2"
   # "BEFOREARC compositionality exp_setting_2 experiment_2"
   # "BEFOREARC compositionality exp_setting_3 experiment_3"
