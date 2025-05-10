@@ -415,23 +415,35 @@ def get_paper_model_name(config):
         ):
             model_name = "ViT-vanilla"
         
+        # elif (
+        #     (config.model.visual_tokens.enabled) and 
+        #     (config.model.ape.enabled) and 
+        #     (config.model.ape.ape_type == "2dsincos") and
+        #     (config.model.ape.mixer != "sum") and
+        #     (config.model.ope.enabled) and
+        #     (config.model.rpe.enabled) and 
+        #     ("Alibi" in config.model.rpe.rpe_type)
+        # ):
+        #     model_name = "ViT-vitarc"
+        
+        # elif (
+        #     (config.model.visual_tokens.enabled) and 
+        #     (config.model.ape.enabled) and 
+        #     (config.model.ape.ape_type == "2dsincos") and
+        #     (config.model.rpe.enabled) and
+        #     (config.model.rpe.rpe_type == "rope")
+        # ):
+        #     model_name = "ViT"
+
         elif (
             (config.model.visual_tokens.enabled) and 
             (config.model.ape.enabled) and 
             (config.model.ape.ape_type == "2dsincos") and
             (config.model.ape.mixer != "sum") and
             (config.model.ope.enabled) and
-            (config.model.rpe.enabled) and 
-            ("Alibi" in config.model.rpe.rpe_type)
-        ):
-            model_name = "ViT-vitarc"
-        
-        elif (
-            (config.model.visual_tokens.enabled) and 
-            (config.model.ape.enabled) and 
-            (config.model.ape.ape_type == "2dsincos") and
             (config.model.rpe.enabled) and
             (config.model.rpe.rpe_type == "rope")
+            (config.model.num_reg_tokens > 0)
         ):
             model_name = "ViT"
 
