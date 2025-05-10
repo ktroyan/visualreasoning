@@ -3,12 +3,14 @@
 NOTE:
 - We specify the relevant parameters based on the default configs.
 
+
 ## ResNet
 # Compositionality
 bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_all_es.yaml" --backbone resnet --visual_tokens_enabled false --add_log_name "ResNet" --max_epochs 10 --gpu_id 0
 
 # Sys-Gen
 bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_all_es.yaml" --backbone resnet --visual_tokens_enabled false --add_log_name "ResNet" --max_epochs 10 --gpu_id 1
+
 
 ## ViT-vanilla
 # Compositionality
@@ -17,16 +19,10 @@ bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs
 # Sys-Gen
 bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_all_es.yaml" --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false --add_log_name "ViT-vanilla" --max_epochs 10 --gpu_id 3
 
-## ViT-vitarc
+
+## ViT
 # Compositionality
-bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_all_es.yaml" --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum --ope_enabled true --rpe_enabled true --rpe_type Two-slope-Alibi --add_log_name "ViT-vitarc" --max_epochs 10 --gpu_id 4
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_all_es.yaml" --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum_vec --ope_enabled true --rpe_enabled true --rpe_type rope --num_reg_tokens 6 --add_log_name "ViT" --max_epochs 10 --gpu_id 4
 
 # Sys-Gen
-bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_all_es.yaml" --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum --ope_enabled true --rpe_enabled true --rpe_type Two-slope-Alibi --add_log_name "ViT-vitarc" --max_epochs 10 --gpu_id 5
-
-## ViT-ours
-# Compositionality
-bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_all_es.yaml" --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --num_reg_tokens 6 --add_log_name "ViT-ours" --max_epochs 10 --gpu_id 6
-
-# Sys-Gen
-bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_all_es.yaml" --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --num_reg_tokens 6 --add_log_name "ViT-ours" --max_epochs 10 --gpu_id 7
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_all_es.yaml" --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum_vec --ope_enabled true --rpe_enabled true --rpe_type rope --num_reg_tokens 6 --add_log_name "ViT" --max_epochs 10 --gpu_id 5
