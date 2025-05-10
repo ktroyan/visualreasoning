@@ -107,13 +107,13 @@ def main(config, inference_folder, datamodule, model=None, model_ckpt_path=None,
         
         if isinstance(datamodule.test_dataloader(), list):
             test_dataloader = datamodule.test_dataloader()[0]       # get in-domain test dataloader
-            check_rearc_train_test_contamination(train_dataloader, test_dataloader)
+            check_rearc_train_test_contamination(train_dataloader, test_dataloader, "train vs test")
             gen_test_dataloader = datamodule.test_dataloader()[1]   # get OOD test dataloader
-            check_rearc_train_test_contamination(train_dataloader, gen_test_dataloader)
+            check_rearc_train_test_contamination(train_dataloader, gen_test_dataloader, "train vs gen_test")
 
         else:
             test_dataloader = datamodule.test_dataloader()
-            check_rearc_train_test_contamination(train_dataloader, test_dataloader)
+            check_rearc_train_test_contamination(train_dataloader, test_dataloader, "train vs test")
 
 
     # Testing
