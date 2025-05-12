@@ -1417,18 +1417,6 @@ class LLaDAModel(nn.Module):
         remasking = self.config.diffusion.remasking
         block_length = gen_length
 
-        try:
-            assert prompt.shape == torch.Size([32, 225]), "prompt shape should be [32, 225]"
-            assert gen_length == 225, "gen_length should be 225"
-        except AssertionError:
-            print(f"Ohohhh, something is wrong with the prompt shape or gen_length. {prompt.shape}, {gen_length}")
-
-        try:
-            vocab_size = self.config.embedding_size  # or whatever your vocab is
-            assert prompt.max() < vocab_size, f"Prompt contains invalid token ID >= {vocab_size}"
-            assert mask_id < vocab_size, f"mask_id {mask_id} >= vocab_size {vocab_size}"
-        except AssertionError:
-            print(f"Prompt contains invalid token ID >= {vocab_size}")
 
         x = torch.full((prompt.shape[0], prompt.shape[1] + gen_length), mask_id, dtype=torch.long).to(self.device)
         x[:, :prompt.shape[1]] = prompt.clone()
@@ -1455,25 +1443,10 @@ class LLaDAModel(nn.Module):
                     un_x[prompt_index] = mask_id
                     x_ = torch.cat([x, un_x], dim=0)
 
-                    try:
-                        assert x.max() < vocab_size, f"x.max() = {x.max().item()}, vocab_size = {vocab_size}"
-                        assert x.min() >= 0, f"x.min() = {x.min().item()}"
-                    except AssertionError:
-                        print(f"x.max() = {x.max().item()}, vocab_size = {vocab_size}")
-                        print(f"x.min() = {x.min().item()}")
-
                     logits = forward_f(x=x_, y=target_ids, **forward_sample_params)
                     logits, un_logits = torch.chunk(logits, 2, dim=0)
                     logits = un_logits + (cfg_scale + 1) * (logits - un_logits)
                 else:
-
-                    try:
-                        assert x.max() < vocab_size, f"x.max() = {x.max().item()}, vocab_size = {vocab_size}"
-                        assert x.min() >= 0, f"x.min() = {x.min().item()}"
-                    except AssertionError:
-                        print(f"x.max() = {x.max().item()}, vocab_size = {vocab_size}")
-                        print(f"x.min() = {x.min().item()}")
-
                     logits = forward_f(x=x, y=target_ids, **forward_sample_params)
 
                 logits_with_noise = add_gumbel_noise(logits, temperature=temperature)
