@@ -104,6 +104,11 @@ def main() -> None:
     # Log the complete and actual config used for the experiment
     log_config_dict(config, "*** All arguments contained in the config dict ***")
 
+    # Explicitly save the study, setting, experiment name and paper model name to make sure they exist table columns
+    run.summary["study"] = config.experiment.study
+    run.summary["setting"] = config.experiment.setting
+    run.summary["experiment_name"] = config.experiment.name
+
     # Seed everything for reproducibility
     if config.base.seed is not None:
         pl.seed_everything(config.base.seed)
@@ -171,6 +176,7 @@ def main() -> None:
     # Get the model name for the paper
     paper_model_name = get_paper_model_name(config)
     exp_logger.experiment.log({"paper_model_name": paper_model_name})  # log the model name for the paper to wandb
+    run.summary["model_name"] = paper_model_name
 
     # Save the experiment results relevant to the paper
     experiment_results_file_path = write_experiment_results_logs(config, experiment_folder, paper_experiment_results, paper_model_name)
