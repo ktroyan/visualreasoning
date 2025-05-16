@@ -182,6 +182,13 @@ def main() -> None:
     experiment_results_file_path = write_experiment_results_logs(config, experiment_folder, paper_experiment_results, paper_model_name)
     exp_logger.experiment.save(experiment_results_file_path)    # save the experiment results file to wandb; similar to wandb.save()
 
+    # Save the run_metrics.jsonl file to wandb if it exists
+    run_metrics_file_path = os.path.join(experiment_folder, "run_metrics.jsonl")
+    if os.path.exists(run_metrics_file_path):
+        exp_logger.experiment.save(run_metrics_file_path)
+    else:
+        logger.warning(f"run_metrics.jsonl file not found in {experiment_folder}. Not saving to wandb.")
+
     # End the wandb run
     run.finish()
 
