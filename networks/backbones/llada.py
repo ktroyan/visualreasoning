@@ -29,23 +29,6 @@ from omegaconf import DictConfig
 from torch import einsum
 from networks.backbones.vit import PatchEmbed
 
-# from transformers import PreTrainedModel
-# from transformers.modeling_outputs import CausalLMOutputWithPast
-# from transformers.models.auto import AutoModel
-# from transformers.cache_utils import Cache
-
-
-# from .configuration_llada import (
-#     LLaDAConfig,
-#     StrEnum,
-#     InitFnType,
-#     ActivationType,
-#     BlockType,
-#     LayerNormType,
-#     ModelConfig,
-#     ActivationCheckpointingStrategy,
-# )
-
 if sys.version_info.minor > 8:
     from collections.abc import MutableMapping
 elif sys.version_info.minor == 8:
@@ -110,54 +93,6 @@ class ActivationCheckpointingStrategy(StrEnum):
     """
     Focus checkpointing on where it is cheap to recompute and saves most memory.
     """
-
-
-# class LLaDAConfig(PretrainedConfig):
-#     model_type = "llada"
-#     keys_to_ignore_at_inference = ["past_key_values"]  # TODO: confirm
-#
-#     def __init__(self, use_cache: bool = False, **kwargs):
-#         model_config = ModelConfig()
-#         all_kwargs = model_config.__dict__
-#         all_kwargs.update(kwargs)
-#         all_kwargs.update({"use_cache": use_cache})
-#         all_kwargs.update(
-#             {
-#                 "architectures": all_kwargs.get("architectures", ["LLaDAModelLM"])
-#             }
-#         )
-#         super().__init__(**all_kwargs)
-#
-#     @property
-#     def num_attention_heads(self):
-#         return self.n_heads
-#
-#     @property
-#     def num_hidden_layers(self):
-#         return self.n_layers
-#
-#     @property
-#     def hidden_size(self):
-#         return self.d_model
-#
-#
-# # Register the config class so that it is available for transformer pipelines, auto-loading etc.
-# AutoConfig.register("llada", LLaDAConfig)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 class ModuleType(StrEnum):

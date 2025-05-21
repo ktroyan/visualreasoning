@@ -2,15 +2,20 @@
 
 # List of experiment configurations
 configs=(
-  # "BEFOREARC compositionality exp_setting_1 experiment_5"
-  # "BEFOREARC compositionality exp_setting_2 experiment_5"
-  "BEFOREARC compositionality exp_setting_1 experiment_4"
-  "BEFOREARC compositionality exp_setting_2 experiment_4"
-  # "BEFOREARC compositionality exp_setting_1 experiment_2"
-  # "BEFOREARC compositionality exp_setting_2 experiment_2"
-  # "BEFOREARC compositionality exp_setting_3 experiment_3"
-  # "BEFOREARC compositionality exp_setting_3 experiment_4"
-  # "BEFOREARC compositionality exp_setting_3 experiment_5"
+  "BEFOREARC compositionality exp_setting_1 experiment_2"
+  "BEFOREARC compositionality exp_setting_2 experiment_2"
+  "BEFOREARC compositionality exp_setting_2 experiment_5"
+  "BEFOREARC compositionality exp_setting_3 experiment_2"
+  "BEFOREARC compositionality exp_setting_3 experiment_5"
+  "BEFOREARC sys-gen exp_setting_2 experiment_4"
+  "BEFOREARC sys-gen exp_setting_2 experiment_5"
+  "BEFOREARC sys-gen exp_setting_3 experiment_3"
+  "BEFOREARC sys-gen exp_setting_3 experiment_4"
+  "BEFOREARC sys-gen exp_setting_3 experiment_5"
+  "BEFOREARC sys-gen exp_setting_4 experiment_3"
+  "BEFOREARC sys-gen exp_setting_4 experiment_5"
+  "BEFOREARC sys-gen exp_setting_5 experiment_3"
+  "BEFOREARC sys-gen exp_setting_5 experiment_5"
 )
 
 # Iterate over each configuration and submit the job
