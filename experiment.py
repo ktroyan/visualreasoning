@@ -16,7 +16,7 @@ import models
 import training
 import inference
 from utility.utils import log_config_dict, get_complete_config, generate_timestamped_experiment_name, save_model_metadata_for_ckpt, get_paper_model_name
-from utility.logging import logger
+from utility.custom_logging import logger
 
 torch.backends.cudnn.benchmark = False
 torch.backends.cudnn.deterministic = False

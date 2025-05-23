@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 # Personal codebase dependencies
-from utility.logging import logger
+from utility.custom_logging import logger
 from utility.utils import timer_decorator
 
 

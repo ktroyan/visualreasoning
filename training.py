@@ -14,7 +14,7 @@ import models
 from utility.utils import get_complete_config, log_config_dict, get_latest_ckpt
 from utility.rearc.utils import plot_metrics_locally as plot_rearc_metrics_locally
 from utility.cvr.utils import plot_metrics_locally as plot_cvr_metrics_locally
-from utility.logging import logger
+from utility.custom_logging import logger
 
 
 torch.backends.cudnn.benchmark = False

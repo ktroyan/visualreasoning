@@ -8,7 +8,7 @@ import seaborn as sns
 from typing import Dict, List, Tuple
 
 # Personal codebase dependencies
-from utility.logging import logger
+from utility.custom_logging import logger
 
 
 def check_train_test_contamination(train_dataloader, test_dataloader):

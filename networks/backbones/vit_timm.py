@@ -18,7 +18,7 @@ from timm.layers import PatchEmbed
 
 # Personal codebase dependencies
 from utility.utils import plot_absolute_positional_embeddings
-from utility.logging import logger
+from utility.custom_logging import logger
 
 
 __all__ = ['get_vit_timm']

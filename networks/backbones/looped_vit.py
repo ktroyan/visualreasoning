@@ -17,7 +17,7 @@ import torch.nn.functional as F
 # Personal codebase dependencies
 from utility.utils import plot_absolute_positional_embeddings
 from utility.rearc.utils import one_hot_encode
-from utility.logging import logger
+from utility.custom_logging import logger
 
 
 __all__ = ['get_looped_vit']

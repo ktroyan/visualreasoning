@@ -2,7 +2,7 @@ from torch.utils.data import DataLoader
 from pytorch_lightning import LightningDataModule
 
 # Personal codebase dependencies
-from utility.logging import logger
+from utility.custom_logging import logger
 
 class DataModuleBase(LightningDataModule):
 
