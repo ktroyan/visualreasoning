@@ -960,7 +960,7 @@ class BEFOREARCModel(VisReasModel):
 
         # --- PonderNet ---
         if self.model_config.pondernet.enabled:
-            # Run the encoder adaptive loop to get features and p_list
+            # Run the encoder adaptive loop to get the list of features and list of halting probabilities
             x_features_list, p_list, halt_step = self.encoder(x, 
                                                               task_tokens, 
                                                               example_in_context, 
@@ -980,7 +980,7 @@ class BEFOREARCModel(VisReasModel):
 
                 logits_list.append(logits_step_t) # each [B, seq_len, num_classes] tensor is a step-wise prediction
 
-            # Return lists of all step-wise logits and halting probabilities
+            # Return lists of all step-wise logits and halting probabilities, as well as the halting step at which each sample halted
             return logits_list, p_list, halt_step
 
 
