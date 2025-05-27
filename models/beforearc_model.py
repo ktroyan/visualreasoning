@@ -864,7 +864,7 @@ class BEFOREARCModel(VisReasModel):
 
         ## Encoder to Decoder projection layer; useful to handle the task embedding that is concatenated
         # TODO: We could handle the task embedding differently than by a simple concatenation. For example using FiLM. See later.
-        if (self.head_input_dim != self.head_input_embed_dim) and self.model_config.head in ["transformer", "xtransformer", "mytransformer"]:
+        if (self.head_input_dim != self.head_input_embed_dim) and model_config.head in ["transformer", "xtransformer", "mytransformer"]:
             self.enc_to_dec_proj = nn.Linear(self.head_input_dim, self.head_input_embed_dim, device=self.device)  # project the encoder output (of dimension backbone_network_config.embed_dim + task_embedding_dim) to the decoder embedding dimension
 
         
