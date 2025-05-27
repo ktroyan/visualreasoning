@@ -3,6 +3,6 @@ wandb:
     enabled: false
     config: 'configs/sweeps/beforearc/comp_es1.yaml'  # runs a sweep for all the models and experiments specific in the file
     num_jobs: -1  # -1 for all runs possible in the sweep config given
-  wandb_project_name: 'VisReas-project-2'
+  wandb_project_name: 'VisReas-project-dev'
   wandb_entity_name: 'VisReas-ETHZ'     # this should be a WandB username or team name; e.g. 'klim-t', 'VisReas-ETHZ'
   log_model: false

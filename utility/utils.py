@@ -70,6 +70,15 @@ def get_complete_config(sweep_config: Dict = None) -> Tuple[OmegaConf, Dict]:
         def resolve_if_then_else(enabled, set_value):
             return set_value if enabled else None  # return None when parameter is not enabled
         
+        def resolve_pondernet_for_looped_vit(backbone_network_name, use_pondernet):
+            """
+            This resolver is used to set the PonderNet parameters only when the backbone network is 'looped_vit'.
+            """
+            if backbone_network_name == "looped_vit":
+                return use_pondernet
+            else:
+                return False
+        
         # This resolver is used to handle specific cases for the sys-gen study
         def resolve_if_then_else_sysgen(study_name, set_value):
             if study_name == "sys-gen":
@@ -118,6 +127,7 @@ def get_complete_config(sweep_config: Dict = None) -> Tuple[OmegaConf, Dict]:
 
         # Register the resolvers. Use replace=True to not try to register twice the resolver which would raise an error during WandB sweeps
         OmegaConf.register_new_resolver("resolve_if_then_else", resolve_if_then_else, replace=True)
+        OmegaConf.register_new_resolver("resolve_pondernet_for_looped_vit", resolve_pondernet_for_looped_vit, replace=True)
         OmegaConf.register_new_resolver("resolve_if_then_else_sysgen", resolve_if_then_else_sysgen, replace=True)
         OmegaConf.register_new_resolver("resolve_if_then_else_compositionality", resolve_if_then_else_compositionality, replace=True)
         OmegaConf.register_new_resolver("resolve_use_gen_test_set", resolve_use_gen_test_set, replace=True)

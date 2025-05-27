@@ -20,6 +20,62 @@ from utility.custom_logging import logger
 # os.environ['TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS'] = '1'
 
 
+class ReconstructionLoss(nn.Module):
+    def __init__(self, loss_fn):
+        super().__init__()
+        self.loss_fn = loss_fn
+
+    def forward(self, p_list, logits_list, y):
+        # p_list is [T, B]
+        # logits_list: is [T, B, seq_len, num_classes]
+        # y is [B, seq_len]
+
+        total_loss = 0.0
+        for t in range(len(p_list)):
+            logits_t = logits_list[t].transpose(2, 1)  # [B, num_classes, seq_len] <-- [B, seq_len, num_classes]; Torch Cross-Entropy loss function wants [B, num_classes, seq_len]
+            p_t = p_list[t].unsqueeze(-1)
+            loss_t = (p_t * self.loss_fn(logits_t, y, reduction='none')).mean()
+            total_loss += loss_t
+        
+        return total_loss
+
+class RegularizationLoss(nn.Module):
+    def __init__(self, lambda_p, max_steps):
+        """
+        max_steps is used to precompute the geometric prior parameterized by the hyperparameter lambda_p
+
+        The idea of the regularization loss is to promote exploration.
+        That is, the model is incentivized to perform 1/lambda_p steps since we attribute non-zero probabilities for all steps.
+        """
+        super().__init__()
+        
+        # Build (truncated) geometric prior: p_g[k] = (1-lambda_p)^k * lambda_p
+        p_g = torch.zeros(max_steps)
+        not_halted = 1.0    # for (1-lambda_p)^k, so start with 1.0 at k=0 for full mass
+        for k in range(max_steps):
+            if k == max_steps-1:
+                # Attribute all the remaining mass to the last step so that it sums to 1 (needed as it is a truncated geometric distribution)
+                p_g[k] = not_halted
+
+            else:
+                p_g[k] = not_halted * lambda_p
+                not_halted *= (1 - lambda_p)
+        
+        self.register_buffer('p_g', nn.Parameter(p_g, requires_grad=False))
+        self.kld = nn.KLDivLoss(reduction='batchmean')
+
+    def forward(self, p_list):
+        p = torch.stack(p_list).transpose(0, 1)  # [B, T], where T is the actual number of steps/iterations performed; transpose for batch first
+        p = p.clamp(min=1e-6, max=1-1e-6)   # clamping to avoid log(0); only used if p is used as input and not target below in kld
+        
+        # Geometric distribution prior p_g
+        p_g = self.p_g[:p.shape[1]].unsqueeze(0).expand_as(p)   # [B, T] <-- [T] <-- [max_steps]
+
+        # TODO: See comment NOTE below about log-space of input and target.
+        #       Not sure whether to use p_g.log() or p.log() as "input" since different sources do different things. 
+        return self.kld(p_g.log(), p)    # NOTE: the input should be in log-space for this KL divergence loss function; the target can be in the log-space too if the argument log_target=True; See https://docs.pytorch.org/docs/stable/generated/torch.nn.KLDivLoss.html
+        # return self.kl_div(p.log(), p_g)
+
 class VisReasModel(pl.LightningModule):
     """
     Model module class that handles the training, validation and testing logic of the model.
@@ -88,6 +144,12 @@ class VisReasModel(pl.LightningModule):
             if data_config.validate_in_and_out_domain:
                 self.gen_val_attention_scores = []
 
+        # --- PonderNet ---
+        if self.model_config.pondernet.enabled:
+            self.rec_loss = ReconstructionLoss(F.cross_entropy)
+            self.reg_loss = RegularizationLoss(self.model_config.pondernet.lambda_p,
+                                               self.model_config.pondernet.max_steps    # T
+                                               )
 
     def load_backbone_weights(self, checkpoint_path):
         self.model_backbone.load_state_dict(torch.load(checkpoint_path, weights_only=False)['model'], strict=False)
@@ -126,9 +188,7 @@ class VisReasModel(pl.LightningModule):
 
     def shared_step(self, batch):
         """
-        The same code is shared between training, validation and test steps. 
-        In theory, we would not need to compute and return the loss for testing, hence we would only call shared_step() in the test_step() method. 
-        However, we still do it, so the purpose of this shared_step() is lesser.
+        The same processing is performed during training, validation and test steps. 
         """
 
         x, y, task_tokens, example_in_context, y_true_size, x_grid_object_ids, special_grid_tokens_dict = batch   # [B, H, W], [B, H, W], [B], [B, 2], [B, seq_len], Dict
@@ -136,7 +196,7 @@ class VisReasModel(pl.LightningModule):
         B, H, W = x.shape
 
         # Flatten 2D tensor (grid image) y
-        y = y.view(B, -1)  # [B, seq_len=H*W] <-- [B, H, W]
+        y_flat = y.view(B, -1)  # [B, seq_len=H*W] <-- [B, H, W]
 
         # Handle input grid object ids for OPE
         if not self.model_config.ope.enabled:
@@ -153,67 +213,131 @@ class VisReasModel(pl.LightningModule):
         elif self.model_config.task_embedding.approach == 'task_tokens':
             example_in_context = None
 
+        # Cerate mask to ignore any token outside of the true size of the target grid
+        mask = self.create_true_size_mask(B, H, W, y_true_size)
+
+        # --- PonderNet ---
+        if self.model_config.pondernet.enabled:
+            # Pondering: Compute logits and halting probabilities for all pondering steps/iterations (so we have two lists)
+            logits_list, p_list, halt_step = self.forward(x,
+                                               y_flat,
+                                               task_tokens=task_tokens,
+                                               example_in_context=example_in_context,
+                                               x_grid_object_ids=x_grid_object_ids
+                                               )
+            
+            return logits_list, p_list, halt_step, y_flat, mask, special_grid_tokens_dict
         
-        # Forward pass through the whole model
-        y_hat = self(x, y, task_tokens=task_tokens, example_in_context=example_in_context, x_grid_object_ids=x_grid_object_ids)  # computed logits
-
-        # Permute the dimensions of y_hat to be [B, num_classes, seq_len] instead of [B, seq_len, num_classes] to match PyTorch's cross_entropy function format
-        y_hat = y_hat.permute(0, 2, 1)  # [B, num_classes, seq_len] <-- [B, seq_len, num_classes]
-
-        # Create the multiplicative mask based on the true sizes of y to only compute the metrics w.r.t. the actual tokens to predict in the target
-        true_size_mask = self.create_true_size_mask(B, H, W, y_true_size)
-
-        return x, y_hat, y, true_size_mask, special_grid_tokens_dict
+        # --- Standard ---
+        else:
+            # Compute logits
+            logits = self.forward(x, 
+                                  y_flat,
+                                  task_tokens=task_tokens,
+                                  example_in_context=example_in_context,
+                                  x_grid_object_ids=x_grid_object_ids
+                                  )
+            
+            return logits, None, y_flat, mask, special_grid_tokens_dict
 
     def step(self, batch, batch_idx):
 
-        x, y_hat, y, mask, special_grid_tokens_dict = self.shared_step(batch)    # [B, num_classes, seq_len], [B, seq_len], [B, seq_len]
+        # --- PonderNet ---
+        if self.model_config.pondernet.enabled:
+            logits_list, p_list, halt_step, y_flat, mask, special_grid_tokens_dict = self.shared_step(batch)
+            
+            ## Loss computation
+            # Reconstruction loss
+            rec_loss = self.rec_loss(p_list, logits_list, y_flat)
+            
+            # Regularization loss
+            reg_loss = self.reg_loss(p_list)
+            beta = self.model_config.pondernet.beta
+            
+            # PonderNet objective loss (using Reconstruction and Regularization losses)
+            obj_loss = rec_loss + beta * reg_loss
+            loss = obj_loss.unsqueeze(0) # loss returned for backpropagation; convert to 1-element tensor so that it can be concatenated properly when storing metrics later
 
-        B, H, W = x.shape
-        B, seq_len = y.shape
+            # Convert to 1-element tensors so that they can be concatenated properly when storing metrics later
+            rec_loss = rec_loss.unsqueeze(0)
+            reg_loss = reg_loss.unsqueeze(0)
 
-        # probabilities = F.softmax(y_hat, dim=1)  # compute the probabilities (normalized logits) of the model for each sample of the batch
+            ## Prediction logits
+            # TODO: Check if correct!
+            # During training, the output is sampled using a multinomial sampling for the halting probability distribution obtained
+            # During evaluation, the output is the output obtained at the step at which the model halted (following the Bernoulli sampling with probability lambda_t)
+            
+            all_logits = torch.stack(logits_list, dim=1)    # stack all logits along the steps dimension into [B, T, seq_len, num_classes]
+            B, seq_len, num_classes = y_flat.shape[0], y_flat.shape[1], all_logits.shape[3]
+            
+            if self.training:
+                # Get training prediction logits
 
-        # TODO: 
-        # See exactly how we want to compute the loss and metrics. What types of tokens we want to consider.
-        # Also, convert the non-data tokens to background tokens (i.e., 0) when computing the loss and metrics, no?
-        # Also, consider weighting the tokens (e.g., there are many more bakground tokens) differently when computing the loss for grid with padding.
+                # We probabilistically sample a halting step per batch element to get the logits of that step
+                p = torch.stack(p_list, dim=1).clamp(min=1e-6, max=1-1e-6)  # [B, T]; stack the probabilities of halting p_list into [B, T]
+                sampled_step = torch.multinomial(p, num_samples=1)  # [B, 1]; sample one step to use per batch element
 
-        # Loss per symbol (with all sorts of padding considered): compute the loss per token/symbol
-        per_sample_loss = F.cross_entropy(y_hat, y.long(), reduction='none').float()  # [B, seq_len]
-        loss_symbol_with_pad = (per_sample_loss.mean()).unsqueeze(0)
+                # Get the per‐token class‐scores from the sampled halting step for each element in the batch
+                step_indices = sampled_step.view(B, 1, 1, 1).expand(-1, 1, seq_len, num_classes) # build gather index of shape [B, 1, seq_len, 1]
+                logits = all_logits.gather(1, step_indices).squeeze(1)  # gather the sampled-step logits to [B, seq_len, num_classes] <-- [B, 1, seq_len, num_classes]; along the T dimension of all_logits, gather takes the index given by step_indices[b, 0, i, j] at every (sequence, class) position (i,j)
 
-        # Loss per symbol (without padding): compute the loss per token/symbol and then apply the mask to ignore the padding tokens
-        per_sample_loss = F.cross_entropy(y_hat, y.long(), reduction='none').float()  # [B, seq_len]
-        loss_symbol_no_pad = ((per_sample_loss * mask).sum() / mask.sum()).unsqueeze(0)  # only consider non-padding elements
+            else:
+                # Get evaluation prediction logits
+                # During evaluation, we take the logits at the last step (i.e., the step at which the model halted probabilistically)
+                # Note that this assumes that the feature states has been preserved by being stored in all subsequent steps since the sample has halted
+                # logits = logits_list[-1]  # this would work if we stored the feature state of a sample that just halted through all the subsequent steps
 
-        # Compute predictions
-        preds = torch.argmax(y_hat, dim=1)  # [B, seq_len]; predictions for each token/symbol of the model for each sample of the batch
+                # Get the per‐token class‐scores from the halting step at which each element in the batch first halted
+                step_indices = halt_step.view(B, 1, 1, 1).expand(-1, 1, seq_len, num_classes)
+                logits = all_logits.gather(1, step_indices).squeeze(1)
+            
+            selected_step = step_indices[:, 0, 0, 0]   # allows to observe how many steps were taken for each sample; [B]
+            
+            logs = {"loss": loss, "ponder_rec_loss": rec_loss, "ponder_reg_loss": reg_loss}
 
-        # Accuracy per symbol (with padding) (i.e., the accuracy of the model in predicting the correct symbol for each pixel of the grid considering the whole max. padded grid, thus also the padding tokens)
-        acc_symbol_with_pad = (preds == y).float().mean().unsqueeze(0)
+        # --- Standard ---
+        else:
+            logits, _, y_flat, mask, special_grid_tokens_dict = self.shared_step(batch)
+            
+            per_sample_loss = F.cross_entropy(logits.permute(0, 2, 1),
+                                              y_flat.long(),
+                                              reduction='none',
+                                            #   ignore_index=special_grid_tokens_dict['PAD_TOKEN']  # ignore the padding token
+                                              ).float()
+            
+            loss = per_sample_loss.mean().unsqueeze(0)  # [B, seq_len]
+            logs = {"loss": loss}
 
-        # Accuracy per symbol (without padding) (i.e., the accuracy of the model in predicting the correct symbol for each pixel of the grid considering only the target grid, that is, without considering the padding tokens)
-        acc_symbol_no_pad = (((preds == y) * mask).sum().float() / mask.sum()).unsqueeze(0)  # only consider non-padding elements
-
-        # Grid accuracy (only count as correct if the entire padded grid is correct)
-        acc_grid_with_pad = torch.all(preds == y, dim=1).float().mean().unsqueeze(0)
-
-        # Grid accuracy (only count as correct if entire non-padding grid is correct)
-        acc_grid_no_pad = torch.all((preds == y) | ~mask, dim=1).float().mean().unsqueeze(0)   # | ~mask ensures automatically count as correct the padding tokens
-
-        logs = {'loss': loss_symbol_with_pad, 
-                'loss_no_pad': loss_symbol_no_pad, 
-                'acc': acc_symbol_with_pad,
-                'acc_no_pad': acc_symbol_no_pad, 
-                'acc_grid': acc_grid_with_pad, 
-                'acc_grid_no_pad': acc_grid_no_pad
-                }
         
-        loss = loss_symbol_with_pad
+        ## Metrics computation
+        # Get predictions
+        preds = torch.argmax(logits, dim=2) # [B, seq_len] <-- [B, seq_len, num_classes]
+        
+        # Compute more loss metrics where it is just Cross-Entropy
+        per_sample_loss = F.cross_entropy(logits.permute(0, 2, 1),
+                                          y_flat.long(),
+                                          reduction='none'
+                                          ).float() # [B, seq_len]
+
+        loss_no_pad = ((per_sample_loss * mask).sum() / mask.sum()).unsqueeze(0)
+
+        # Compute accuracy metrics
+        acc_with_pad = ((preds == y_flat).float().mean()).unsqueeze(0)
+        acc_no_pad = (((preds == y_flat) * mask).sum().float() / mask.sum()).unsqueeze(0)
+        acc_grid_pad = (torch.all(preds == y_flat, dim=1).float().mean()).unsqueeze(0)
+        acc_grid_nopad = (torch.all((preds == y_flat) | ~mask, dim=1).float().mean()).unsqueeze(0)
+
+        # Store metrics in logs
+        logs.update({
+            "loss_no_pad": loss_no_pad,
+            "acc": acc_with_pad,
+            "acc_no_pad": acc_no_pad,
+            "acc_grid": acc_grid_pad,
+            "acc_grid_no_pad": acc_grid_nopad
+        })
 
         return loss, logs, preds
-
+        
     def training_step(self, batch, batch_idx):
         """
         This method is called for each batch during the training phase.
@@ -385,15 +509,43 @@ class VisReasModel(pl.LightningModule):
 
         # Plot model predictions
         if self.model_config.observe_preds.enabled:
-            # Plot a few training and validation samples (inputs, predictions, targets) of the first and last batch seen during the epoch
-            
-            for batch_index, split in zip([0, -1], ["train", "val"]):
-                # Plot a few training and validation samples of the first and last batch seen during the epoch
+            # Plot a few training samples (inputs, predictions, targets) of the first and last batch seen during the epoch
+            for batch_index in [0, -1]:
                 fig_paths = plot_image_predictions(self.save_folder,
-                                                   split,
+                                                   "train",
                                                    self.train_inputs, 
                                                    self.train_preds,
                                                    self.train_targets,
+                                                   self.image_size,
+                                                   n_samples=self.model_config.observe_preds.n_samples,
+                                                   batch_index=batch_index,
+                                                   epoch=self.current_epoch
+                                                   )
+                
+                figs_to_log.append(fig_paths)
+
+            # Plot a few validation samples (inputs, predictions, targets) of the first and last batch seen during the epoch
+            for batch_index in [0, -1]:
+                fig_paths = plot_image_predictions(self.save_folder,
+                                                   "val",
+                                                   self.val_inputs, 
+                                                   self.val_preds,
+                                                   self.val_targets,
+                                                   self.image_size,
+                                                   n_samples=self.model_config.observe_preds.n_samples,
+                                                   batch_index=batch_index,
+                                                   epoch=self.current_epoch
+                                                   )
+                
+                figs_to_log.append(fig_paths)
+
+            for batch_index in [0, -1]:
+                # Plot a few validation samples (inputs, predictions, targets) of the first and last batch seen during the epoch
+                fig_paths = plot_image_predictions(self.save_folder,
+                                                   "gen_val",
+                                                   self.gen_val_inputs, 
+                                                   self.gen_val_preds,
+                                                   self.gen_val_targets,
                                                    self.image_size,
                                                    n_samples=self.model_config.observe_preds.n_samples,
                                                    batch_index=batch_index,
@@ -412,7 +564,7 @@ class VisReasModel(pl.LightningModule):
                     except Exception as e:
                         log_message = f"Error logging image predictions to wandb: {e}"
                         log_message += f"Issue for figure path: {fig_path}"
-                        log_message += f"This image logging was skipped."
+                        log_message += "This image logging was skipped."
                         logger.warning(log_message)
 
         # Reset the lists for the next epoch
@@ -436,73 +588,37 @@ class VisReasModel(pl.LightningModule):
             self.gen_val_attention_scores = []
 
     def test_step(self, batch, batch_idx, dataloader_idx=0):
-        """
-        This method is called for each batch during the testing phase.
-        This is a default PyTorch Lightning method that we override to define the testing logic.
-        """
 
         x, y, task_tokens, example_in_context, y_true_size, x_grid_object_ids, special_grid_tokens_dict = batch
+        B, _, _ = x.shape
 
-        x, y_hat, y, mask, special_grid_tokens_dict = self.shared_step(batch)
+        loss, logs, preds = self.step(batch, batch_idx)
 
-        B, H, W = x.shape
-        B, seq_len = y.shape
-
-        # TODO: See exactly how we want to compute the loss and metrics. What types of tokens we want to consider.
-        # Also, convert the non-data tokens to background tokens (i.e., 0) when computing the loss and metrics, no?
-
-        # Loss per symbol (with all sort of padding considered): compute the loss per token/symbol
-        per_sample_loss = F.cross_entropy(y_hat, y.long(), reduction='none').float()  # [B, seq_len]
-        loss_symbol_with_pad = per_sample_loss.mean().unsqueeze(0)
-
-        # Loss per symbol (without padding considered): compute the loss per token/symbol and then apply the mask to ignore the padding tokens
-        per_sample_loss = F.cross_entropy(y_hat, y.long(), reduction='none').float()  # [B, seq_len]
-        loss_symbol_no_pad = ((per_sample_loss * mask).sum() / mask.sum()).unsqueeze(0)  # only consider non-padding elements
-
-        # Compute predictions
-        preds = torch.argmax(y_hat, dim=1)  # [B, seq_len]; predictions for each token/symbol of the model for each sample of the batch
-
-        # Accuracy per symbol (with padding) (i.e., the accuracy of the model in predicting the correct symbol for each pixel of the grid considering the whole max. padded grid, thus also the padding tokens)
-        acc_symbol_with_pad = (preds == y).float().mean().unsqueeze(0)
-
-        # Accuracy per symbol (without padding) (i.e., the accuracy of the model in predicting the correct symbol for each pixel of the grid considering only the target grid, that is, without considering the padding tokens)
-        acc_symbol_no_pad = (((preds == y) * mask).sum().float() / mask.sum()).unsqueeze(0)  # only consider non-padding elements
-
-        # Grid accuracy with pad (only count as correct if the entire padded grid is correct)
-        acc_grid_with_pad = torch.all(preds == y, dim=1).float().mean().unsqueeze(0)
-
-        # Grid accuracy without pad (only count as correct if entire non-padding grid is correct)
-        acc_grid_no_pad = torch.all((preds == y) | ~mask, dim=1).float().mean().unsqueeze(0)   # | ~mask ensures automatically count as correct the padding tokens
-
-        logs = {'loss': loss_symbol_with_pad,
-                'loss_no_pad': loss_symbol_no_pad,
-                'acc': acc_symbol_with_pad, 
-                'acc_no_pad': acc_symbol_no_pad, 
-                'acc_grid': acc_grid_with_pad, 
-                'acc_grid_no_pad': acc_grid_no_pad
-                }
-
+        # Prefix keys for logs depending on whether it is for test or gen_test
         if dataloader_idx == 0:
-            # Logging
-            results = {f"test_{k}": v for k, v in logs.items()}
-            self.log_dict(results, logger=True, on_step=True, prog_bar=True, add_dataloader_idx=False)
-            self.test_step_results.append(results)
+            prefix = "test"
+        elif dataloader_idx == 1:
+            prefix = "gen_test"
+        
+        test_results = {f"{prefix}_{k}": v for k, v in logs.items()}
 
+        # Log the results to WandB
+        self.log_dict(test_results, logger=True, on_step=True, prog_bar=True, add_dataloader_idx=False)
+
+        # Save locally (e.g., for plotting)
+        if dataloader_idx == 0:
+            self.test_step_results.append(test_results)
             self.test_inputs.append(x)
             self.test_preds.append(preds)
-            self.test_targets.append(y)
-
+            self.test_targets.append(y.view(B, -1))   # flatten y for consistency
+        
         elif dataloader_idx == 1:
-            # Logging
-            results = {f"gen_test_{k}": v for k, v in logs.items()}
-            self.log_dict(results, logger=True, on_step=True, prog_bar=True, add_dataloader_idx=False)
-            self.gen_test_step_results.append(results)
-
+            self.gen_test_step_results.append(test_results)
             self.gen_test_inputs.append(x)
             self.gen_test_preds.append(preds)
-            self.gen_test_targets.append(y)
-        
-        return results
+            self.gen_test_targets.append(y.view(B, -1))   # flatten y for consistency
+
+        return test_results
     
     def on_test_epoch_end(self):
         """
@@ -748,7 +864,7 @@ class BEFOREARCModel(VisReasModel):
 
         ## Encoder to Decoder projection layer; useful to handle the task embedding that is concatenated
         # TODO: We could handle the task embedding differently than by a simple concatenation. For example using FiLM. See later.
-        if self.head_input_dim != self.head_input_embed_dim:
+        if (self.head_input_dim != self.head_input_embed_dim) and self.model_config.head in ["transformer", "xtransformer", "mytransformer"]:
             self.enc_to_dec_proj = nn.Linear(self.head_input_dim, self.head_input_embed_dim, device=self.device)  # project the encoder output (of dimension backbone_network_config.embed_dim + task_embedding_dim) to the decoder embedding dimension
 
         
@@ -841,44 +957,72 @@ class BEFOREARCModel(VisReasModel):
         if not(self.model_config.ope.enabled and (x_grid_object_ids is not None) and self.model_config.backbone in ["vit", "looped_vit", "transformer"]):
             x_grid_object_ids = None
 
-        # Encode the input sequence
-        if self.model_config.backbone in ["vit", "looped_vit"]:
-            x_encoded = self.encoder(x, task_tokens, example_in_context, x_grid_object_ids)  # [B, seq_len, embed_dim]; NOTE: the extra tokens will have been truncated so the encoded sequence will also have a dim seq_len
 
-        elif self.model_config.backbone in ["resnet"]:
-            # NOTE: The task embedding is handled below for ResNet as it is not used at encoding time
-            x_encoded = self.encoder(x, task_tokens, example_in_context) # [B, seq_len, embed_dim]
+        # --- PonderNet ---
+        if self.model_config.pondernet.enabled:
+            # Run the encoder adaptive loop to get features and p_list
+            x_features_list, p_list, halt_step = self.encoder(x, 
+                                                              task_tokens, 
+                                                              example_in_context, 
+                                                              x_grid_object_ids
+                                                              )
 
-            if self.head_input_dim != self.head_input_embed_dim:
-                # Map the encoded input sequence to the same embedding dimension as the decoder's
-                x_encoded = self.enc_to_dec_proj(x_encoded)  # [B, seq_len, head_input_embed_dim]
-
-        # Decode the encoded input sequence
-        if self.model_config.head in ["transformer", "xtransformer", "mytransformer"]:
-            # Transformer Decoder
-
-            if self.head_input_dim != self.head_input_embed_dim:
-                # Map the encoded input sequence to the same embedding dimension as the decoder's
-                x_encoded = self.enc_to_dec_proj(x_encoded)  # [B, seq_len, head_input_embed_dim]
-
-            logits = self.decoder(y, x_encoded) # [B, seq_len, num_classes]
-
-        elif self.model_config.head in ["mlp"]:
-            # MLP Decoder/Head
-    
-            # Forward pass through the model head
-            # We can treat each pixel/token independently as part of a sequence, so we can directly apply a Linear layer 
-            # where the last dimension is the features dimension, instead of reshaping the tensor
-            logits = self.decoder(x_encoded)   # [B, seq_len, num_classes] <-- [B, seq_len=H*W, C=self.network_config.embed_dim]
-
-            if self.model_config.backbone in ["resnet"]:
-                if task_tokens is not None:
-                    # Discard the appended task tokens
-                    logits = logits[:, :-task_tokens.shape[1], :]
+            # Decode each step/iteration as we would for a single step (i.e., when pondernet is not used)
+            logits_list = []
+            for feature in x_features_list:
+                if self.model_config.head in ["transformer", "xtransformer", "mytransformer"]:
+                    if self.head_input_dim != self.head_input_embed_dim:
+                        feature = self.enc_to_dec_proj(feature)
+                    logits_step_t = self.decoder(y, feature)
                 
-                if example_in_context is not None:
-                    # Discard the appended input-output example
-                    logits = logits[:, :-2*seq_len, :]
-                
+                elif self.model_config.head in ["mlp"]:
+                    logits_step_t = self.decoder(feature)
 
+                logits_list.append(logits_step_t) # each [B, seq_len, num_classes] tensor is a step-wise prediction
+
+            # Return lists of all step-wise logits and halting probabilities
+            return logits_list, p_list, halt_step
+
+
+        # --- Standard pass ---
+        else:
+            # Encode the input sequence
+            if self.model_config.backbone in ["vit", "looped_vit"]:
+                x_encoded = self.encoder(x, task_tokens, example_in_context, x_grid_object_ids)  # [B, seq_len, embed_dim]; NOTE: the extra tokens will have been truncated so the encoded sequence will also have a dim seq_len
+
+            elif self.model_config.backbone in ["resnet"]:
+                # NOTE: The task embedding is handled below for ResNet as it is not used at encoding time
+                x_encoded = self.encoder(x, task_tokens, example_in_context) # [B, seq_len, embed_dim]
+
+                if self.head_input_dim != self.head_input_embed_dim:
+                    # Map the encoded input sequence to the same embedding dimension as the decoder's
+                    x_encoded = self.enc_to_dec_proj(x_encoded)  # [B, seq_len, head_input_embed_dim]
+
+            # Decode the encoded input sequence
+            if self.model_config.head in ["transformer", "xtransformer", "mytransformer"]:
+                # Transformer Decoder
+
+                if self.head_input_dim != self.head_input_embed_dim:
+                    # Map the encoded input sequence to the same embedding dimension as the decoder's
+                    x_encoded = self.enc_to_dec_proj(x_encoded)  # [B, seq_len, head_input_embed_dim]
+
+                logits = self.decoder(y, x_encoded) # [B, seq_len, num_classes]
+
+            elif self.model_config.head in ["mlp"]:
+                # MLP Decoder/Head
+        
+                # Forward pass through the model head
+                # We can treat each pixel/token independently as part of a sequence, so we can directly apply a Linear layer 
+                # where the last dimension is the features dimension, instead of reshaping the tensor
+                logits = self.decoder(x_encoded)   # [B, seq_len, num_classes] <-- [B, seq_len=H*W, C=self.network_config.embed_dim]
+
+                if self.model_config.backbone in ["resnet"]:
+                    if task_tokens is not None:
+                        # Discard the appended task tokens
+                        logits = logits[:, :-task_tokens.shape[1], :]
+                    
+                    if example_in_context is not None:
+                        # Discard the appended input-output example
+                        logits = logits[:, :-2*seq_len, :]
+                
         return logits

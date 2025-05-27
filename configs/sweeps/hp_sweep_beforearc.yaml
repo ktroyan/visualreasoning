@@ -13,10 +13,39 @@ method: grid
 # Metric to optimize
 metric:
   goal: minimize
-  name: metrics/val_loss_epoch  # TODO: see why metrics/val_loss does not exist in the Sweep section on WandB      
+  name: metrics/gen_val_loss_epoch     
 
 ##### Hyperparameters sweep #####
+parameters:
+  model:
+    parameters:
+      
+      pondernet:
+        parameters:
+          max_steps:
+            values: [5, 10, 20]         # number of steps for the PonderNet
+          beta:
+            values: [0.01, 0.1, 0.2]    # KLD regularization coefficient
+          lambda_p:
+            values: [0.05, 0.1]         # expected value for the number of steps/iterations
+          epsilon:
+            values: [0.01, 0.05, 0.1]   # to stop when the cumulative probability mass is greater than epsilon
 
+      visual_tokens:
+        parameters:
+          enabled:
+            values: [true, false]  # whether to use visual tokens or not
+      
+      ape:
+        parameters:
+          enabled:
+            values: [true, false]  # whether to use absolute positional encoding or not
+      
+      rpe:
+        parameters:
+          enabled:
+            values: [true, false]  # whether to use relative positional encoding or not
+      
 
 # early_terminate:
 #   type: hyperband
