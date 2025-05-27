@@ -1,5 +1,5 @@
 base:
-  seed: 42
+  seed: 1997
   n_gpus: 1 # number of GPUs to use
   gpu_id: 0 # GPU to use
   data_env: 'BEFOREARC' # choices: 'BEFOREARC', 'REARC', 'CVR'
