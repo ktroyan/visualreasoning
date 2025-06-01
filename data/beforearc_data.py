@@ -451,7 +451,7 @@ class BEFOREARCDataModule(DataModuleBase):
 
         # TODO: Remove
         # Take a subset of the dataset for testing purposes
-        train_set_df = train_set_df.sample(n=10000, random_state=42)
+        # train_set_df = train_set_df.sample(n=10000, random_state=42)
 
         dataset_splits = [train_set_df, val_set_df, test_set_df]
 
