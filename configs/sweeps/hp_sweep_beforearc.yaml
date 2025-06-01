@@ -13,23 +13,66 @@ method: grid
 # Metric to optimize
 metric:
   goal: minimize
-  name: metrics/gen_val_loss_epoch     
+  name: metrics/gen_val_acc_grid_epoch     
 
 ##### Hyperparameters sweep #####
 parameters:
+
+  experiment:
+    parameters:
+      study:
+        values: ['compositionality']
+      setting:
+        values: ['exp_setting_3']
+      name:
+        values: ['experiment_2']
+
+  data:
+    parameters:
+      train_batch_size:
+        values: [8, 16, 64, 128]  # batch size for the training data loader
+
+  training:
+    parameters:
+      checkpointing:
+        parameters:
+          enabled:
+            values: [true]  # whether to save checkpoints or not
+          monitored_metric:
+            # values: ['gen_val_loss', 'gen_val_acc', 'gen_val_acc_grid_epoch', 'val_loss', 'val_acc', 'val_acc_grid_epoch']  # choices: gen_val_loss, gen_val_acc, val_acc, val_loss, gen_val_grid_acc_epoch
+            values: ['gen_val_loss', 'gen_val_acc_grid_epoch']  # choices: gen_val_loss, gen_val_acc, val_acc, val_loss, gen_val_grid_acc_epoch
+      # max_epochs:
+      #   values: [15]  # number of epochs to train the model for
+  
   model:
     parameters:
-      
-      pondernet:
+
+      training_hparams:
         parameters:
-          max_steps:
-            values: [5, 10, 20]         # number of steps for the PonderNet
-          epsilon:
-            values: [0.01, 0.05, 0.1]   # to stop when the cumulative probability mass is greater than epsilon
-          beta:
-            values: [0.01, 0.1, 0.2]    # KLD regularization coefficient
-          lambda_p:
-            values: [0.05, 0.1, 0.25]   # expected value for the number of steps/iterations
+          lr:
+            # values: [0.0001, 0.001, 0.01]  # learning rate for the optimizer
+            values: [0.001]  # learning rate for the optimizer
+        
+          # optimizer:
+          #   values: ['AdamW', 'SGD']  # choices: Adam, AdamW, SGD
+          
+          # scheduler:
+          #   parameters:
+          #     type:
+          #       values: ['CosineAnnealingLR', 'ReduceLROnPlateau', 'StepLR']  # choices: ReduceLROnPlateau, StepLR, CosineAnnealingLR
+
+      
+      # pondernet:
+      #   parameters:
+          # max_steps:
+            # values: [5, 10, 20]       # number of steps for the PonderNet
+          
+          # epsilon:
+          #   values: [0.01, 0.05, 0.1]   # to stop when the cumulative probability mass is greater than epsilon
+          # beta:
+          #   values: [0.01, 0.1, 0.2]    # KLD regularization coefficient
+          # lambda_p:
+          #   values: [0.05, 0.1, 0.25]   # expected value for the number of steps/iterations
 
       # visual_tokens:
       #   parameters:
