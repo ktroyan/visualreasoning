@@ -1070,16 +1070,19 @@ class LoopedVisionTransformer(nn.Module):
         x_features_list, p_list = [], []
         halt_step = torch.full((B,), -1, dtype=torch.long, device=x.device)    # to remember the actual halting step per sample at evaluation
 
-        # TODO: Should we encode input x here to get an initial hidden state h_0?
-        #       Should we use x AND a hidden state h_t at each step when calling transformer_step() ?
+        # TODO: Should we encode input x here to get an initial hidden state h_0? Or directly using x is ok as initial hidden state?
+        #       Should we use x AND a hidden state h_t at each step when calling transformer_step() since the paper suggests step(x, h_t) ?
+        #       Currently, I use a residual approach where I add the input x to the hidden state h_t at each step.
+
+        h_t = x  # [B, seq_len, embed_dim]; initial hidden state features h_0 (i.e., the input embeddings)
 
         # Perform at most max_steps steps of network computation
         for step_t in range(max_steps):
-            # Single Transformer step
-            x = self.transformer_step(x, num_appended_extra_tokens) # [B, seq_len, embed_dim]; compute hidden state features x
+            # Single Transformer step with residual connection
+            h_t = self.transformer_step(x + h_t, num_appended_extra_tokens) # [B, seq_len, embed_dim]; compute hidden state features
             
             # Store encoded input (i.e., predicted features, hidden state) for this step
-            x_features_list.append(x)
+            x_features_list.append(h_t)
 
             # Compute halting mass p_t (i.e., unconditioned, overall probability of halting)
             if step_t == max_steps - 1: # last step
@@ -1089,7 +1092,7 @@ class LoopedVisionTransformer(nn.Module):
             else:
                 # Get the hidden state features to predict the halting probability with the halting node MLP
                 # TODO: Maybe better approach needed for better halting probability prediction?
-                x_hidden_vector = x.mean(dim=1)  # [B, embed_dim]; mean pooling (or could use a CLS token) since the halting MLP expects a single feature vector per sample
+                x_hidden_vector = h_t.mean(dim=1)  # [B, embed_dim]; mean pooling (or could use a CLS token) since the halting MLP expects a single feature vector per sample
 
                 # Compute conditional halting probability lambda_t using the halting MLP node
                 lambda_t = self.halting_mlp(x_hidden_vector).squeeze(-1)  # [B]; lambda_n in the paper
@@ -1132,7 +1135,7 @@ class LoopedVisionTransformer(nn.Module):
                 # During evaluation only
                 # In order to not compute unnecessarily new hidden/feature states for the samples that halted, we zero out future updates for samples that halted
                 keep_processing = (~halted).view(B, 1, 1) # mask where 1 is for the samples that still have to be processed and 0 for the samples that have halted
-                x = x * keep_processing
+                h_t = h_t * keep_processing
 
         # Set the halt_step of the samples that never halted before max_steps steps of processing to the last step
         halt_step[halt_step < 0] = len(p_list) - 1
