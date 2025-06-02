@@ -539,18 +539,19 @@ class VisReasModel(pl.LightningModule):
                 
                 figs_to_log.append(fig_paths)
 
-            for batch_index in [0, -1]:
-                # Plot a few validation samples (inputs, predictions, targets) of the first and last batch seen during the epoch
-                fig_paths = plot_image_predictions(self.save_folder,
-                                                   "gen_val",
-                                                   self.gen_val_inputs, 
-                                                   self.gen_val_preds,
-                                                   self.gen_val_targets,
-                                                   self.image_size,
-                                                   n_samples=self.model_config.observe_preds.n_samples,
-                                                   batch_index=batch_index,
-                                                   epoch=self.current_epoch
-                                                   )
+            if self.data_config.validate_in_and_out_domain:
+                for batch_index in [0, -1]:
+                    # Plot a few validation samples (inputs, predictions, targets) of the first and last batch seen during the epoch
+                    fig_paths = plot_image_predictions(self.save_folder,
+                                                    "gen_val",
+                                                    self.gen_val_inputs, 
+                                                    self.gen_val_preds,
+                                                    self.gen_val_targets,
+                                                    self.image_size,
+                                                    n_samples=self.model_config.observe_preds.n_samples,
+                                                    batch_index=batch_index,
+                                                    epoch=self.current_epoch
+                                                    )
                 
                 figs_to_log.append(fig_paths)
 
