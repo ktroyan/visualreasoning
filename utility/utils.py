@@ -10,7 +10,7 @@ import shutil
 from typing import Any, Dict, List, Tuple
 
 # Personal codebase dependencies
-from utility.logging import logger
+from utility.custom_logging import logger
 
 
 def get_complete_config(sweep_config: Dict = None) -> Tuple[OmegaConf, Dict]:

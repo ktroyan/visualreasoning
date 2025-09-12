@@ -10,7 +10,7 @@ import torch.nn.functional as F
 # Personal codebase dependencies
 from .data_base import DataModuleBase
 from utility.cvr.utils import compute_dataset_stats
-from utility.logging import logger
+from utility.custom_logging import logger
 
 
 class CVRDataset(Dataset):

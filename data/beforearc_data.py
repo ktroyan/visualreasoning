@@ -9,7 +9,7 @@ from datasets import load_dataset
 
 # Personal codebase dependencies
 from .data_base import DataModuleBase
-from utility.logging import logger
+from utility.custom_logging import logger
 from .external.vitarc.obj_idx_utils import generate_input_type_ids_multi
 
 def create_object_grid(input_grid, max_img_size, special_tokens_dic):

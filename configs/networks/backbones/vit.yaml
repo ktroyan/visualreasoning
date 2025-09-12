@@ -6,9 +6,9 @@ backbone_network:
   qkv_bias: true
   num_layers: 6  # 6
   ape_dropout_rate: 0.0
-  attn_dropout_rate: 0.0  # 0.1
+  attn_dropout_rate: 0.1  # 0.1
   attn_proj_dropout_rate: 0.0
-  ff_dropout_rate: 0.0  # 0.1
+  ff_dropout_rate: 0.1  # 0.1
   init_weights_cfg:
     type: 'trunc_normal'  # choices: 'xavier', 'kaiming', 'trunc_normal', 'normal'
     distribution: 'uniform' # choices: 'uniform', 'normal'; applies if type is 'xavier' or 'kaiming'

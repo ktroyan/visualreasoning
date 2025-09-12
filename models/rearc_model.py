@@ -16,7 +16,7 @@ from networks.heads.xtransformer import get_xtransformer_decoder
 from networks.heads.mytransformer import get_mytransformer_decoder
 from utility.utils import plot_lr_schedule
 from utility.rearc.utils import plot_image_predictions, plot_attention_scores
-from utility.logging import logger
+from utility.custom_logging import logger
 
 # os.environ['TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS'] = '1'
 

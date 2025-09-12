@@ -6,7 +6,7 @@ from x_transformers.autoregressive_wrapper import top_k, top_p
 from torch.amp import autocast
 
 # Personal codebase dependencies
-from utility.logging import logger
+from utility.custom_logging import logger
 from utility.utils import timer_decorator
 
 __all__ = ['get_xtransformer_decoder']

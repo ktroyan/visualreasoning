@@ -11,7 +11,7 @@ import seaborn as sns
 from typing import Dict, List
 
 # Personal codebase dependencies
-from utility.logging import logger
+from utility.custom_logging import logger
 
 
 def compute_dataset_stats(dataset_path):

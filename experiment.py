@@ -16,7 +16,7 @@ import models
 import training
 import inference
 from utility.utils import log_config_dict, get_complete_config, generate_timestamped_experiment_name, save_model_metadata_for_ckpt, get_paper_model_name
-from utility.logging import logger
+from utility.custom_logging import logger
 
 torch.backends.cudnn.benchmark = False
 torch.backends.cudnn.deterministic = False
@@ -104,6 +104,11 @@ def main() -> None:
     # Log the complete and actual config used for the experiment
     log_config_dict(config, "*** All arguments contained in the config dict ***")
 
+    # Explicitly save the study, setting, experiment name and paper model name to make sure they exist table columns
+    run.summary["study"] = config.experiment.study
+    run.summary["setting"] = config.experiment.setting
+    run.summary["experiment_name"] = config.experiment.name
+
     # Seed everything for reproducibility
     if config.base.seed is not None:
         pl.seed_everything(config.base.seed)
@@ -171,10 +176,18 @@ def main() -> None:
     # Get the model name for the paper
     paper_model_name = get_paper_model_name(config)
     exp_logger.experiment.log({"paper_model_name": paper_model_name})  # log the model name for the paper to wandb
+    run.summary["model_name"] = paper_model_name
 
     # Save the experiment results relevant to the paper
     experiment_results_file_path = write_experiment_results_logs(config, experiment_folder, paper_experiment_results, paper_model_name)
     exp_logger.experiment.save(experiment_results_file_path)    # save the experiment results file to wandb; similar to wandb.save()
+
+    # Save the run_metrics.jsonl file to wandb if it exists
+    run_metrics_file_path = os.path.join(experiment_folder, "run_metrics.jsonl")
+    if os.path.exists(run_metrics_file_path):
+        exp_logger.experiment.save(run_metrics_file_path)
+    else:
+        logger.warning(f"run_metrics.jsonl file not found in {experiment_folder}. Not saving to wandb.")
 
     # End the wandb run
     run.finish()

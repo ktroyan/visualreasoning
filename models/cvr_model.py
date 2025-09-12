@@ -14,7 +14,7 @@ from networks.backbones.llada import get_llada_encoder
 from networks.heads.mlp import get_mlp_head
 from utility.cvr.utils import plot_image_predictions
 from utility.utils import plot_lr_schedule  # noqa: F401
-from utility.logging import logger
+from utility.custom_logging import logger
 
 
 class VisReasModel(pl.LightningModule):

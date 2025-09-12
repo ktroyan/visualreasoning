@@ -14,14 +14,14 @@ import models
 from utility.utils import get_complete_config, log_config_dict, get_latest_ckpt
 from utility.rearc.utils import plot_metrics_locally as plot_rearc_metrics_locally
 from utility.cvr.utils import plot_metrics_locally as plot_cvr_metrics_locally
-from utility.logging import logger
+from utility.custom_logging import logger
 
 
 torch.backends.cudnn.benchmark = False
 torch.backends.cudnn.deterministic = False
 torch.set_float32_matmul_precision('medium')    # 'high'
-# os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
-# os.environ['TORCH_USE_CUDA_DSA'] = 'true'
+os.environ['CUDA_LAUNCH_BLOCKING'] = '1'
+os.environ['TORCH_USE_CUDA_DSA'] = 'true'
 
 # os.environ['TORCH_LOGS'] = "graph_breaks"
 # os.environ['TORCH_LOGS'] = "recompiles"
@@ -107,8 +107,12 @@ class MetricsCallback(Callback):
             all_local_plotting_metrics.update({
                 'gen_val_loss_epoch': self.gen_val_loss_epoch,
                 'gen_val_acc_epoch': self.gen_val_acc_epoch,
-                'gen_val_grid_acc_epoch': self.gen_val_grid_acc_epoch
             })
+
+            if self.base_config.data_env in ["REARC", "BEFOREARC"]:
+                all_local_plotting_metrics.update({
+                    'gen_val_grid_acc_epoch': self.gen_val_grid_acc_epoch
+                })
 
         return all_local_plotting_metrics
 
@@ -151,12 +155,6 @@ class MetricsCallback(Callback):
 
             # logger.info(f"Considering the metrics: {epoch_metrics.keys()}")
             log_message = ""
-
-            # TODO: 
-            # When would we need to use .mean() ? So far it is equivalent to not taking the mean.
-            # log_message += f"[Epoch {trainer.current_epoch}] Mean metrics: \n"
-            # for k, v in epoch_metrics.items():
-            #     log_message += f"{k}: {v.mean()} \n"
 
             log_message += f"[Epoch {trainer.current_epoch}] Current epoch metrics: \n"
             for k, v in epoch_metrics.items():
@@ -274,6 +272,7 @@ def init_callbacks(config, training_folder):
             raise ValueError(f"Unknown monitored metric for model checkpoint: {config.training.checkpointing.monitored_metric}")
         
         model_checkpoint = pl.callbacks.ModelCheckpoint(dirpath=training_folder, 
+                                                        # filename="best_model",
                                                         save_top_k=1, 
                                                         mode=mode, 
                                                         monitor=f'metrics/{config.training.checkpointing.monitored_metric}', # 'metrics/val_loss' or 'metrics/val_acc'
