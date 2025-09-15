@@ -3,6 +3,7 @@ experiment:
   study: 'compositionality'  # choices: 'sample-efficiency', 'sys-gen', 'compositionality'
   setting: 'exp_setting_3'  # depends on the study; e.g. 'exp_setting_1'
   name: 'experiment_2'  # depends on the study and setting; e.g. 'experiment_1'
+  exp_specifics: '' # add any specifics needed to define a specific experiment to run; e.g., 'grid_size_30'
   exp_summary_results_dir: '${experiment.experiments_dir}/exp_summary_results'
   exp_logger: 'wandb'
   dev_run: false

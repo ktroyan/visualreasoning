@@ -9,7 +9,7 @@ model:
   ape:
     enabled: false
     ape_type: '2dsincos'  # choices: 'learn', '2dsincos'; absolute positional encoding
-    mixer: 'sum'  # choices: 'sum', 'weighted_sum', weighted_sum_vec, ...; how to mix the input embeddings and the positional embeddings
+    mixer: 'weighted_sum_vec'  # choices: 'sum', 'weighted_sum', weighted_sum_vec, ...; how to mix the input embeddings and the positional embeddings
   ope:
     enabled: false
   rpe:
@@ -27,7 +27,7 @@ model:
   encoder_aggregation:
     enabled: false
     method: '' # choices: '' (for no pooling and returning a sequence), 'mean', 'max', 'token' (for aggregating features and returning the cls token)
-  num_elementary_tasks: 14    # number of elementary transformations + 1 for identity as padding; used for the task embedding; NOTE: this should match the transformations in the data module
+  num_elementary_tasks: 17    # number of elementary transformations + 1 for identity as padding; used for the task embedding; NOTE: this should match the transformations in the data module
   task_embedding:
     enabled: ${resolve_if_then_else_compositionality:${experiment.study}, true}  # if the study is compositionality, then whether the task embedding is used or not depends on the set value. Otherwise, it is not used.
     approach: ${resolve_if_then_else:${model.task_embedding.enabled}, task_tokens}  # choices: task_tokens, example_in_context

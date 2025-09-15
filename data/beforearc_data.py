@@ -131,6 +131,8 @@ class BEFOREARCDataset(Dataset):
                                                             'pad_left': max_token_id + 13,
                                                             'mirror_vertical': max_token_id + 14,
                                                             'crop_top_side': max_token_id + 15,
+                                                            'double_right': max_token_id + 16,
+                                                            'crop_contours': max_token_id + 17,
                                                             }
 
             logger.info(f"The token IDs for the transformations are:\n{self.elementary_transformations_to_token_ids}")
@@ -341,7 +343,7 @@ class BEFOREARCDataset(Dataset):
         ## Grid object IDs for OPE 
         # Create a grid containing object ids for the input grid x
         # TODO: Should they be created with the original input grid or the padded one (possibly with special visual tokens too) ?
-        #       I guess the latter, but not sure when checking VITARC code as they seem to use the original input grid.
+        #       I guess the latter, but not sure when checking ViTARC code as they seem to use the original input grid.
         #       But then I am not sure if it's a good choice as the model will see border tokens and newline tokens and in the
         #       object ids grid there would be zeros (according to ViTARC code), so background (?) at those locations.
         #       Hence, I am thinking that it is better to perform it on the fully padded (with special tokens too) grid?
@@ -424,29 +426,34 @@ class BEFOREARCDataModule(DataModuleBase):
         # Get experiment study from path
         study = data_config.dataset_dir.split('/')[-3]
         if "sys-gen" in study:  # to match the local naming convention of the studies
-            study = study.replace('sys-gen', 'generalization')
+            study = study.replace('sys-gen', 'EnvGen')
+
+        if "compositionality" in study:  # to match the local naming convention of the studies
+            study = study.replace('compositionality', 'CompGen')
+
+        if data_config.dataset_specifics != '':
+            study = study + "_GridSize"
 
         # Get experiment setting from path
         setting = data_config.dataset_dir.split('/')[-2]
 
         # Get experiment name from path
         exp_name = data_config.dataset_dir.split('/')[-1]
+        if data_config.dataset_specifics != '':
+            exp_name = exp_name + f"/{data_config.dataset_specifics}"
 
         # Dataset path (using HuggingFace datasets)
         dataset_path = f"{study}/{setting}/{exp_name}"
 
-        if "sample-efficiency" in study:
-            # base_repo = "yassinetb/cogitao-dev"
-            # Load parquet files from the local path
-            base_data_folder = data_config.dataset_dir
+        # HF base path
+        base_repo = "yassinetb/COGITAO"
 
+        if "sample-efficiency" in study:
             train_set_df = pd.read_parquet(f'{base_data_folder}/train.parquet')
             val_set_df = pd.read_parquet(f'{base_data_folder}/val.parquet')
             test_set_df = pd.read_parquet(f'{base_data_folder}/test.parquet')
 
         else:
-            base_repo = "taratataw/before-arc"
-
             train_set_parquet = load_dataset(base_repo, data_files={"data": f"{dataset_path}/train.parquet"})
             val_set_parquet = load_dataset(base_repo, data_files={"data": f"{dataset_path}/val.parquet"})
             test_set_parquet = load_dataset(base_repo, data_files={"data": f"{dataset_path}/test.parquet"})
