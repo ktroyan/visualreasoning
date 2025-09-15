@@ -48,7 +48,7 @@ def write_inference_results_logs(config, inference_folder, all_test_results, pap
         f.write(f"Experiment Name: {config.experiment.name}\n\n")
 
         # Log model name
-        f.write(f"*** Model ***\n")
+        f.write("*** Model ***\n")
         full_model_name = f"{paper_model_name} + {config.model.head}"   # model name including network head
         f.write(f"Model: {full_model_name}\n\n")
 

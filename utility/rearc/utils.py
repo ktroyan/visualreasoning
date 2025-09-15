@@ -340,7 +340,8 @@ def plot_metrics_locally(save_folder_path: str, metrics: Dict) -> List[str]:
         return fig_path
 
     
-    ## Epoch-wise plots
+    ## ID 
+    # Epoch-wise plots
     assert len(metrics['train_acc_epoch']) == len(metrics['val_acc_epoch']) == len(metrics['train_loss_epoch']) == len(metrics['val_loss_epoch']) == len(metrics['train_grid_acc_epoch']) == len(metrics['val_grid_acc_epoch'])
     
     epochs = np.arange(len(metrics['val_acc_epoch'])) + 1
@@ -382,6 +383,46 @@ def plot_metrics_locally(save_folder_path: str, metrics: Dict) -> List[str]:
                   )
     
     fig_paths.append(fig_path)
+
+
+    ## OOD
+    if 'gen_val_loss_epoch' in metrics:
+        # Plot the training loss and OOD validation loss per epoch
+        fig_path = plot_and_save(x=epochs,
+                    y1=metrics['train_loss_epoch'],
+                    y2=metrics['gen_val_loss_epoch'],
+                    xlabel="Epoch", ylabel="Loss",
+                    title="Training & OOD Validation Loss (Epoch-wise)",
+                    filename="ood_loss_epoch.png"
+                    )
+        
+        fig_paths.append(fig_path)
+
+    if 'gen_val_acc_epoch' in metrics:
+        # Plot the training and OOD validation accuracy per epoch
+        fig_path = plot_and_save(x=epochs,
+                    y1=metrics['train_acc_epoch'],
+                    y2=metrics['gen_val_acc_epoch'],
+                    xlabel="Epoch", 
+                    ylabel="Accuracy",
+                    title="Training & OOD Validation Accuracy (Epoch-wise)",
+                    filename="ood_acc_epoch.png"
+                    )
+    
+        fig_paths.append(fig_path)
+
+    if 'gen_val_grid_acc_epoch' in metrics:
+        # Plot the training and OOD validation grid accuracy per epoch
+        fig_path = plot_and_save(x=epochs,
+                    y1=metrics['train_grid_acc_epoch'],
+                    y2=metrics['gen_val_grid_acc_epoch'],
+                    xlabel="Epoch", 
+                    ylabel="Grid Accuracy",
+                    title="Training & OOD Validation Grid Accuracy (Epoch-wise)",
+                    filename="ood_grid_acc_epoch.png"
+                    )
+    
+        fig_paths.append(fig_path)
 
     logger.info(f"Local plots of relevant training metrics saved in: {figs_folder_path}")
 

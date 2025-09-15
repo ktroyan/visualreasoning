@@ -21,6 +21,62 @@ from utility.custom_logging import logger
 # os.environ['TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS'] = '1'
 
 
+class ReconstructionLoss(nn.Module):
+    def __init__(self, loss_fn):
+        super().__init__()
+        self.loss_fn = loss_fn
+
+    def forward(self, p_list, logits_list, y):
+        # p_list is [T, B]
+        # logits_list: is [T, B, seq_len, num_classes]
+        # y is [B, seq_len]
+
+        total_loss = 0.0
+        for t in range(len(p_list)):
+            logits_t = logits_list[t].transpose(2, 1)  # [B, num_classes, seq_len] <-- [B, seq_len, num_classes]; Torch Cross-Entropy loss function wants [B, num_classes, seq_len]
+            p_t = p_list[t].unsqueeze(-1)
+            loss_t = (p_t * self.loss_fn(logits_t, y, reduction='none')).mean()
+            total_loss += loss_t
+
+        return total_loss
+
+class RegularizationLoss(nn.Module):
+    def __init__(self, lambda_p, max_steps):
+        """
+        max_steps is used to precompute the geometric prior parameterized by the hyperparameter lambda_p
+
+        The idea of the regularization loss is to promote exploration.
+        That is, the model is incentivized to perform 1/lambda_p steps since we attribute non-zero probabilities for all steps.
+        """
+        super().__init__()
+
+        # Build (truncated) geometric prior: p_g[k] = (1-lambda_p)^k * lambda_p
+        p_g = torch.zeros(max_steps)
+        not_halted = 1.0    # for (1-lambda_p)^k, so start with 1.0 at k=0 for full mass
+        for k in range(max_steps):
+            if k == max_steps-1:
+                # Attribute all the remaining mass to the last step so that it sums to 1 (needed as it is a truncated geometric distribution)
+                p_g[k] = not_halted
+
+            else:
+                p_g[k] = not_halted * lambda_p
+                not_halted *= (1 - lambda_p)
+
+        self.register_buffer('p_g', nn.Parameter(p_g, requires_grad=False))
+        self.kld = nn.KLDivLoss(reduction='batchmean')
+
+    def forward(self, p_list):
+        p = torch.stack(p_list).transpose(0, 1)  # [B, T], where T is the actual number of steps/iterations performed; transpose for batch first
+        p = p.clamp(min=1e-6, max=1-1e-6)   # clamping to avoid log(0); only used if p is used as input and not target below in kld
+
+        # Geometric distribution prior p_g
+        p_g = self.p_g[:p.shape[1]].unsqueeze(0).expand_as(p)   # [B, T] <-- [T] <-- [max_steps]
+
+        # TODO: See comment NOTE below about log-space of input and target.
+        #       Not sure whether to use p_g.log() or p.log() as "input" since different sources do different things.
+        return self.kld(p_g.log(), p)    # NOTE: the input should be in log-space for this KL divergence loss function; the target can be in the log-space too if the argument log_target=True; See https://docs.pytorch.org/docs/stable/generated/torch.nn.KLDivLoss.html
+        # return self.kl_div(p.log(), p_g)
+
 class VisReasModel(pl.LightningModule):
     """
     Model module class that handles the training, validation and testing logic of the model.
@@ -89,6 +145,8 @@ class VisReasModel(pl.LightningModule):
             if data_config.validate_in_and_out_domain:
                 self.gen_val_attention_scores = []
 
+        if self.model_config.pondernet.enabled:
+            raise NotImplementedError("This is not yet implemented on this branch. Please switch to main.")
 
     def load_backbone_weights(self, checkpoint_path):
         self.model_backbone.load_state_dict(torch.load(checkpoint_path, weights_only=False)['model'], strict=False)
@@ -127,9 +185,7 @@ class VisReasModel(pl.LightningModule):
 
     def shared_step(self, batch):
         """
-        The same code is shared between training, validation and test steps. 
-        In theory, we would not need to compute and return the loss for testing, hence we would only call shared_step() in the test_step() method. 
-        However, we still do it, so the purpose of this shared_step() is lesser.
+        The same processing is performed during training, validation and test steps.
         """
 
         x, y, task_tokens, example_in_context, y_true_size, x_grid_object_ids, special_grid_tokens_dict = batch   # [B, H, W], [B, H, W], [B], [B, 2], [B, seq_len], Dict
@@ -154,7 +210,10 @@ class VisReasModel(pl.LightningModule):
         elif self.model_config.task_embedding.approach == 'task_tokens':
             example_in_context = None
 
-        
+
+        if self.model_config.pondernet.enabled:
+            raise NotImplementedError("This is not yet implemented on this branch. Please switch to main.")
+
         # Forward pass through the whole model
         y_hat, prediction_mask  = self(x, y, task_tokens=task_tokens, example_in_context=example_in_context, x_grid_object_ids=x_grid_object_ids)  # computed logits
 
@@ -168,6 +227,9 @@ class VisReasModel(pl.LightningModule):
         return x, y_hat, y, true_size_mask, prediction_mask, special_grid_tokens_dict
 
     def step(self, batch, batch_idx):
+
+        if self.model_config.pondernet.enabled:
+            raise NotImplementedError("This is not yet implemented on this branch. Please switch to main.")
 
         x, y_hat, y, true_size_mask, prediction_mask, special_grid_tokens_dict = self.shared_step(batch)    # [B, num_classes, seq_len], [B, seq_len], [B, seq_len]
         y_orig = y.clone()  # store the original inputs and targets for logging
@@ -231,7 +293,7 @@ class VisReasModel(pl.LightningModule):
 
 
         logs = {'loss': loss_symbol_with_pad,
-                'loss_no_pad': loss_symbol_no_pad, 
+                'loss_no_pad': loss_symbol_no_pad,
                 'acc': acc_symbol_with_pad,
                 'acc_no_pad': acc_symbol_no_pad,
                 'acc_grid': acc_grid_with_pad,
@@ -409,13 +471,11 @@ class VisReasModel(pl.LightningModule):
 
         # Plot model predictions
         if self.model_config.observe_preds.enabled:
-            # Plot a few training and validation samples (inputs, predictions, targets) of the first and last batch seen during the epoch
-
-            for batch_index, split in zip([0, -1], ["train", "val"]):
-                # Plot a few training and validation samples of the first and last batch seen during the epoch
+            # Plot a few training samples (inputs, predictions, targets) of the first and last batch seen during the epoch
+            for batch_index in [0, -1]:
                 fig_paths = plot_image_predictions(self.save_folder,
-                                                   split,
-                                                   self.train_inputs,
+                                                   "train",
+                                                   self.train_inputs, 
                                                    self.train_preds,
                                                    self.train_targets,
                                                    self.image_size,
@@ -423,6 +483,37 @@ class VisReasModel(pl.LightningModule):
                                                    batch_index=batch_index,
                                                    epoch=self.current_epoch
                                                    )
+
+                figs_to_log.append(fig_paths)
+
+            # Plot a few validation samples (inputs, predictions, targets) of the first and last batch seen during the epoch
+            for batch_index in [0, -1]:
+                fig_paths = plot_image_predictions(self.save_folder,
+                                                   "val",
+                                                   self.val_inputs,
+                                                   self.val_preds,
+                                                   self.val_targets,
+                                                   self.image_size,
+                                                   n_samples=self.model_config.observe_preds.n_samples,
+                                                   batch_index=batch_index,
+                                                   epoch=self.current_epoch
+                                                   )
+
+                figs_to_log.append(fig_paths)
+
+            if self.data_config.validate_in_and_out_domain:
+                for batch_index in [0, -1]:
+                    # Plot a few validation samples (inputs, predictions, targets) of the first and last batch seen during the epoch
+                    fig_paths = plot_image_predictions(self.save_folder,
+                                                    "gen_val",
+                                                    self.gen_val_inputs,
+                                                    self.gen_val_preds,
+                                                    self.gen_val_targets,
+                                                    self.image_size,
+                                                    n_samples=self.model_config.observe_preds.n_samples,
+                                                    batch_index=batch_index,
+                                                    epoch=self.current_epoch
+                                                    )
 
                 figs_to_log.append(fig_paths)
 
@@ -436,7 +527,7 @@ class VisReasModel(pl.LightningModule):
                     except Exception as e:
                         log_message = f"Error logging image predictions to wandb: {e}"
                         log_message += f"Issue for figure path: {fig_path}"
-                        log_message += f"This image logging was skipped."
+                        log_message += "This image logging was skipped."
                         logger.warning(log_message)
 
         # Reset the lists for the next epoch
@@ -461,78 +552,37 @@ class VisReasModel(pl.LightningModule):
 
 
     def test_step(self, batch, batch_idx, dataloader_idx=0):
-        """
-        This method is called for each batch during the testing phase.
-        This is a default PyTorch Lightning method that we override to define the testing logic.
-        """
 
-        x, y_hat, y, mask, prediction_mask, special_grid_tokens_dict = self.shared_step(batch)
+        x, y, task_tokens, example_in_context, y_true_size, x_grid_object_ids, special_grid_tokens_dict = batch
+        B, _, _ = x.shape
 
-        assert prediction_mask is None, "Prediction mask should be None during testing as we generate all the tokens."
+        loss, logs, preds = self.step(batch, batch_idx)
 
-        # TODO: See exactly how we want to compute the loss and metrics. What types of tokens we want to consider.
-        # Also, convert the non-data tokens to background tokens (i.e., 0) when computing the loss and metrics, no?
-
-        # Determine if y_hat is logits or class predictions
-        if y_hat.dtype.is_floating_point:
-            # Loss per symbol (with all sort of padding considered): compute the loss per token/symbol
-            per_sample_loss = F.cross_entropy(y_hat, y.long(), reduction='none').float()  # [B, seq_len]
-            loss_symbol_with_pad = per_sample_loss.mean().unsqueeze(0)
-
-            # Loss per symbol (without padding considered): compute the loss per token/symbol and then apply the mask to ignore the padding tokens
-            per_sample_loss = F.cross_entropy(y_hat, y.long(), reduction='none').float()  # [B, seq_len]
-            loss_symbol_no_pad = ((per_sample_loss * mask).sum() / mask.sum()).unsqueeze(0)  # only consider non-padding elements
-
-            # Compute predictions
-            preds = torch.argmax(y_hat, dim=1)  # [B, seq_len]; predictions for each token/symbol of the model for each sample of the batch
-
-        else:
-            # Already predicted class indices: cannot compute loss
-            loss_symbol_with_pad = torch.tensor([0.0], device=y_hat.device)
-            loss_symbol_no_pad = torch.tensor([0.0], device=y_hat.device)
-            preds = y_hat
-
-        # Accuracy per symbol (with padding) (i.e., the accuracy of the model in predicting the correct symbol for each pixel of the grid considering the whole max. padded grid, thus also the padding tokens)
-        acc_symbol_with_pad = (preds == y).float().mean().unsqueeze(0)
-
-        # Accuracy per symbol (without padding) (i.e., the accuracy of the model in predicting the correct symbol for each pixel of the grid considering only the target grid, that is, without considering the padding tokens)
-        acc_symbol_no_pad = (((preds == y) * mask).sum().float() / mask.sum()).unsqueeze(0)  # only consider non-padding elements
-
-        # Grid accuracy with pad (only count as correct if the entire padded grid is correct)
-        acc_grid_with_pad = torch.all(preds == y, dim=1).float().mean().unsqueeze(0)
-
-        # Grid accuracy without pad (only count as correct if entire non-padding grid is correct)
-        acc_grid_no_pad = torch.all((preds == y) | ~mask, dim=1).float().mean().unsqueeze(0)   # | ~mask ensures automatically count as correct the padding tokens
-
-        logs = {'loss': loss_symbol_with_pad,
-                'loss_no_pad': loss_symbol_no_pad,
-                'acc': acc_symbol_with_pad,
-                'acc_no_pad': acc_symbol_no_pad, 
-                'acc_grid': acc_grid_with_pad,
-                'acc_grid_no_pad': acc_grid_no_pad
-                }
-
+        # Prefix keys for logs depending on whether it is for test or gen_test
         if dataloader_idx == 0:
-            # Logging
-            results = {f"test_{k}": v for k, v in logs.items()}
-            self.log_dict(results, logger=True, on_step=True, prog_bar=True, add_dataloader_idx=False)
-            self.test_step_results.append(results)
+            prefix = "test"
+        elif dataloader_idx == 1:
+            prefix = "gen_test"
 
+        test_results = {f"{prefix}_{k}": v for k, v in logs.items()}
+
+        # Log the results to WandB
+        self.log_dict(test_results, logger=True, on_step=True, prog_bar=True, add_dataloader_idx=False)
+
+        # Save locally (e.g., for plotting)
+        if dataloader_idx == 0:
+            self.test_step_results.append(test_results)
             self.test_inputs.append(x)
             self.test_preds.append(preds)
-            self.test_targets.append(y)
+            self.test_targets.append(y.view(B, -1))   # flatten y for consistency
 
         elif dataloader_idx == 1:
-            # Logging
-            results = {f"gen_test_{k}": v for k, v in logs.items()}
-            self.log_dict(results, logger=True, on_step=True, prog_bar=True, add_dataloader_idx=False)
-            self.gen_test_step_results.append(results)
-
+            self.gen_test_step_results.append(test_results)
             self.gen_test_inputs.append(x)
             self.gen_test_preds.append(preds)
-            self.gen_test_targets.append(y)
+            self.gen_test_targets.append(y.view(B, -1))   # flatten y for consistency
 
-        return results
+        return test_results
     
     def on_test_epoch_end(self):
         """
@@ -792,7 +842,7 @@ class BEFOREARCModel(VisReasModel):
 
         ## Encoder to Decoder projection layer; useful to handle the task embedding that is concatenated
         # TODO: We could handle the task embedding differently than by a simple concatenation. For example using FiLM. See later.
-        if self.head_input_dim != self.head_input_embed_dim:
+        if (self.head_input_dim != self.head_input_embed_dim) and model_config.head in ["transformer", "xtransformer", "mytransformer"]:
             self.enc_to_dec_proj = nn.Linear(self.head_input_dim, self.head_input_embed_dim, device=self.device)  # project the encoder output (of dimension backbone_network_config.embed_dim + task_embedding_dim) to the decoder embedding dimension
 
         
@@ -882,6 +932,9 @@ class BEFOREARCModel(VisReasModel):
         # Use grid object ids for the OPE (which is used within the APE)
         if not (self.model_config.ope.enabled and (x_grid_object_ids is not None) and self.model_config.backbone in ["vit", "looped_vit", "transformer", "llada"]):
             x_grid_object_ids = None
+
+        if self.model_config.pondernet.enabled:
+            raise NotImplementedError("This is not yet implemented on this branch. Please switch to main.")
 
         if isinstance(self.encoder, LLaDAModel):
             # LLaDA expects a token sequence, not an image. We flatten already here as this makes it easier to mask

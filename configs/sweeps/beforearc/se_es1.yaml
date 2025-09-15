@@ -1,0 +1,39 @@
+# NOTE: The parameters structure should follow that of the nested keys used in the config files in /configs by using "parameters" to create imbrication
+
+# Program to run
+program: experiment.py
+
+# Use grid method since we sweep over experiments and not peform HP optimization.
+method: grid
+
+# This does not matter as we do not perform any optimization
+# metric:
+#   goal: minimize
+#   name: metrics/val_loss_epoch
+
+parameters:
+  base:
+    parameters:
+      data_env:
+        values: ['BEFOREARC']
+
+  # model:
+  #   parameters:
+  #     backbone:
+  #       # values: ['resnet']
+  #       # values: ['vit']
+  #       # values: ['looped_vit']
+  #       # values: ['diffusion_vit']
+  #     head:
+  #       # values: ['mlp']
+  
+  experiment:
+    parameters:
+      study:
+        values: ['sample-efficiency']
+      setting:
+        values: ['exp_setting_1']
+      name:
+        values: ['experiment_1', 'experiment_2', 'experiment_3', 'experiment_4', 
+                 'experiment_5', 'experiment_6', 'experiment_7', 'experiment_8',
+                 'experiment_9', 'experiment_10']
