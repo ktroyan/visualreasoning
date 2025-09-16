@@ -19,6 +19,10 @@ from utility.utils import plot_absolute_positional_embeddings
 from utility.rearc.utils import one_hot_encode
 from utility.custom_logging import logger
 
+# For flash / memory-efficient kernels when available (e.g., A100, RTX40xx, etc.), otherwise
+# use math kernels for older GPUs.
+torch.backends.cuda.sdp_kernel(enable_flash=True, enable_math=False, enable_mem_efficient=True)
+
 
 __all__ = ['get_looped_vit']
 
@@ -380,16 +384,27 @@ class MHSA(nn.Module):
         # Get the Queries, Keys, Values for all heads
         x_q, x_k, x_v = x_qkv[0], x_qkv[1], x_qkv[2]    # ([B, num_heads, seq_len, head_embed_dim], [B, num_heads, seq_len, head_embed_dim], [B, num_heads, seq_len, head_embed_dim])
 
-        # Compute the attention scores
-        attn = (x_q @ x_k.transpose(-2, -1))    # [B, num_heads, seq_len, seq_len]; attention matrix/logits
-        attn_scaled = attn * self.scale   # [B, num_heads, seq_len, seq_len]; scaled attention logits
-        # NOTE: no masking
-        attn_scores = self.softmax(attn_scaled)   # [B, num_heads, seq_len, seq_len]; attention scores/weights
-        attn_scores = self.attn_drop(attn_scores)   # [B, num_heads, seq_len, seq_len]; dropout
-        self.attn_scores = attn_scores    # store the attention scores for visualization
+        # # Method 1: Raw compute of the attention scores
+        # # Compute the attention scores
+        # attn = (x_q @ x_k.transpose(-2, -1))    # [B, num_heads, seq_len, seq_len]; attention matrix/logits
+        # attn_scaled = attn * self.scale   # [B, num_heads, seq_len, seq_len]; scaled attention logits
+        # # NOTE: no masking
+        # attn_scores = self.softmax(attn_scaled)   # [B, num_heads, seq_len, seq_len]; attention scores/weights
+        # attn_scores = self.attn_drop(attn_scores)   # [B, num_heads, seq_len, seq_len]; dropout
+        # self.attn_scores = attn_scores    # store the attention scores for visualization
+        # attn_out = attn_scores @ x_v
+
+        # Method 2: Memory-efficient attention (SDPA)
+        attn_p = self.attn_drop.p if self.training else 0.0
+        attn_out = F.scaled_dot_product_attention(
+            x_q.contiguous(), x_k.contiguous(), x_v.contiguous(),
+            attn_mask=None,
+            dropout_p=attn_p,
+            is_causal=False
+        )  # [B, H, S, D]
 
         # Get the new embeddings from the Values and Attention scores, and concatenate back the heads through reshaping
-        x = (attn_scores @ x_v).transpose(1, 2).reshape(B, seq_len, embed_dim)  # [B, seq_len, embed_dim] <-- [B, seq_len, num_heads, head_embed_dim] <-- [B, num_heads, seq_len, head_embed_dim] 
+        x = attn_out.transpose(1, 2).reshape(B, seq_len, embed_dim)  # [B, seq_len, embed_dim] <-- [B, seq_len, num_heads, head_embed_dim] <-- [B, num_heads, seq_len, head_embed_dim] 
         x = self.proj(x)    # [B, seq_len, embed_dim]; linearly project the new embeddings
         x = self.proj_drop(x)   # [B, seq_len, embed_dim]; dropout
         return x
@@ -631,19 +646,30 @@ class RoPEMHSA(nn.Module):
             x_q = torch.cat((x_q, appended_extra_q), dim=2)
             x_k = torch.cat((x_k, appended_extra_k), dim=2)
 
-        # Compute the attention scores
-        attn = (x_q @ x_k.transpose(-2, -1))    # [B, num_heads, seq_len, seq_len]; unscaled attention logits
-        attn_scaled = attn * self.scale   # [B, num_heads, seq_len, seq_len]; scaled attention logits
-        attn_scores = self.softmax(attn_scaled)   # [B, num_heads, seq_len, seq_len]; attention scores/weights (normalized scaled attention logits)
-        # NOTE: no masking
-        attn_scores = self.attn_drop(attn_scores)   # [B, num_heads, seq_len, seq_len]; dropout
-        self.attn_scores = attn_scores    # store the attention scores/weights for visualization
+        # Method 1: Raw compute of the attention scores
+        # attn = (x_q @ x_k.transpose(-2, -1))    # [B, num_heads, seq_len, seq_len]; unscaled attention logits
+        # attn_scaled = attn * self.scale   # [B, num_heads, seq_len, seq_len]; scaled attention logits
+        # attn_scores = self.softmax(attn_scaled)   # [B, num_heads, seq_len, seq_len]; attention scores/weights (normalized scaled attention logits)
+        # # NOTE: no masking
+        # attn_scores = self.attn_drop(attn_scores)   # [B, num_heads, seq_len, seq_len]; dropout
+        # self.attn_scores = attn_scores    # store the attention scores/weights for visualization
+        # attn_out = attn_scores @ x_v
+
+        # Method 2: Memory-efficient attention (SDPA)
+        attn_p = self.attn_drop.p if self.training else 0.0
+        attn_out = F.scaled_dot_product_attention(
+            x_q.contiguous(), x_k.contiguous(), x_v.contiguous(),
+            attn_mask=None,
+            dropout_p=attn_p,
+            is_causal=False
+        )  # [B, H, S, D]
 
         # Get the new embeddings from the Values and Attention scores, and concatenate back the heads through reshaping
         # NOTE: Attention used for the full sequence, so no slicing required on x_v
-        x = (attn_scores @ x_v).transpose(1, 2).reshape(B, seq_len, embed_dim)  # [B, seq_len, embed_dim] <-- [B, seq_len, num_heads, head_embed_dim] <-- [B, num_heads, seq_len, head_embed_dim] 
+        x = attn_out.transpose(1, 2).reshape(B, seq_len, embed_dim)  # [B, seq_len, embed_dim] <-- [B, seq_len, num_heads, head_embed_dim] <-- [B, num_heads, seq_len, head_embed_dim] 
         x = self.proj(x)    # [B, seq_len, embed_dim]; linearly project the new embeddings
         x = self.proj_drop(x)   # [B, seq_len, embed_dim]; dropout
+        
         return x
 
 class FeedForward(nn.Module):
@@ -723,7 +749,8 @@ class LoopedTransformerLayer(nn.Module):
             x = x + self.attn(self.first_norm(x))   # [B, seq_len, embed_dim]; this uses norm first and then attention
 
         x = x + self.ff(self.second_norm(x))    # [B, seq_len, embed_dim]
-        return x, self.attn.attn_scores
+        # return x, self.attn.attn_scores
+        return x
 
 def calculate_2d_relative_positions(grid_height, grid_width, rpe_type):
     """ ViTARC. Calculate the 2D relative positions of all the pixels in the grid. """
@@ -1038,10 +1065,11 @@ class LoopedVisionTransformer(nn.Module):
 
         """
         for layer in self.transformer_layers:
-            x, attn = layer(x, num_appended_extra_tokens)
+            # x, attn = layer(x, num_appended_extra_tokens)
+            x = layer(x, num_appended_extra_tokens)
             
-            if self.model_config.attention_map.enabled:
-                self.attn_scores.append(attn)
+            # if self.model_config.attention_map.enabled:
+            #     self.attn_scores.append(attn)
         
         x = self.last_layer_norm(x)
         
