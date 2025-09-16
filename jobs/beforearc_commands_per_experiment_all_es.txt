@@ -1,0 +1,80 @@
+*** All commands to run an experiment in each setting in Before-ARC ***
+
+NOTE:
+- We specify the relevant parameters based on the default configs.
+
+
+### Compositionality (CompGen)
+
+## Experiment 1
+# Models
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_exp1_all_es.yaml" --backbone resnet --visual_tokens_enabled false --add_log_name "ResNet" --max_epochs 10 --gpu_id 0
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_exp1_all_es.yaml" --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false --add_log_name "Vanilla-ViT" --max_epochs 10 --gpu_id 1
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_exp1_all_es.yaml" --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum_vec --ope_enabled true --rpe_enabled true --rpe_type rope --num_reg_tokens 6 --add_log_name "Grid-ViT" --max_epochs 10 --gpu_id 2
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_exp1_all_es.yaml" --backbone looped_vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --add_log_name "Pondering-Looped-Transformer" --max_epochs 10 --gpu_id 3
+
+## Experiment 2
+# Models
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_exp2_all_es.yaml" --backbone resnet --visual_tokens_enabled false --add_log_name "ResNet" --max_epochs 10 --gpu_id 0
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_exp2_all_es.yaml" --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false --add_log_name "Vanilla-ViT" --max_epochs 10 --gpu_id 1
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_exp2_all_es.yaml" --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum_vec --ope_enabled true --rpe_enabled true --rpe_type rope --num_reg_tokens 6 --add_log_name "Grid-ViT" --max_epochs 10 --gpu_id 2
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_exp2_all_es.yaml" --backbone looped_vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --add_log_name "Pondering-Looped-Transformer" --max_epochs 10 --gpu_id 3
+
+## Experiment 3
+# Models
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_exp3_all_es.yaml" --backbone resnet --visual_tokens_enabled false --add_log_name "ResNet" --max_epochs 10 --gpu_id 0
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_exp3_all_es.yaml" --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false --add_log_name "Vanilla-ViT" --max_epochs 10 --gpu_id 1
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_exp3_all_es.yaml" --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum_vec --ope_enabled true --rpe_enabled true --rpe_type rope --num_reg_tokens 6 --add_log_name "Grid-ViT" --max_epochs 10 --gpu_id 2
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_exp3_all_es.yaml" --backbone looped_vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --add_log_name "Pondering-Looped-Transformer" --max_epochs 10 --gpu_id 3
+
+## Experiment 4
+# Models
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_exp4_all_es.yaml" --backbone resnet --visual_tokens_enabled false --add_log_name "ResNet" --max_epochs 10 --gpu_id 0
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_exp4_all_es.yaml" --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false --add_log_name "Vanilla-ViT" --max_epochs 10 --gpu_id 1
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_exp4_all_es.yaml" --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum_vec --ope_enabled true --rpe_enabled true --rpe_type rope --num_reg_tokens 6 --add_log_name "Grid-ViT" --max_epochs 10 --gpu_id 2
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_exp4_all_es.yaml" --backbone looped_vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --add_log_name "Pondering-Looped-Transformer" --max_epochs 10 --gpu_id 3
+
+## Experiment 5
+# Models
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_exp5_all_es.yaml" --backbone resnet --visual_tokens_enabled false --add_log_name "ResNet" --max_epochs 10 --gpu_id 0
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_exp5_all_es.yaml" --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false --add_log_name "Vanilla-ViT" --max_epochs 10 --gpu_id 1
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_exp5_all_es.yaml" --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum_vec --ope_enabled true --rpe_enabled true --rpe_type rope --num_reg_tokens 6 --add_log_name "Grid-ViT" --max_epochs 10 --gpu_id 2
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_exp5_all_es.yaml" --backbone looped_vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --add_log_name "Pondering-Looped-Transformer" --max_epochs 10 --gpu_id 3
+
+
+### Systematic Generalization (EnvGen)
+
+## Experiment 1
+# Models
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_exp1_all_es.yaml" --backbone resnet --visual_tokens_enabled false --add_log_name "ResNet" --max_epochs 10 --gpu_id 0
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_exp1_all_es.yaml" --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false --add_log_name "Vanilla-ViT" --max_epochs 10 --gpu_id 1
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_exp1_all_es.yaml" --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum_vec --ope_enabled true --rpe_enabled true --rpe_type rope --num_reg_tokens 6 --add_log_name "Grid-ViT" --max_epochs 10 --gpu_id 2
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_exp1_all_es.yaml" --backbone looped_vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --add_log_name "Pondering-Looped-Transformer" --max_epochs 10 --gpu_id 3
+
+## Experiment 2
+# Models
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_exp2_all_es.yaml" --backbone resnet --visual_tokens_enabled false --add_log_name "ResNet" --max_epochs 10 --gpu_id 0
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_exp2_all_es.yaml" --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false --add_log_name "Vanilla-ViT" --max_epochs 10 --gpu_id 1
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_exp2_all_es.yaml" --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum_vec --ope_enabled true --rpe_enabled true --rpe_type rope --num_reg_tokens 6 --add_log_name "Grid-ViT" --max_epochs 10 --gpu_id 2
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_exp2_all_es.yaml" --backbone looped_vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --add_log_name "Pondering-Looped-Transformer" --max_epochs 10 --gpu_id 3
+
+## Experiment 3
+# Models
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_exp3_all_es.yaml" --backbone resnet --visual_tokens_enabled false --add_log_name "ResNet" --max_epochs 10 --gpu_id 0
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_exp3_all_es.yaml" --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false --add_log_name "Vanilla-ViT" --max_epochs 10 --gpu_id 1
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_exp3_all_es.yaml" --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum_vec --ope_enabled true --rpe_enabled true --rpe_type rope --num_reg_tokens 6 --add_log_name "Grid-ViT" --max_epochs 10 --gpu_id 2
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_exp3_all_es.yaml" --backbone looped_vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --add_log_name "Pondering-Looped-Transformer" --max_epochs 10 --gpu_id 3
+
+## Experiment 4
+# Models
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_exp4_all_es.yaml" --backbone resnet --visual_tokens_enabled false --add_log_name "ResNet" --max_epochs 10 --gpu_id 0
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_exp4_all_es.yaml" --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false --add_log_name "Vanilla-ViT" --max_epochs 10 --gpu_id 1
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_exp4_all_es.yaml" --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum_vec --ope_enabled true --rpe_enabled true --rpe_type rope --num_reg_tokens 6 --add_log_name "Grid-ViT" --max_epochs 10 --gpu_id 2
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_exp4_all_es.yaml" --backbone looped_vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --add_log_name "Pondering-Looped-Transformer" --max_epochs 10 --gpu_id 3
+
+## Experiment 5
+# Models
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_exp5_all_es.yaml" --backbone resnet --visual_tokens_enabled false --add_log_name "ResNet" --max_epochs 10 --gpu_id 0
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_exp5_all_es.yaml" --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false --add_log_name "Vanilla-ViT" --max_epochs 10 --gpu_id 1
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_exp5_all_es.yaml" --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum_vec --ope_enabled true --rpe_enabled true --rpe_type rope --num_reg_tokens 6 --add_log_name "Grid-ViT" --max_epochs 10 --gpu_id 2
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_exp5_all_es.yaml" --backbone looped_vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --add_log_name "Pondering-Looped-Transformer" --max_epochs 10 --gpu_id 3
