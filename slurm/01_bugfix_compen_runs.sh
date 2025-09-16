@@ -20,7 +20,7 @@ for config in "${configs[@]}"; do
   sbatch run_experiment.submit \
     wandb.sweep.enabled=false \
     wandb.wandb_entity_name=VisReas-ETHZ \
-    wandb.wandb_project_name=VisReas-project-${data_env}-llada-final \
+    wandb.wandb_project_name=VisReas-project-${data_env}-llada-new-comgen \
     base.data_env=${data_env} \
     experiment.study=${study} \
     experiment.setting=${setting} \
