@@ -1,27 +1,14 @@
 import os
-
-import pandas as pd
 import wandb
-import warnings
 import json
 import ast
-import numpy as np
-import math
+import pandas as pd
 import itertools
 
 # warnings.filterwarnings("ignore")
 
 api = wandb.Api(api_key=os.getenv("WANDB_API_KEY"))
-
-EXTRACTED_METRICS = ['test_acc_epoch', 'test_acc_grid_epoch', 'test_acc_grid_no_pad_epoch', 'test_acc_step',
-                     'test_acc_grid_step', 'test_acc_grid_no_pad_step', 'metrics/val_acc_epoch',
-                     'metrics/val_acc_grid_epoch', 'metrics/val_acc_grid_no_pad_epoch', 'gen_test_acc_epoch',
-                     'gen_test_acc_grid_epoch', 'gen_test_acc_grid_no_pad_epoch', 'gen_test_acc_step',
-                     'gen_test_acc_grid_step', 'gen_test_acc_grid_no_pad_step', 'metrics/gen_val_acc_epoch',
-                     'metrics/gen_val_acc_grid_epoch', 'metrics/gen_val_acc_grid_no_pad_epoch']
-
-
-EXTRACTED_METRICS = ['test_acc_grid_no_pad_epoch', 'gen_test_acc_grid_no_pad_epoch']
+EXTRACTED_METRICS = ['test_acc_grid_epoch', 'gen_test_acc_grid_epoch']
 
 
 def download_data(entity: str, project: str) -> pd.DataFrame:
@@ -87,11 +74,32 @@ def download_data(entity: str, project: str) -> pd.DataFrame:
             print(f"Error processing run {run.id}: {e}")
             continue
 
+
+        do_update = True
+
+        if do_update:
+            assert run_infos['backbone'] == "llada"
+            assert "study" not in run.summary.keys()
+            assert "setting" not in run.summary.keys()
+            assert "experiment_name" not in run.summary.keys()
+            assert "model_name" not in run.summary.keys()
+            assert "seed" not in run.summary.keys()
+
+            run.summary["study"] = run_infos['study']
+            run.summary["setting"] = run_infos['setting']
+            run.summary["experiment_name"] = run_infos['name']
+            run.summary["model_name"] = "LLaDA"
+            run.summary["seed"] = run_infos['seed']
+            if "test_acc_grid_epoch" not in run.summary.keys():
+                run.summary["test_acc_grid_epoch"] = run_infos['test_acc_grid_epoch'] if "test_acc_grid_epoch" in run_infos else None
+            if "gen_test_acc_grid_epoch" not in run.summary.keys():
+                run.summary["gen_test_acc_grid_epoch"] = run_infos['gen_test_acc_grid_epoch'] if "gen_test_acc_grid_epoch" in run_infos else None
+            run.summary.update()
+
+
+
     return pd.DataFrame.from_dict(output)
 
-
-import itertools
-import pandas as pd
 
 def check_completeness(run_data_df: pd.DataFrame) -> None:
     # Definitions
@@ -104,11 +112,11 @@ def check_completeness(run_data_df: pd.DataFrame) -> None:
     compositionality_combos = list(itertools.product(['compositionality'], compositionality_settings, compositionality_names))
     sysgen_combos = list(itertools.product(['sys-gen'], sysgen_settings, sysgen_names))
     target_combos = compositionality_combos + sysgen_combos
-    required_seeds = {1997, 2025, 4269}
+    required_seeds = {1997, 2025, 42}
 
     # === Deduplicate and average metric columns ===
     unique_cols = ["data_env", "model", "study", "setting", "name", "seed"]
-    metrics = ["test_acc_grid_no_pad_epoch", "gen_test_acc_grid_no_pad_epoch"]
+    metrics = EXTRACTED_METRICS
 
     dedup_df = (
         run_data_df
@@ -135,10 +143,10 @@ def check_completeness(run_data_df: pd.DataFrame) -> None:
 
     # === Check for NaNs ===
     nan_rows = filtered_df[
-        filtered_df['test_acc_grid_no_pad_epoch'].isna() |
-        filtered_df['gen_test_acc_grid_no_pad_epoch'].isna()
+        filtered_df[metrics[0]].isna() |
+        filtered_df[metrics[1]].isna()
     ]
-    nan_info = nan_rows[["model", "study", "setting", "name", "seed", "test_acc_grid_no_pad_epoch", "gen_test_acc_grid_no_pad_epoch"]]
+    nan_info = nan_rows[["model", "study", "setting", "name", "seed"] + metrics]
 
     # === Output ===
     print("=== Missing combinations ===")
@@ -165,7 +173,7 @@ def check_completeness(run_data_df: pd.DataFrame) -> None:
 
 
 def calc_table_averages(run_data_df: pd.DataFrame) -> None:
-    metrics = ["test_acc_grid_no_pad_epoch", "gen_test_acc_grid_no_pad_epoch"]
+    metrics = EXTRACTED_METRICS
     grouping = ["data_env", "model", "study", "setting"]
 
     # Model names
@@ -198,14 +206,8 @@ def calc_table_averages(run_data_df: pd.DataFrame) -> None:
 
 
 def main():
-    beforearc_llada_df = download_data(entity="VisReas-ETHZ", project="VisReas-project-BEFOREARC-llada-final")
-    # pretty_print_run_data(beforearc_llada_df)
-
-    #klim_df = download_data(entity="VisReas-ETHZ", project="VisReas-project")
-    # pretty_print_run_data(klim_df)
-
+    beforearc_llada_df = download_data(entity="VisReas-ETHZ", project="VisReas-project-BEFOREARC-llada-thesis")
     data_df = pd.concat([beforearc_llada_df])
-    # create_latex_tables(data_df)
     calc_table_averages(data_df)
 
 
