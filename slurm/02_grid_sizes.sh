@@ -55,7 +55,7 @@ configs=(
 for config in "${configs[@]}"; do
   read -r data_env study setting name specifics seed <<< "$config"
 
-  sbatch run_experiment.submit \
+  sbatch run_experiment_bigger.submit \
     wandb.sweep.enabled=false \
     wandb.wandb_entity_name=VisReas-ETHZ \
     wandb.wandb_project_name=VisReas-project-${data_env}-llada-grid-size \
