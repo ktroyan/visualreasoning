@@ -137,6 +137,64 @@ def download_data(entity: str, project: str) -> pd.DataFrame:
     return pd.DataFrame.from_dict(output)
 
 
+def update_dataframe(old_df: pd.DataFrame, new_df: pd.DataFrame) -> pd.DataFrame:
+    # Columns that define a unique run config
+    key_cols = ['name', 'state', 'data_env', 'seed', 'study',
+                'setting', 'backbone', 'head', 'model']
+
+    # Columns to update
+    update_cols = ['test_acc_grid_epoch', 'gen_test_acc_grid_epoch']
+
+    # Work on a copy to avoid modifying the original df
+    updated_df = old_df.copy()
+
+    changes = []
+    for _, row in new_df.iterrows():
+        mask = (updated_df[key_cols] == row[key_cols]).all(axis=1)
+
+        # Check number of matches
+        if mask.sum() == 0:
+            # Allow special missing case
+            if (row['study'] == 'compositionality' and
+                row['setting'] == 'exp_setting_2' and
+                row['name'] == 'experiment_4'):
+                # Append the row instead of overwriting
+                updated_df = pd.concat([updated_df, pd.DataFrame([row])], ignore_index=True)
+                for col in update_cols:
+                    changes.append({**{k: row[k] for k in key_cols},
+                                    'column': col,
+                                    'old': None,
+                                    'new': row[col]})
+                continue
+            else:
+                raise ValueError(f"No match found in old_df for config:\n{row[key_cols].to_dict()}")
+
+        if mask.sum() > 1:
+            raise ValueError(f"Multiple matches found in old_df for config:\n{row[key_cols].to_dict()}")
+
+        # Update values for matching row
+        for col in update_cols:
+            old_val = updated_df.loc[mask, col].values[0]
+            new_val = row[col]
+            if old_val != new_val:
+                changes.append({**{k: row[k] for k in key_cols},
+                                'column': col,
+                                'old': old_val,
+                                'new': new_val})
+                updated_df.loc[mask, col] = new_val
+
+    # Print changes
+    if changes:
+        print("Updated values:")
+        for change in changes:
+            print(change)
+    else:
+        print("No values changed.")
+
+    return updated_df
+
+
+
 def check_completeness(run_data_df: pd.DataFrame) -> None:
     # Definitions
     compositionality_settings = ['exp_setting_1', 'exp_setting_2', 'exp_setting_3']
@@ -375,14 +433,21 @@ def main():
     df_3 = cached_download(entity="VisReas-ETHZ", project="VisReas-project-seed42", refresh=refresh)
     print("BASE RUNS")
     data_df = pd.concat([df_1, df_2, df_3])
-    calc_table_averages(data_df)
+    data_df = data_df.drop_duplicates()
+    data_df = data_df[data_df.study != 'sample-efficiency']  # remove sample efficiency runs from base runs (new ones below)
+    #calc_table_averages(data_df)
 
     ## NEW COMP-GEN RUNS
-    data_df = cached_download(entity="VisReas-ETHZ", project="VisReas-project-BEFOREARC-llada-new-comgen", refresh=refresh)
+    new_data_df = cached_download(entity="VisReas-ETHZ", project="VisReas-project-BEFOREARC-llada-new-comgen",  refresh=refresh)
+    new_data_df = new_data_df.drop_duplicates()
     print("NEW COMP-GEN RUNS")
+    #calc_table_averages(new_data_df)
+
+    ## FIXED ORIG RUNS
+    data_df = update_dataframe(data_df, new_data_df)
+    print("FIXED ORIG RUNS WITH NEW COMP-GEN DATA")
     calc_table_averages(data_df)
 
-    # TODO: Here, replace Base Runs with new comp-gen runs for final table
 
     ## SAMPLE EFFICIENCY RUNS
     data_df = cached_download(entity="VisReas-ETHZ", project="VisReas-project-BEFOREARC-llada-se", refresh=refresh)
@@ -390,7 +455,7 @@ def main():
     calc_table_averages(data_df)
 
     ## GRID-SIZES RUNS
-    data_df = cached_download(entity="VisReas-ETHZ", project="VisReas-project-BEFOREARC-llada-grid-size", refresh=refresh)
+    data_df = cached_download(entity="VisReas-ETHZ", project="VisReas-project-BEFOREARC-llada-grid-size",  refresh=refresh)
     print("GRID-SIZES RUNS")
     calc_table_averages(data_df)
 
