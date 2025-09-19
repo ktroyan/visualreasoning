@@ -449,6 +449,7 @@ class BEFOREARCDataModule(DataModuleBase):
         base_repo = "yassinetb/COGITAO"
 
         if "sample-efficiency" in study:
+            base_data_folder = f"supplementary/Sample_Efficiency/{setting}/{exp_name}"
             train_set_df = pd.read_parquet(f'{base_data_folder}/train.parquet')
             val_set_df = pd.read_parquet(f'{base_data_folder}/val.parquet')
             test_set_df = pd.read_parquet(f'{base_data_folder}/test.parquet')
