@@ -10,9 +10,9 @@ import itertools
 api = wandb.Api(api_key=os.getenv("WANDB_API_KEY"))
 EXTRACTED_METRICS = ['test_acc_grid_epoch', 'gen_test_acc_grid_epoch']
 
-
 CACHE_DIR = "cache_wandb"
 os.makedirs(CACHE_DIR, exist_ok=True)
+
 
 def cached_download(entity: str, project: str, refresh: bool = False) -> pd.DataFrame:
     """
@@ -29,6 +29,7 @@ def cached_download(entity: str, project: str, refresh: bool = False) -> pd.Data
     df = download_data(entity=entity, project=project)  # <-- your existing function
     df.to_pickle(cache_file)
     return df
+
 
 def download_data(entity: str, project: str) -> pd.DataFrame:
     output = []
@@ -60,7 +61,7 @@ def download_data(entity: str, project: str) -> pd.DataFrame:
             else:
                 exp_infos = ast.literal_eval(config["data_config"]["value"])['dataset_dir'].split("/")
                 run_infos['study'] = exp_infos[-3]
-                run_infos['setting'] =exp_infos[-2]
+                run_infos['setting'] = exp_infos[-2]
                 run_infos['name'] = exp_infos[-1]
 
             if "backbone_network_config" in config:
@@ -108,7 +109,6 @@ def download_data(entity: str, project: str) -> pd.DataFrame:
             print(f"Error processing run {run.id}: {e}")
             continue
 
-
         do_update = True
 
         if do_update:
@@ -134,8 +134,6 @@ def download_data(entity: str, project: str) -> pd.DataFrame:
                 run.summary["gen_test_acc_grid_epoch"] = run_infos['gen_test_acc_grid_epoch'] if "gen_test_acc_grid_epoch" in run_infos else None
             run.summary.update()
 
-
-
     return pd.DataFrame.from_dict(output)
 
 
@@ -154,14 +152,23 @@ def check_completeness(run_data_df: pd.DataFrame) -> None:
 
     # === Deduplicate and average metric columns ===
     unique_cols = ["data_env", "model", "study", "setting", "name", "seed"]
-    metrics = EXTRACTED_METRICS
+    if 'exp_specifics' in run_data_df.columns:
+        unique_cols.append("exp_specifics")
+    if 'model_definitions' in run_data_df.columns:
+        unique_cols.append("model_definitions")
 
-    dedup_df = (
-        run_data_df
-        .groupby(unique_cols, dropna=False)[metrics]
-        .mean()
-        .reset_index()
-    )
+    # Filter metrics to only those that exist in the dataframe
+    available_metrics = [m for m in EXTRACTED_METRICS if m in run_data_df.columns]
+
+    if available_metrics:
+        dedup_df = (
+            run_data_df
+            .groupby(unique_cols, dropna=False)[available_metrics]
+            .mean()
+            .reset_index()
+        )
+    else:
+        dedup_df = run_data_df.groupby(unique_cols, dropna=False).first().reset_index()
 
     # === Filter relevant rows ===
     filtered_df = dedup_df[dedup_df[['study', 'setting', 'name']].apply(tuple, axis=1).isin(target_combos)]
@@ -180,11 +187,16 @@ def check_completeness(run_data_df: pd.DataFrame) -> None:
     missing_seeds_rows = seed_grouped[seed_grouped['seed'].apply(lambda s: not required_seeds.issubset(s))]
 
     # === Check for NaNs ===
-    nan_rows = filtered_df[
-        filtered_df[metrics[0]].isna() |
-        filtered_df[metrics[1]].isna()
-    ]
-    nan_info = nan_rows[["model", "study", "setting", "name", "seed"] + metrics]
+    if available_metrics:
+        nan_condition = filtered_df[available_metrics[0]].isna()
+        for metric in available_metrics[1:]:
+            nan_condition |= filtered_df[metric].isna()
+
+        nan_rows = filtered_df[nan_condition]
+        nan_info = nan_rows[["model", "study", "setting", "name", "seed"] + available_metrics]
+    else:
+        nan_rows = pd.DataFrame()  # Empty dataframe if no metrics available
+        nan_info = pd.DataFrame()
 
     # === Output ===
     print("=== Missing combinations ===")
@@ -209,7 +221,6 @@ def check_completeness(run_data_df: pd.DataFrame) -> None:
         print("✅ No missing values in key metrics.")
 
 
-
 def calc_table_averages(run_data_df: pd.DataFrame) -> None:
     metrics = EXTRACTED_METRICS
     grouping = ["data_env", "model", "study", "setting"]
@@ -221,27 +232,134 @@ def calc_table_averages(run_data_df: pd.DataFrame) -> None:
     run_data_df = run_data_df[(run_data_df.state == "finished") & (run_data_df["data_env"] == "BEFOREARC")]
 
     # if we have same experiment twice, average them
-    # TODO: Metric might not exist
     unique_groups = ["data_env", "model", "study", "setting", "name", "seed"]
-    run_data_df = run_data_df.groupby(unique_groups)[metrics].mean().reset_index()
+    if 'exp_specifics' in run_data_df.columns:
+        unique_groups.append("exp_specifics")
+    if 'model_definitions' in run_data_df.columns:
+        unique_groups.append("model_definitions")
+
+    # Filter metrics to only those that exist in the dataframe
+    available_metrics = [m for m in metrics if m in run_data_df.columns]
+    if available_metrics:
+        run_data_df = run_data_df.groupby(unique_groups)[available_metrics].mean().reset_index()
+    else:
+        run_data_df = run_data_df.groupby(unique_groups).first().reset_index()
 
     check_completeness(run_data_df)
 
-
     # Output values -> main table
-    aggregated = run_data_df.groupby(grouping)[metrics].mean().reset_index()
-    print(aggregated)
-    aggregated_std = run_data_df.groupby(grouping)[metrics].std().reset_index()
-    print(aggregated_std)
+    if available_metrics:
+        aggregated = run_data_df.groupby(grouping)[available_metrics].mean().reset_index()
+        aggregated_std = run_data_df.groupby(grouping)[available_metrics].std().reset_index()
 
-    # Output values -> per experiment table / appendix
-    grouping = grouping + ["name"]
-    aggregated = run_data_df.groupby(grouping)[metrics].mean().reset_index()
-    print(aggregated)
-    aggregated_std = run_data_df.groupby(grouping)[metrics].std().reset_index()
-    print(aggregated_std)
+        # Add model_definitions and exp_specifics to grouping for display if available
+        display_grouping = grouping.copy()
+        if 'model_definitions' in run_data_df.columns and 'model_definitions' not in display_grouping:
+            display_grouping.append('model_definitions')
+        if 'exp_specifics' in run_data_df.columns and 'exp_specifics' not in display_grouping:
+            display_grouping.append('exp_specifics')
 
+        # Re-aggregate with display grouping if it's different
+        if display_grouping != grouping:
+            aggregated = run_data_df.groupby(display_grouping)[available_metrics].mean().reset_index()
+            aggregated_std = run_data_df.groupby(display_grouping)[available_metrics].std().reset_index()
 
+        # Sort by the specified order
+        sort_cols = ['model']
+        if 'model_definitions' in aggregated.columns:
+            sort_cols.append('model_definitions')
+        sort_cols.extend(['study', 'setting'])
+        if 'name' in aggregated.columns:
+            sort_cols.append('name')
+        if 'exp_specifics' in aggregated.columns:
+            sort_cols.append('exp_specifics')
+
+        aggregated = aggregated.sort_values(sort_cols).reset_index(drop=True)
+        aggregated_std = aggregated_std.sort_values(sort_cols).reset_index(drop=True)
+
+        # Create combined table with mean ± std format
+        combined_table = aggregated.copy()
+        for metric in available_metrics:
+            combined_table[metric] = aggregated[metric].apply(lambda x: f"{x * 100:.1f}") + " ± " + aggregated_std[
+                metric].apply(lambda x: f"{x * 100:.1f}")
+
+        # Reorder columns: data_env, model, model_definitions, study, setting, name, exp_specifics, then metrics
+        column_order = []
+        if 'data_env' in combined_table.columns:
+            column_order.append('data_env')
+        if 'model' in combined_table.columns:
+            column_order.append('model')
+        if 'model_definitions' in combined_table.columns:
+            column_order.append('model_definitions')
+        if 'study' in combined_table.columns:
+            column_order.append('study')
+        if 'setting' in combined_table.columns:
+            column_order.append('setting')
+        if 'name' in combined_table.columns:
+            column_order.append('name')
+        if 'exp_specifics' in combined_table.columns:
+            column_order.append('exp_specifics')
+        # Add metrics at the end
+        column_order.extend(available_metrics)
+
+        combined_table = combined_table[column_order]
+
+        # Set pandas options to display all columns
+        pd.set_option('display.max_columns', None)
+        pd.set_option('display.width', None)
+        pd.set_option('display.max_colwidth', None)
+
+        print("\n=== Main Table ===")
+        print(combined_table.to_string(index=False))
+
+        # Output values -> per experiment table / appendix
+        grouping = grouping + ["name"]
+
+        # Add model_definitions and exp_specifics to grouping for display if available
+        display_grouping_exp = grouping.copy()
+        if 'model_definitions' in run_data_df.columns and 'model_definitions' not in display_grouping_exp:
+            display_grouping_exp.append('model_definitions')
+        if 'exp_specifics' in run_data_df.columns and 'exp_specifics' not in display_grouping_exp:
+            display_grouping_exp.append('exp_specifics')
+
+        aggregated = run_data_df.groupby(display_grouping_exp)[available_metrics].mean().reset_index()
+        aggregated_std = run_data_df.groupby(display_grouping_exp)[available_metrics].std().reset_index()
+
+        # Sort by the specified order
+        aggregated = aggregated.sort_values(sort_cols).reset_index(drop=True)
+        aggregated_std = aggregated_std.sort_values(sort_cols).reset_index(drop=True)
+
+        # Create combined table with mean ± std format
+        combined_table = aggregated.copy()
+        for metric in available_metrics:
+            combined_table[metric] = aggregated[metric].apply(lambda x: f"{x * 100:.1f}") + " ± " + aggregated_std[
+                metric].apply(lambda x: f"{x * 100:.1f}")
+
+        # Reorder columns: data_env, model, model_definitions, study, setting, name, exp_specifics, then metrics
+        column_order = []
+        if 'data_env' in combined_table.columns:
+            column_order.append('data_env')
+        if 'model' in combined_table.columns:
+            column_order.append('model')
+        if 'model_definitions' in combined_table.columns:
+            column_order.append('model_definitions')
+        if 'study' in combined_table.columns:
+            column_order.append('study')
+        if 'setting' in combined_table.columns:
+            column_order.append('setting')
+        if 'name' in combined_table.columns:
+            column_order.append('name')
+        if 'exp_specifics' in combined_table.columns:
+            column_order.append('exp_specifics')
+        # Add metrics at the end
+        column_order.extend(available_metrics)
+
+        combined_table = combined_table[column_order]
+
+        print("\n=== Per Experiment Table ===")
+        print(combined_table.to_string(index=False))
+    else:
+        print("No available metrics found in dataframe")
 
 
 def main():
@@ -263,6 +381,8 @@ def main():
     data_df = cached_download(entity="VisReas-ETHZ", project="VisReas-project-BEFOREARC-llada-new-comgen", refresh=refresh)
     print("NEW COMP-GEN RUNS")
     calc_table_averages(data_df)
+
+    # TODO: Here, replace Base Runs with new comp-gen runs for final table
 
     ## SAMPLE EFFICIENCY RUNS
     data_df = cached_download(entity="VisReas-ETHZ", project="VisReas-project-BEFOREARC-llada-se", refresh=refresh)
