@@ -431,8 +431,11 @@ class BEFOREARCDataModule(DataModuleBase):
         if "compositionality" in study:  # to match the local naming convention of the studies
             study = study.replace('compositionality', 'CompGen')
         
-        if data_config.dataset_specifics != '':
+        if 'CompGen' in study and data_config.dataset_specifics != '':
             study = study + "_GridSize"
+
+        if "sample-efficiency" in study:
+            study = study.replace('sample-efficiency', 'Sample_Efficiency')
 
         # Get experiment setting from path
         setting = data_config.dataset_dir.split('/')[-2]
@@ -443,25 +446,22 @@ class BEFOREARCDataModule(DataModuleBase):
             exp_name = exp_name + f"/{data_config.dataset_specifics}"
 
         # Dataset path (using HuggingFace datasets)
-        dataset_path = f"{study}/{setting}/{exp_name}"
+        if "Sample_Efficiency" in study or "GridSize" in study:
+            dataset_path = f"supplementary/{study}/{setting}/{exp_name}"
+        else:
+            dataset_path = f"{study}/{setting}/{exp_name}"
 
         # HF base path
-        base_repo = "yassinetb/COGITAO"
+        base_repo = "yassinetb/COGITAO" # HF repo
 
-        if "sample-efficiency" in study:
-            train_set_df = pd.read_parquet(f'{base_data_folder}/train.parquet')
-            val_set_df = pd.read_parquet(f'{base_data_folder}/val.parquet')
-            test_set_df = pd.read_parquet(f'{base_data_folder}/test.parquet')
+        train_set_parquet = load_dataset(base_repo, data_files={"data": f"{dataset_path}/train.parquet"})
+        val_set_parquet = load_dataset(base_repo, data_files={"data": f"{dataset_path}/val.parquet"})
+        test_set_parquet = load_dataset(base_repo, data_files={"data": f"{dataset_path}/test.parquet"})
 
-        else:
-            train_set_parquet = load_dataset(base_repo, data_files={"data": f"{dataset_path}/train.parquet"})
-            val_set_parquet = load_dataset(base_repo, data_files={"data": f"{dataset_path}/val.parquet"})
-            test_set_parquet = load_dataset(base_repo, data_files={"data": f"{dataset_path}/test.parquet"})
-
-            # Convert parquet to pandas dataframe
-            train_set_df = train_set_parquet['data'].to_pandas()
-            val_set_df = val_set_parquet['data'].to_pandas()
-            test_set_df = test_set_parquet['data'].to_pandas()
+        # Convert parquet to pandas dataframe
+        train_set_df = train_set_parquet['data'].to_pandas()
+        val_set_df = val_set_parquet['data'].to_pandas()
+        test_set_df = test_set_parquet['data'].to_pandas()
 
         # TODO: Remove
         # Take a subset of the dataset for testing purposes
