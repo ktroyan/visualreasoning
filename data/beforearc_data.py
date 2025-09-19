@@ -449,20 +449,16 @@ class BEFOREARCDataModule(DataModuleBase):
         base_repo = "yassinetb/COGITAO"
 
         if "sample-efficiency" in study:
-            base_data_folder = f"supplementary/Sample_Efficiency/{setting}/{exp_name}"
-            train_set_df = pd.read_parquet(f'{base_data_folder}/train.parquet')
-            val_set_df = pd.read_parquet(f'{base_data_folder}/val.parquet')
-            test_set_df = pd.read_parquet(f'{base_data_folder}/test.parquet')
+            dataset_path = f"supplementary/Sample_Efficiency/{setting}/{exp_name}"
 
-        else:
-            train_set_parquet = load_dataset(base_repo, data_files={"data": f"{dataset_path}/train.parquet"})
-            val_set_parquet = load_dataset(base_repo, data_files={"data": f"{dataset_path}/val.parquet"})
-            test_set_parquet = load_dataset(base_repo, data_files={"data": f"{dataset_path}/test.parquet"})
+        train_set_parquet = load_dataset(base_repo, data_files={"data": f"{dataset_path}/train.parquet"})
+        val_set_parquet = load_dataset(base_repo, data_files={"data": f"{dataset_path}/val.parquet"})
+        test_set_parquet = load_dataset(base_repo, data_files={"data": f"{dataset_path}/test.parquet"})
 
-            # Convert parquet to pandas dataframe
-            train_set_df = train_set_parquet['data'].to_pandas()
-            val_set_df = val_set_parquet['data'].to_pandas()
-            test_set_df = test_set_parquet['data'].to_pandas()
+        # Convert parquet to pandas dataframe
+        train_set_df = train_set_parquet['data'].to_pandas()
+        val_set_df = val_set_parquet['data'].to_pandas()
+        test_set_df = test_set_parquet['data'].to_pandas()
 
         # TODO: Remove
         # Take a subset of the dataset for testing purposes
