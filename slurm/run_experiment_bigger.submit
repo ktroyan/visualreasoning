@@ -6,7 +6,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --mem=100G
 #SBATCH --account=cai_cv
-#SBATCH --partition=p_gpu_high_end
+#SBATCH --partition=gpu_top
 #SBATCH --output=/cluster/home/sage/temp/vr/experiment/%j_%N.out
 #SBATCH --error=/cluster/home/sage/temp/vr/experiment/%j_%N.err
 
