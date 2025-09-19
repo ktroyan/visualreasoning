@@ -11,6 +11,25 @@ api = wandb.Api(api_key=os.getenv("WANDB_API_KEY"))
 EXTRACTED_METRICS = ['test_acc_grid_epoch', 'gen_test_acc_grid_epoch']
 
 
+CACHE_DIR = "cache_wandb"
+os.makedirs(CACHE_DIR, exist_ok=True)
+
+def cached_download(entity: str, project: str, refresh: bool = False) -> pd.DataFrame:
+    """
+    Downloads dataframe from HuggingFace and caches it locally as a pickle.
+    If refresh=False and cache exists, load from cache instead of re-downloading.
+    """
+    cache_file = os.path.join(CACHE_DIR, f"{entity}_{project}.pkl")
+
+    if not refresh and os.path.exists(cache_file):
+        print(f"Loading cached dataframe: {cache_file}")
+        return pd.read_pickle(cache_file)
+
+    print(f"Downloading dataframe from HF: entity={entity}, project={project}")
+    df = download_data(entity=entity, project=project)  # <-- your existing function
+    df.to_pickle(cache_file)
+    return df
+
 def download_data(entity: str, project: str) -> pd.DataFrame:
     output = []
     runs = api.runs(entity + "/" + project)
@@ -34,6 +53,10 @@ def download_data(entity: str, project: str) -> pd.DataFrame:
                 run_infos['study'] = config["experiment"]["value"]["study"]
                 run_infos['setting'] = config["experiment"]["value"]["setting"]
                 run_infos['name'] = config["experiment"]["value"]["name"]
+
+                if 'exp_specifics' in config["experiment"]["value"]:
+                    run_infos['exp_specifics'] = config["experiment"]["value"]["exp_specifics"]
+
             else:
                 exp_infos = ast.literal_eval(config["data_config"]["value"])['dataset_dir'].split("/")
                 run_infos['study'] = exp_infos[-3]
@@ -49,6 +72,17 @@ def download_data(entity: str, project: str) -> pd.DataFrame:
                 run_infos['head'] = ast.literal_eval(config["head_network_config"]["value"])["name"]
             else:
                 run_infos['head'] = config["model"]["value"]["head"]
+
+            if not run_infos['backbone'] == "llada":
+                continue
+
+            # Define model size
+            backbone = ast.literal_eval(config["backbone_network_config"]["value"])
+            run_infos['model_definitions'] = f"{backbone['embed_dim']}-{backbone['mlp_hidden_size']}-{backbone['mlp_ratio']}-{backbone['n_heads']}-{backbone['n_kv_heads']}-{backbone['n_layers']}"
+
+            # TODO: Remove this temporary fix
+            if run_infos['seed'] == 42:
+                run_infos['seed'] = 4269
 
             # Get required results
             summary = run.summary._json_dict
@@ -78,6 +112,10 @@ def download_data(entity: str, project: str) -> pd.DataFrame:
         do_update = True
 
         if do_update:
+            if not run_infos['backbone'] == "llada" or "study" in run_infos or "setting" in run_infos or "experiment_name" in run_infos or "model_name" in run_infos or "seed" in run_infos:
+                print(f"Skipping 'do_update' for run {run.id}: {run_infos}")
+                continue
+
             assert run_infos['backbone'] == "llada"
             assert "study" not in run.summary.keys()
             assert "setting" not in run.summary.keys()
@@ -112,7 +150,7 @@ def check_completeness(run_data_df: pd.DataFrame) -> None:
     compositionality_combos = list(itertools.product(['compositionality'], compositionality_settings, compositionality_names))
     sysgen_combos = list(itertools.product(['sys-gen'], sysgen_settings, sysgen_names))
     target_combos = compositionality_combos + sysgen_combos
-    required_seeds = {1997, 2025, 42}
+    required_seeds = {1997, 2025, 4269}
 
     # === Deduplicate and average metric columns ===
     unique_cols = ["data_env", "model", "study", "setting", "name", "seed"]
@@ -183,6 +221,7 @@ def calc_table_averages(run_data_df: pd.DataFrame) -> None:
     run_data_df = run_data_df[(run_data_df.state == "finished") & (run_data_df["data_env"] == "BEFOREARC")]
 
     # if we have same experiment twice, average them
+    # TODO: Metric might not exist
     unique_groups = ["data_env", "model", "study", "setting", "name", "seed"]
     run_data_df = run_data_df.groupby(unique_groups)[metrics].mean().reset_index()
 
@@ -206,8 +245,38 @@ def calc_table_averages(run_data_df: pd.DataFrame) -> None:
 
 
 def main():
-    beforearc_llada_df = download_data(entity="VisReas-ETHZ", project="VisReas-project-BEFOREARC-llada-thesis")
-    data_df = pd.concat([beforearc_llada_df])
+    refresh = False
+
+    ## BASE RUNS
+
+    # Base Runs with seed 1997
+    df_1 = cached_download(entity="VisReas-ETHZ", project="VisReas-project", refresh=refresh)
+    # Base Runs with seed 2025
+    df_2 = cached_download(entity="VisReas-ETHZ", project="VisReas-project-seed2025", refresh=refresh)
+    # Base Runs with seed 42
+    df_3 = cached_download(entity="VisReas-ETHZ", project="VisReas-project-seed42", refresh=refresh)
+    print("BASE RUNS")
+    data_df = pd.concat([df_1, df_2, df_3])
+    calc_table_averages(data_df)
+
+    ## NEW COMP-GEN RUNS
+    data_df = cached_download(entity="VisReas-ETHZ", project="VisReas-project-BEFOREARC-llada-new-comgen", refresh=refresh)
+    print("NEW COMP-GEN RUNS")
+    calc_table_averages(data_df)
+
+    ## SAMPLE EFFICIENCY RUNS
+    data_df = cached_download(entity="VisReas-ETHZ", project="VisReas-project-BEFOREARC-llada-se", refresh=refresh)
+    print("SAMPLE EFFICIENCY RUNS")
+    calc_table_averages(data_df)
+
+    ## GRID-SIZES RUNS
+    data_df = cached_download(entity="VisReas-ETHZ", project="VisReas-project-BEFOREARC-llada-grid-size", refresh=refresh)
+    print("GRID-SIZES RUNS")
+    calc_table_averages(data_df)
+
+    ## MODEL SIZES RUNS
+    data_df = cached_download(entity="VisReas-ETHZ", project="VisReas-project-BEFOREARC-llada-model-size", refresh=refresh)
+    print("MODEL SIZES RUNS")
     calc_table_averages(data_df)
 
 
