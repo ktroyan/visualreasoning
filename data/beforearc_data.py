@@ -427,12 +427,15 @@ class BEFOREARCDataModule(DataModuleBase):
         study = data_config.dataset_dir.split('/')[-3]
         if "sys-gen" in study:  # to match the local naming convention of the studies
             study = study.replace('sys-gen', 'EnvGen')
-
+        
         if "compositionality" in study:  # to match the local naming convention of the studies
             study = study.replace('compositionality', 'CompGen')
-
-        if data_config.dataset_specifics != '':
+        
+        if 'CompGen' in study and data_config.dataset_specifics != '':
             study = study + "_GridSize"
+
+        if "sample-efficiency" in study:
+            study = study.replace('sample-efficiency', 'Sample_Efficiency')
 
         # Get experiment setting from path
         setting = data_config.dataset_dir.split('/')[-2]
@@ -443,13 +446,13 @@ class BEFOREARCDataModule(DataModuleBase):
             exp_name = exp_name + f"/{data_config.dataset_specifics}"
 
         # Dataset path (using HuggingFace datasets)
-        dataset_path = f"{study}/{setting}/{exp_name}"
+        if "Sample_Efficiency" in study or "GridSize" in study:
+            dataset_path = f"supplementary/{study}/{setting}/{exp_name}"
+        else:
+            dataset_path = f"{study}/{setting}/{exp_name}"
 
         # HF base path
-        base_repo = "yassinetb/COGITAO"
-
-        if "sample-efficiency" in study:
-            dataset_path = f"supplementary/Sample_Efficiency/{setting}/{exp_name}"
+        base_repo = "yassinetb/COGITAO" # HF repo
 
         train_set_parquet = load_dataset(base_repo, data_files={"data": f"{dataset_path}/train.parquet"})
         val_set_parquet = load_dataset(base_repo, data_files={"data": f"{dataset_path}/val.parquet"})
