@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # Initialize variables as empty string (i.e., no defaults)
+SEED=""
 GPU_ID=""
 DATA_ENV=""
 STUDY=""
@@ -20,6 +21,7 @@ NUM_REG_TOKENS=""
 USE_TASK_EMBEDDING=""
 USE_GEN_TEST_SET=""
 VALIDATE_IN_AND_OUT_DOMAIN=""
+WANDB_PROJECT_NAME=""
 WANDB_SWEEP_ENABLED=""
 WANDB_SWEEP_CONFIG=""
 DEV_RUN=""
@@ -28,6 +30,7 @@ ADDI_LOG_NAME=""
 # Parse CLI arguments
 while [[ $# -gt 0 ]]; do
     case "$1" in
+        --seed) SEED="$2"; shift 2 ;;
         --gpu_id) GPU_ID="$2"; shift 2 ;;
         --data_env) DATA_ENV="$2"; shift 2 ;;
         --study) STUDY="$2"; shift 2 ;;
@@ -47,6 +50,7 @@ while [[ $# -gt 0 ]]; do
         --rpe_type) RPE_TYPE="$2"; shift 2 ;;
         --num_reg_tokens) NUM_REG_TOKENS="$2"; shift 2 ;;
         --use_task_embedding) USE_TASK_EMBEDDING="$2"; shift 2 ;;
+        --wandb_project_name) WANDB_PROJECT_NAME="$2"; shift 2 ;;
         --sweep_enabled) WANDB_SWEEP_ENABLED="$2"; shift 2 ;;
         --sweep_config) WANDB_SWEEP_CONFIG="$2"; shift 2 ;;
         --dev_run) DEV_RUN="$2"; shift 2 ;;
@@ -80,14 +84,15 @@ fi
 # Construct command
 CMD="nohup uv run experiment.py"
 
-[[ -n "$GPU_ID" ]] && CMD+=" base.gpu_id=\"${GPU_ID}\""
+[[ -n "$SEED" ]] && CMD+=" base.seed=${SEED}"    # seed is int, so no quotes
+[[ -n "$GPU_ID" ]] && CMD+=" base.gpu_id=${GPU_ID}"  # gpu_id is int, so no quotes
 [[ -n "$DATA_ENV" ]] && CMD+=" base.data_env=\"${DATA_ENV}\""
 [[ -n "$STUDY" ]] && CMD+=" experiment.study=\"${STUDY}\""
 [[ -n "$SETTING" ]] && CMD+=" experiment.setting=\"${SETTING}\""
 [[ -n "$EXPERIMENT" ]] && CMD+=" experiment.name=\"${EXPERIMENT}\""
 [[ -n "$USE_GEN_TEST_SET" ]] && CMD+=" data.use_gen_test_set=\"${USE_GEN_TEST_SET}\""
 [[ -n "$VALIDATE_IN_AND_OUT_DOMAIN" ]] && CMD+=" data.validate_in_and_out_domain=\"${VALIDATE_IN_AND_OUT_DOMAIN}\""
-[[ -n "$MAX_EPOCHS" ]] && CMD+=" training.max_epochs=\"${MAX_EPOCHS}\""
+[[ -n "$MAX_EPOCHS" ]] && CMD+=" training.max_epochs=${MAX_EPOCHS}" # max_epochs is int, so no quotes
 [[ -n "$BACKBONE" ]] && CMD+=" model.backbone=\"${BACKBONE}\""
 [[ -n "$HEAD" ]] && CMD+=" model.head=\"${HEAD}\""
 [[ -n "$VISUAL_TOKENS_ENABLED" ]] && CMD+=" model.visual_tokens.enabled=\"${VISUAL_TOKENS_ENABLED}\""
@@ -97,13 +102,17 @@ CMD="nohup uv run experiment.py"
 [[ -n "$OPE_ENABLED" ]] && CMD+=" model.ope.enabled=\"${OPE_ENABLED}\""
 [[ -n "$RPE_ENABLED" ]] && CMD+=" model.rpe.enabled=\"${RPE_ENABLED}\""
 [[ -n "$RPE_TYPE" ]] && CMD+=" model.rpe.rpe_type=\"${RPE_TYPE}\""
-[[ -n "$NUM_REG_TOKENS" ]] && CMD+=" model.num_reg_tokens=\"${NUM_REG_TOKENS}\""
+[[ -n "$NUM_REG_TOKENS" ]] && CMD+=" model.num_reg_tokens=${NUM_REG_TOKENS}"    # num_reg_tokens is int, so no quotes
 [[ -n "$USE_TASK_EMBEDDING" ]] && CMD+=" model.task_embedding.enabled=\"${USE_TASK_EMBEDDING}\""
+[[ -n "$WANDB_PROJECT_NAME" ]] && CMD+=" wandb.wandb_project_name=\"${WANDB_PROJECT_NAME}\""
 [[ -n "$WANDB_SWEEP_ENABLED" ]] && CMD+=" wandb.sweep.enabled=\"${WANDB_SWEEP_ENABLED}\""
 [[ -n "$WANDB_SWEEP_CONFIG" ]] && CMD+=" wandb.sweep.config=\"${WANDB_SWEEP_CONFIG}\""
 [[ -n "$DEV_RUN" ]] && CMD+=" experiment.dev_run=\"${DEV_RUN}\""
 
 CMD+=" > \"${LOG_FILE}\" 2>&1 &"
+
+# Echo what command we try to run
+echo "Executing command: $CMD"
 
 # Run command
 eval $CMD
