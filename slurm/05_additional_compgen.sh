@@ -2,23 +2,41 @@
 
 # List of experiment configurations
 configs=(
-  "BEFOREARC compositionality exp_setting_4 experiment_1 1997"
-  "BEFOREARC compositionality exp_setting_4 experiment_2 1997"
-  "BEFOREARC compositionality exp_setting_4 experiment_3 1997"
-  "BEFOREARC compositionality exp_setting_4 experiment_4 1997"
-  "BEFOREARC compositionality exp_setting_4 experiment_5 1997"
+#  "BEFOREARC compositionality exp_setting_4 experiment_1 1997"
+#  "BEFOREARC compositionality exp_setting_4 experiment_2 1997"
+#  "BEFOREARC compositionality exp_setting_4 experiment_3 1997"
+#  "BEFOREARC compositionality exp_setting_4 experiment_4 1997"
+#  "BEFOREARC compositionality exp_setting_4 experiment_5 1997"
+#
+#  "BEFOREARC compositionality exp_setting_4 experiment_1 42"
+#  "BEFOREARC compositionality exp_setting_4 experiment_2 42"
+#  "BEFOREARC compositionality exp_setting_4 experiment_3 42"
+#  "BEFOREARC compositionality exp_setting_4 experiment_4 42"
+#  "BEFOREARC compositionality exp_setting_4 experiment_5 42"
+#
+#  "BEFOREARC compositionality exp_setting_4 experiment_1 2025"
+#  "BEFOREARC compositionality exp_setting_4 experiment_2 2025"
+#  "BEFOREARC compositionality exp_setting_4 experiment_3 2025"
+#  "BEFOREARC compositionality exp_setting_4 experiment_4 2025"
+#  "BEFOREARC compositionality exp_setting_4 experiment_5 2025"
 
-  "BEFOREARC compositionality exp_setting_4 experiment_1 42"
-  "BEFOREARC compositionality exp_setting_4 experiment_2 42"
-  "BEFOREARC compositionality exp_setting_4 experiment_3 42"
-  "BEFOREARC compositionality exp_setting_4 experiment_4 42"
-  "BEFOREARC compositionality exp_setting_4 experiment_5 42"
+  "BEFOREARC compositionality exp_setting_5 experiment_1 1997"
+  "BEFOREARC compositionality exp_setting_5 experiment_2 1997"
+  "BEFOREARC compositionality exp_setting_5 experiment_3 1997"
+  "BEFOREARC compositionality exp_setting_5 experiment_4 1997"
+  "BEFOREARC compositionality exp_setting_5 experiment_5 1997"
 
-  "BEFOREARC compositionality exp_setting_4 experiment_1 2025"
-  "BEFOREARC compositionality exp_setting_4 experiment_2 2025"
-  "BEFOREARC compositionality exp_setting_4 experiment_3 2025"
-  "BEFOREARC compositionality exp_setting_4 experiment_4 2025"
-  "BEFOREARC compositionality exp_setting_4 experiment_5 2025"
+  "BEFOREARC compositionality exp_setting_5 experiment_1 42"
+  "BEFOREARC compositionality exp_setting_5 experiment_2 42"
+  "BEFOREARC compositionality exp_setting_5 experiment_3 42"
+  "BEFOREARC compositionality exp_setting_5 experiment_4 42"
+  "BEFOREARC compositionality exp_setting_5 experiment_5 42"
+
+  "BEFOREARC compositionality exp_setting_5 experiment_1 2025"
+  "BEFOREARC compositionality exp_setting_5 experiment_2 2025"
+  "BEFOREARC compositionality exp_setting_5 experiment_3 2025"
+  "BEFOREARC compositionality exp_setting_5 experiment_4 2025"
+  "BEFOREARC compositionality exp_setting_5 experiment_5 2025"
 )
 
 # Iterate over each configuration and submit the job
