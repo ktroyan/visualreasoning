@@ -133,6 +133,10 @@ class BEFOREARCDataset(Dataset):
                                                             'crop_top_side': max_token_id + 15,
                                                             'double_right': max_token_id + 16,
                                                             'crop_contours': max_token_id + 17,
+                                                            'translate_right': max_token_id + 18,
+                                                            'fill_holes_same_color': max_token_id + 19,
+                                                            'empty_inside_pixels': max_token_id + 20,
+                                                            'double_down': max_token_id + 21
                                                             }
 
             logger.info(f"The token IDs for the transformations are:\n{self.elementary_transformations_to_token_ids}")
