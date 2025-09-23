@@ -11,8 +11,8 @@ from typing import Dict, List, Tuple
 from utility.custom_logging import logger
 
 
-def check_train_test_contamination(train_dataloader, test_dataloader):
-    log_message = "Checking for data contamination between train and test sets...\n"
+def check_train_test_contamination(train_dataloader, test_dataloader, log_message):
+    log_message = f"Checking for data contamination {log_message}\n"
 
     def hash_sample(sample):
         """ Hash the raw bytes of a PyTorch tensor, later ensuring reliable comparison between samples. """
