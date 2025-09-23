@@ -80,6 +80,14 @@ def download_data(entity: str, project: str) -> pd.DataFrame:
             # Define model size
             backbone = ast.literal_eval(config["backbone_network_config"]["value"])
             run_infos['model_definitions'] = f"{backbone['embed_dim']}-{backbone['mlp_hidden_size']}-{backbone['mlp_ratio']}-{backbone['n_heads']}-{backbone['n_kv_heads']}-{backbone['n_layers']}"
+            if run_infos['model_definitions'] == '48-96-2-4-4-4':
+                run_infos['model_definitions'] = "100k"
+            if run_infos['model_definitions'] == '128-256-4-4-4-6':
+                run_infos['model_definitions'] = "1M"
+            if run_infos['model_definitions'] == '384-512-4-8-8-8':
+                run_infos['model_definitions'] = "10M"
+
+            run_infos['model'] = run_infos['backbone'] + '+' + run_infos['head']
 
             # TODO: Remove this temporary fix
             if run_infos['seed'] == 42:
@@ -140,7 +148,7 @@ def download_data(entity: str, project: str) -> pd.DataFrame:
 def update_dataframe(old_df: pd.DataFrame, new_df: pd.DataFrame) -> pd.DataFrame:
     # Columns that define a unique run config
     key_cols = ['name', 'state', 'data_env', 'seed', 'study',
-                'setting', 'backbone', 'head', 'model']
+                'setting', 'backbone', 'head', 'model_definitions']
 
     # Columns to update
     update_cols = ['test_acc_grid_epoch', 'gen_test_acc_grid_epoch']
@@ -421,7 +429,7 @@ def calc_table_averages(run_data_df: pd.DataFrame) -> None:
 
 
 def main():
-    refresh = False
+    refresh = True
 
     ## BASE RUNS
 
