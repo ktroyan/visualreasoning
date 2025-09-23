@@ -26,6 +26,7 @@ WANDB_SWEEP_ENABLED=""
 WANDB_SWEEP_CONFIG=""
 DEV_RUN=""
 ADDI_LOG_NAME=""
+CHECK_DATA_CONTAMINATION=""
 
 # Parse CLI arguments
 while [[ $# -gt 0 ]]; do
@@ -55,6 +56,7 @@ while [[ $# -gt 0 ]]; do
         --sweep_config) WANDB_SWEEP_CONFIG="$2"; shift 2 ;;
         --dev_run) DEV_RUN="$2"; shift 2 ;;
         --add_log_name) ADDI_LOG_NAME="$2"; shift 2 ;;
+        --check_data_contamination) CHECK_DATA_CONTAMINATION="$2"; shift 2 ;;
         *)
             echo "Unknown option: $1"
             exit 1
@@ -108,6 +110,7 @@ CMD="nohup uv run experiment.py"
 [[ -n "$WANDB_SWEEP_ENABLED" ]] && CMD+=" wandb.sweep.enabled=\"${WANDB_SWEEP_ENABLED}\""
 [[ -n "$WANDB_SWEEP_CONFIG" ]] && CMD+=" wandb.sweep.config=\"${WANDB_SWEEP_CONFIG}\""
 [[ -n "$DEV_RUN" ]] && CMD+=" experiment.dev_run=\"${DEV_RUN}\""
+[[ -n "$CHECK_DATA_CONTAMINATION" ]] && CMD+=" inference.check_data_contamination=${CHECK_DATA_CONTAMINATION}"
 
 CMD+=" > \"${LOG_FILE}\" 2>&1 &"
 
