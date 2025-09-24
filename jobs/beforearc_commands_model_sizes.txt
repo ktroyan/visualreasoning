@@ -7,50 +7,41 @@ NOTE:
 
 ### CompGen-1 ###
 
-## ResNet 
-bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es1.yaml" --backbone resnet --visual_tokens_enabled false --add_log_name "ResNet" --max_epochs 10 --gpu_id 0
-
-
 ## Vanilla-ViT
-bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es1.yaml" --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false --add_log_name "Vanilla-ViT" --max_epochs 10 --gpu_id 1
-
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es1.yaml" --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false --add_log_name "Vanilla-ViT" --max_epochs 10 --gpu_id 0 --seed 42 --wandb_project_name "VisReas-project-model-sizes"
 
 
 ## Grid-ViT
-bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es1.yaml" --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum_vec --ope_enabled true --rpe_enabled true --rpe_type rope --num_reg_tokens 6 --add_log_name "Grid-ViT" --max_epochs 10 --gpu_id 2
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es1.yaml" --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum_vec --ope_enabled true --rpe_enabled true --rpe_type rope --num_reg_tokens 6 --add_log_name "Grid-ViT" --max_epochs 10 --gpu_id 1 --seed 42 --wandb_project_name "VisReas-project-model-sizes"
 
 
 ## Pondering-Looped-ViT
-bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es1.yaml" --backbone looped_vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --add_log_name "Pondering-Looped-ViT" --max_epochs 10 --gpu_id 3
-
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es1.yaml" --backbone looped_vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --add_log_name "Pondering-Looped-ViT" --max_epochs 10 --gpu_id 2 --seed 42 --wandb_project_name "VisReas-project-model-sizes"
 
 
 ### CompGen-3 ###
 
-## ResNet
-
-
 ## Vanilla-ViT
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es3.yaml" --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false --add_log_name "Vanilla-ViT" --max_epochs 10 --gpu_id 0 --seed 42 --wandb_project_name "VisReas-project-model-sizes"
 
 
 ## Grid-ViT
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es3.yaml" --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum_vec --ope_enabled true --rpe_enabled true --rpe_type rope --num_reg_tokens 6 --add_log_name "Grid-ViT" --max_epochs 10 --gpu_id 1 --seed 42 --wandb_project_name "VisReas-project-model-sizes"
 
 
 ## Pondering-Looped-ViT
-
-
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es3.yaml" --backbone looped_vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --add_log_name "Pondering-Looped-ViT" --max_epochs 10 --gpu_id 2 --seed 42 --wandb_project_name "VisReas-project-model-sizes"
 
 
 ### EnvGen-5 ###
 
-## ResNet
-
-
 ## Vanilla-ViT
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_es5.yaml" --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false --add_log_name "Vanilla-ViT" --max_epochs 10 --gpu_id 0 --seed 42 --wandb_project_name "VisReas-project-model-sizes"
 
 
 ## Grid-ViT
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_es5.yaml" --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum_vec --ope_enabled true --rpe_enabled true --rpe_type rope --num_reg_tokens 6 --add_log_name "Grid-ViT" --max_epochs 10 --gpu_id 1 --seed 42 --wandb_project_name "VisReas-project-model-sizes"
 
 
 ## Pondering-Looped-ViT
-
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/sysgen_es5.yaml" --backbone looped_vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --add_log_name "Pondering-Looped-ViT" --max_epochs 10 --gpu_id 2 --seed 42 --wandb_project_name "VisReas-project-model-sizes"
