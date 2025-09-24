@@ -59,10 +59,13 @@ def download_data(entity: str, project: str) -> pd.DataFrame:
                     run_infos['exp_specifics'] = config["experiment"]["value"]["exp_specifics"]
 
             else:
-                exp_infos = ast.literal_eval(config["data_config"]["value"])['dataset_dir'].split("/")
+                data_cfg = ast.literal_eval(config["data_config"]["value"])
+                exp_infos = data_cfg['dataset_dir'].split("/")
                 run_infos['study'] = exp_infos[-3]
                 run_infos['setting'] = exp_infos[-2]
                 run_infos['name'] = exp_infos[-1]
+                if 'dataset_specifics' in data_cfg:
+                    run_infos['exp_specifics'] = data_cfg["dataset_specifics"]
 
             if "backbone_network_config" in config:
                 run_infos['backbone'] = ast.literal_eval(config["backbone_network_config"]["value"])["name"]
@@ -82,9 +85,11 @@ def download_data(entity: str, project: str) -> pd.DataFrame:
             run_infos['model_definitions'] = f"{backbone['embed_dim']}-{backbone['mlp_hidden_size']}-{backbone['mlp_ratio']}-{backbone['n_heads']}-{backbone['n_kv_heads']}-{backbone['n_layers']}"
             if run_infos['model_definitions'] == '48-96-2-4-4-4':
                 run_infos['model_definitions'] = "100k"
-            if run_infos['model_definitions'] == '128-256-4-4-4-6':
+            elif run_infos['model_definitions'] == '128-256-4-4-4-6':
                 run_infos['model_definitions'] = "1M"
-            if run_infos['model_definitions'] == '384-512-4-8-8-8':
+            elif run_infos['model_definitions'] == '128-384-4-4-4-6':
+                run_infos['model_definitions'] = "Base (1.3M)"
+            elif run_infos['model_definitions'] == '384-512-4-8-8-8':
                 run_infos['model_definitions'] = "10M"
 
             run_infos['model'] = run_infos['backbone'] + '+' + run_infos['head']
@@ -163,9 +168,8 @@ def update_dataframe(old_df: pd.DataFrame, new_df: pd.DataFrame) -> pd.DataFrame
         # Check number of matches
         if mask.sum() == 0:
             # Allow special missing case
-            if (row['study'] == 'compositionality' and
-                row['setting'] == 'exp_setting_2' and
-                row['name'] == 'experiment_4'):
+            if (row['study'] == 'compositionality' and row['setting'] == 'exp_setting_2' and row['name'] == 'experiment_4') or \
+                (row['study'] == 'compositionality' and row['setting'] == 'exp_setting_5'):
                 # Append the row instead of overwriting
                 updated_df = pd.concat([updated_df, pd.DataFrame([row])], ignore_index=True)
                 for col in update_cols:
@@ -287,7 +291,7 @@ def check_completeness(run_data_df: pd.DataFrame) -> None:
         print("✅ No missing values in key metrics.")
 
 
-def calc_table_averages(run_data_df: pd.DataFrame) -> None:
+def calc_table_averages(run_data_df: pd.DataFrame, filename: str = None) -> None:
     metrics = EXTRACTED_METRICS
     grouping = ["data_env", "model", "study", "setting"]
 
@@ -299,7 +303,7 @@ def calc_table_averages(run_data_df: pd.DataFrame) -> None:
 
     # if we have same experiment twice, average them
     unique_groups = ["data_env", "model", "study", "setting", "name", "seed"]
-    if 'exp_specifics' in run_data_df.columns:
+    if 'exp_specifics' in run_data_df.columns and not run_data_df['exp_specifics'].hasnans:
         unique_groups.append("exp_specifics")
     if 'model_definitions' in run_data_df.columns:
         unique_groups.append("model_definitions")
@@ -377,6 +381,8 @@ def calc_table_averages(run_data_df: pd.DataFrame) -> None:
 
         print("\n=== Main Table ===")
         print(combined_table.to_string(index=False))
+        if filename is not None:
+            combined_table.to_csv(f"{filename}_main.csv", index=False)
 
         # Output values -> per experiment table / appendix
         grouping = grouping + ["name"]
@@ -424,6 +430,8 @@ def calc_table_averages(run_data_df: pd.DataFrame) -> None:
 
         print("\n=== Per Experiment Table ===")
         print(combined_table.to_string(index=False))
+        if filename is not None:
+            combined_table.to_csv(f"{filename}_per_exp.csv", index=False)
     else:
         print("No available metrics found in dataframe")
 
@@ -454,23 +462,23 @@ def main():
     ## FIXED ORIG RUNS
     data_df = update_dataframe(data_df, new_data_df)
     print("FIXED ORIG RUNS WITH NEW COMP-GEN DATA")
-    calc_table_averages(data_df)
+    calc_table_averages(data_df, filename="base_runs_fixed")
 
 
     ## SAMPLE EFFICIENCY RUNS
     data_df = cached_download(entity="VisReas-ETHZ", project="VisReas-project-BEFOREARC-llada-se", refresh=refresh)
     print("SAMPLE EFFICIENCY RUNS")
-    calc_table_averages(data_df)
+    calc_table_averages(data_df, filename="sample_efficiency")
 
     ## GRID-SIZES RUNS
     data_df = cached_download(entity="VisReas-ETHZ", project="VisReas-project-BEFOREARC-llada-grid-size",  refresh=refresh)
     print("GRID-SIZES RUNS")
-    calc_table_averages(data_df)
+    calc_table_averages(data_df, filename="grid_sizes")
 
     ## MODEL SIZES RUNS
     data_df = cached_download(entity="VisReas-ETHZ", project="VisReas-project-BEFOREARC-llada-model-size", refresh=refresh)
     print("MODEL SIZES RUNS")
-    calc_table_averages(data_df)
+    calc_table_averages(data_df, filename="model_sizes")
 
 
 if __name__ == "__main__":
