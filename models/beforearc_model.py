@@ -76,6 +76,30 @@ class RegularizationLoss(nn.Module):
         return self.kld(p_g.log(), p)    # NOTE: the input should be in log-space for this KL divergence loss function; the target can be in the log-space too if the argument log_target=True; See https://docs.pytorch.org/docs/stable/generated/torch.nn.KLDivLoss.html
         # return self.kl_div(p.log(), p_g)
 
+def safe_multinomial(p, num_samples=1, dim=-1):
+    """
+    Robust multinomial sampling from probabilities to avoid NaN/Inf/negatives.
+    Use uniform fallback when a row sums to 0.
+    Returns (idx, probs_used)
+    """
+    q = p.float()
+    q = torch.nan_to_num(q, nan=0.0, posinf=0.0, neginf=0.0)
+    q = torch.clamp(q, min=0.0)
+
+    row_sum = q.sum(dim=dim, keepdim=True)
+    zero = row_sum.le(1e-12)
+
+    if zero.any():
+        # Only replace rows that sum to 0
+        uniform_row = torch.full_like(q, 1.0 / q.size(dim))
+        q = torch.where(zero, uniform_row, q)
+        row_sum = q.sum(dim=dim, keepdim=True)
+
+    q = q / row_sum
+    idx = torch.multinomial(q, num_samples=num_samples)
+
+    return idx, q
+
 class VisReasModel(pl.LightningModule):
     """
     Model module class that handles the training, validation and testing logic of the model.
@@ -275,7 +299,8 @@ class VisReasModel(pl.LightningModule):
 
                 # We probabilistically sample a halting step per batch element to get the logits of that step
                 p = torch.stack(p_list, dim=1).clamp(min=1e-6, max=1-1e-6)  # [B, T]; stack the probabilities of halting p_list into [B, T]
-                sampled_step = torch.multinomial(p, num_samples=1)  # [B, 1]; sample one step to use per batch element
+                # sampled_step = torch.multinomial(p, num_samples=1)  # [B, 1]; sample one step to use per batch element
+                sampled_step, _ = safe_multinomial(p.float(), num_samples=1, dim=1)  # [B, 1]; sample one step to use per batch element
 
                 # Get the per‐token class‐scores from the sampled halting step for each element in the batch
                 step_indices = sampled_step.view(B, 1, 1, 1).expand(-1, 1, seq_len, num_classes) # build gather index of shape [B, 1, seq_len, 1]
@@ -628,6 +653,8 @@ class VisReasModel(pl.LightningModule):
         """
 
         figs_to_log = []
+
+        log_message = ""
 
         if len(self.test_step_results) != 0:
             test_step_results = self.test_step_results
