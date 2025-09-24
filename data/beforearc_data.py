@@ -435,7 +435,7 @@ class BEFOREARCDataModule(DataModuleBase):
         if "compositionality" in study:  # to match the local naming convention of the studies
             study = study.replace('compositionality', 'CompGen')
         
-        if 'CompGen' in study and data_config.dataset_specifics != '':
+        if ('CompGen' in study or 'EnvGen' in study) and data_config.dataset_specifics != '':
             study = study + "_GridSize"
 
         if "sample-efficiency" in study:
