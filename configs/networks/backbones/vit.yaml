@@ -1,10 +1,10 @@
 backbone_network:
   name: 'vit'
-  embed_dim: 128  # 384 for small, 768 for base; note that this should be divisible by the number of heads
-  num_heads: 4  # 8
+  embed_dim: 128  # 128 (for 0.5M params), 128 (for 1 Million params), 384 (for 20 Million params); 384 for small, 768 for base; note that this should be divisible by the number of heads
+  num_heads: 4  # 4 (for 0.5M params), 4 (for 1M params), 8 (for 20M params)
   mlp_ratio: 4  # used instead of explicit ff_dim
   qkv_bias: true
-  num_layers: 6  # 6
+  num_layers: 6  # 2 (for 0.5M params), 6 (for 1M params), 12 (for 20M params); number of layers
   ape_dropout_rate: 0.0
   attn_dropout_rate: 0.1  # 0.1
   attn_proj_dropout_rate: 0.0

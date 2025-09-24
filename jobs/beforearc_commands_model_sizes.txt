@@ -2,103 +2,58 @@
 
 NOTE:
 - We specify the relevant parameters based on the default configs.
+- Need to change the network default config since the network arguments have not been added as possible arguments for the job.
+
 
 ### CompGen-1 ###
+
 ## ResNet 
-
-# ~0.5M
-bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es1.yaml" --backbone resnet --visual_tokens_enabled false --add_log_name "ResNet_05M" --max_epochs 10 --gpu_id 0
-
-# ~1.2M
-bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es1.yaml" --backbone resnet --visual_tokens_enabled false --add_log_name "ResNet_1.2M" --max_epochs 10 --gpu_id 0
-
-# ~20M
-bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es1.yaml" --backbone resnet --visual_tokens_enabled false --add_log_name "ResNet_20M" --max_epochs 10 --gpu_id 0
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es1.yaml" --backbone resnet --visual_tokens_enabled false --add_log_name "ResNet" --max_epochs 10 --gpu_id 0
 
 
 ## Vanilla-ViT
-# ~0.5M
-bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es1.yaml" --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false --add_log_name "Vanilla-ViT_05M" --max_epochs 10 --gpu_id 1
 
-# ~1.2M
-bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es1.yaml" --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false --add_log_name "Vanilla-ViT_05M" --max_epochs 10 --gpu_id 1
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es1.yaml" --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false --add_log_name "Vanilla-ViT" --max_epochs 10 --gpu_id 1
 
-# ~20M
-bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es1.yaml" --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false --add_log_name "Vanilla-ViT_05M" --max_epochs 10 --gpu_id 1
 
 
 ## Grid-ViT
-# ~0.5M
 bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es1.yaml" --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum_vec --ope_enabled true --rpe_enabled true --rpe_type rope --num_reg_tokens 6 --add_log_name "Grid-ViT" --max_epochs 10 --gpu_id 2
 
-# ~1.2M
-
-# ~20M
 
 ## Pondering-Looped-ViT
 
-# ~0.5M
 bash ./jobs/run_experiment_nohup.sh --sweep_enabled true --sweep_config "configs/sweeps/beforearc/comp_es1.yaml" --backbone looped_vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --add_log_name "Pondering-Looped-ViT" --max_epochs 10 --gpu_id 3
 
-# ~1.2M
 
-# ~20M
 
 
 ### CompGen-3 ###
+
 ## ResNet
-# ~0.5M
 
-# ~1.2M
-
-# ~20M
 
 ## Vanilla-ViT
-# ~0.5M
 
-# ~1.2M
-
-# ~20M
 
 ## Grid-ViT
-# ~0.5M
 
-# ~1.2M
-
-# ~20M
 
 ## Pondering-Looped-ViT
-# ~0.5M
 
-# ~1.2M
 
-# ~20M
+
 
 ### EnvGen-5 ###
+
 ## ResNet
-# ~0.5M
 
-# ~1.2M
-
-# ~20M
 
 ## Vanilla-ViT
-# ~0.5M
 
-# ~1.2M
-
-# ~20M
 
 ## Grid-ViT
-# ~0.5M
 
-# ~1.2M
-
-# ~20M
 
 ## Pondering-Looped-ViT
-# ~0.5M
 
-# ~1.2M
-
-# ~20M

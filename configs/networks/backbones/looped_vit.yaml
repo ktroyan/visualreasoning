@@ -1,11 +1,11 @@
 backbone_network:
   name: 'looped_vit'
-  embed_dim: 256  # 384 for small, 768 for base; note that this should be divisible by the number of heads
-  num_heads: 8  # 8
+  embed_dim: 256  # 192 (for 0.5M params), 256 (for 1M params), 768 (for 20M params); 384 for small, 768 for base; note that this should be divisible by the number of heads
+  num_heads: 8  # 3 (for 0.5M params), 8 (for 1M params), 12 (for 20M params)
   mlp_ratio: 4  # used instead of explicit ff_dim
   qkv_bias: true
-  num_layers: 1 # number of non-tied layers
-  num_loops: 6  # number of loops if non-pondering
+  num_layers: 1 # 1 (for 1M params), 1 (for 1M params), 3 (for 20M params); number of non-tied layers
+  num_loops: 6  # number of loops if non-pondering/non-ACT
   ape_dropout_rate: 0.0
   attn_dropout_rate: 0.1
   attn_proj_dropout_rate: 0.0
