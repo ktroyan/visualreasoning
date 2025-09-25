@@ -1,5 +1,10 @@
 # visualreasoning
-Evaluating Neural Network architectures by studying Systematic Generalization, Sample Efficiency, Compositionality and ICL in Abstract Visual Reasoning (AVR) tasks from different data environments.
+Evaluating Neural Network architectures within studies of Compositional and Systematic Generalization, Sample Efficiency and ICL in Abstract Visual Reasoning (AVR) tasks from different data environments.
+
+## COGITAO
+Experiments can be run directly as per the examples in the ```/jobs``` folder. A run launched is tied to the configs' default arguments as well as those passed through the CLI (priority).
+
+# Other
 
 ## Repository Structure Overview
 ```
@@ -118,6 +123,8 @@ The model experiments can now be run using those datasets. See the section [Scri
 
 ---
 #### Data
+For COGITAO, data can be accessed through the associated HuggingFace repository.
+
 To be able to execute the different programs, correctly prepared data must be available. Such data are contained in a folder with dataset splits (of either JSON or CSV format depending on the data environment considered).
 
 More specifically, experiment folders containing data splits (i.e., train, val, test, and optionally gen_test) must exist in some folder of path ```./<data_env>/final_datasets/<study>/exp_setting_<index>/<experiment_name>```. 
