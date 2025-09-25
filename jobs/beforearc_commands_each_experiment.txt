@@ -197,6 +197,16 @@ bash ./jobs/run_experiment_nohup.sh --sweep_enabled false --data_env "BEFOREARC"
 bash ./jobs/run_experiment_nohup.sh --sweep_enabled false --data_env "BEFOREARC" --study "compositionality" --setting "exp_setting_3" --experiment experiment_4 --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false --add_log_name "ViT-vanilla" --max_epochs 10 --gpu_id 3
 bash ./jobs/run_experiment_nohup.sh --sweep_enabled false --data_env "BEFOREARC" --study "compositionality" --setting "exp_setting_3" --experiment experiment_5 --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false --add_log_name "ViT-vanilla" --max_epochs 10 --gpu_id 4
 
+# Setting_4
+...
+
+# Setting_5
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled false --data_env "BEFOREARC" --study "compositionality" --setting "exp_setting_5" --experiment experiment_1 --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false --add_log_name "ViT-vanilla" --max_epochs 10 --gpu_id 0
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled false --data_env "BEFOREARC" --study "compositionality" --setting "exp_setting_5" --experiment experiment_2 --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false --add_log_name "ViT-vanilla" --max_epochs 10 --gpu_id 1
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled false --data_env "BEFOREARC" --study "compositionality" --setting "exp_setting_5" --experiment experiment_3 --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false --add_log_name "ViT-vanilla" --max_epochs 10 --gpu_id 2
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled false --data_env "BEFOREARC" --study "compositionality" --setting "exp_setting_5" --experiment experiment_4 --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false --add_log_name "ViT-vanilla" --max_epochs 10 --gpu_id 3
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled false --data_env "BEFOREARC" --study "compositionality" --setting "exp_setting_5" --experiment experiment_5 --backbone vit --visual_tokens_enabled false --ape_enabled true --ape_type learn --ape_mixer sum --ope_enabled false --rpe_enabled false --add_log_name "ViT-vanilla" --max_epochs 10 --gpu_id 4
+
 
 ## EnvGen
 
@@ -314,6 +324,16 @@ bash ./jobs/run_experiment_nohup.sh --sweep_enabled false --data_env "BEFOREARC"
 bash ./jobs/run_experiment_nohup.sh --sweep_enabled false --data_env "BEFOREARC" --study "compositionality" --setting "exp_setting_3" --experiment experiment_4 --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum_vec --ope_enabled true --rpe_enabled true --rpe_type rope --num_reg_tokens 6 --add_log_name "ViT" --max_epochs 10 --gpu_id 3
 bash ./jobs/run_experiment_nohup.sh --sweep_enabled false --data_env "BEFOREARC" --study "compositionality" --setting "exp_setting_3" --experiment experiment_5 --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum_vec --ope_enabled true --rpe_enabled true --rpe_type rope --num_reg_tokens 6 --add_log_name "ViT" --max_epochs 10 --gpu_id 4
 
+# Setting 4
+...
+
+# Setting 5
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled false --data_env "BEFOREARC" --study "compositionality" --setting "exp_setting_5" --experiment experiment_1 --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum_vec --ope_enabled true --rpe_enabled true --rpe_type rope --num_reg_tokens 6 --add_log_name "ViT" --max_epochs 10 --gpu_id 0
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled false --data_env "BEFOREARC" --study "compositionality" --setting "exp_setting_5" --experiment experiment_2 --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum_vec --ope_enabled true --rpe_enabled true --rpe_type rope --num_reg_tokens 6 --add_log_name "ViT" --max_epochs 10 --gpu_id 1
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled false --data_env "BEFOREARC" --study "compositionality" --setting "exp_setting_5" --experiment experiment_3 --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum_vec --ope_enabled true --rpe_enabled true --rpe_type rope --num_reg_tokens 6 --add_log_name "ViT" --max_epochs 10 --gpu_id 2
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled false --data_env "BEFOREARC" --study "compositionality" --setting "exp_setting_5" --experiment experiment_4 --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum_vec --ope_enabled true --rpe_enabled true --rpe_type rope --num_reg_tokens 6 --add_log_name "ViT" --max_epochs 10 --gpu_id 3
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled false --data_env "BEFOREARC" --study "compositionality" --setting "exp_setting_5" --experiment experiment_5 --backbone vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer weighted_sum_vec --ope_enabled true --rpe_enabled true --rpe_type rope --num_reg_tokens 6 --add_log_name "ViT" --max_epochs 10 --gpu_id 4
+
 
 ## EnvGen
 
@@ -428,6 +448,17 @@ bash ./jobs/run_experiment_nohup.sh --sweep_enabled false --data_env "BEFOREARC"
 bash ./jobs/run_experiment_nohup.sh --sweep_enabled false --data_env "BEFOREARC" --study "compositionality" --setting "exp_setting_3" --experiment "experiment_3" --backbone looped_vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --add_log_name "Pondering-Looped-ViT" --max_epochs 10 --gpu_id 0
 bash ./jobs/run_experiment_nohup.sh --sweep_enabled false --data_env "BEFOREARC" --study "compositionality" --setting "exp_setting_3" --experiment "experiment_4" --backbone looped_vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --add_log_name "Pondering-Looped-ViT" --max_epochs 10 --gpu_id 0
 bash ./jobs/run_experiment_nohup.sh --sweep_enabled false --data_env "BEFOREARC" --study "compositionality" --setting "exp_setting_3" --experiment "experiment_5" --backbone looped_vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --add_log_name "Pondering-Looped-ViT" --max_epochs 10 --gpu_id 0
+
+# Setting 4
+...
+
+# Setting 5
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled false --data_env "BEFOREARC" --study "compositionality" --setting "exp_setting_5" --experiment "experiment_1" --backbone looped_vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --add_log_name "Pondering-Looped-ViT" --max_epochs 10 --gpu_id 0
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled false --data_env "BEFOREARC" --study "compositionality" --setting "exp_setting_5" --experiment "experiment_2" --backbone looped_vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --add_log_name "Pondering-Looped-ViT" --max_epochs 10 --gpu_id 0
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled false --data_env "BEFOREARC" --study "compositionality" --setting "exp_setting_5" --experiment "experiment_3" --backbone looped_vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --add_log_name "Pondering-Looped-ViT" --max_epochs 10 --gpu_id 0
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled false --data_env "BEFOREARC" --study "compositionality" --setting "exp_setting_5" --experiment "experiment_4" --backbone looped_vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --add_log_name "Pondering-Looped-ViT" --max_epochs 10 --gpu_id 0
+bash ./jobs/run_experiment_nohup.sh --sweep_enabled false --data_env "BEFOREARC" --study "compositionality" --setting "exp_setting_5" --experiment "experiment_5" --backbone looped_vit --visual_tokens_enabled true --ape_enabled true --ape_type 2dsincos --ape_mixer sum --ope_enabled false --rpe_enabled true --rpe_type rope --add_log_name "Pondering-Looped-ViT" --max_epochs 10 --gpu_id 0
+
 
 
 ## EnvGen
