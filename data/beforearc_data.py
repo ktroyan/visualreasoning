@@ -450,7 +450,7 @@ class BEFOREARCDataModule(DataModuleBase):
             exp_name = exp_name + f"/{data_config.dataset_specifics}"
 
         # Dataset path (using HuggingFace datasets)
-        if "Sample_Efficiency" in study or "GridSize" in study:
+        if "Sample_Efficiency" in study or "GridSize" in study or "CompGen_ScalingSamples" in study:
             dataset_path = f"supplementary/{study}/{setting}/{exp_name}"
         else:
             dataset_path = f"{study}/{setting}/{exp_name}"
