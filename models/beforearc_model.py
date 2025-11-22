@@ -352,13 +352,27 @@ class VisReasModel(pl.LightningModule):
         acc_grid_pad = (torch.all(preds == y_flat, dim=1).float().mean()).unsqueeze(0)
         acc_grid_nopad = (torch.all((preds == y_flat) | ~mask, dim=1).float().mean()).unsqueeze(0)
 
+        # Per-pixel accuracy on object cells (i.e., only cells with values in {1, ..., 9})
+        # A cell part of an object is a value between 1 and 9. Anything different is background (0.) or Visual Tokens (VTs) (10.+)
+        # TODO: If a ground-truth grid contains no object cells (i.e., y_flat has no values in 1..9),
+        #       this metric becomes poorly defined. Currently, we force accuracy to be 0.0 in such cases,
+        #       but this can bias averages downward when such cases occur. 
+        #       In the future, either:
+        #           (1) skip such samples when aggregating (use NaN here and remove them when computing the batch average); or
+        #           (2) accumulate numerator/denominator across steps and compute a ratio-of-sums.
+        obj_mask = ((y_flat >= 1) & (y_flat <= 9)).float()
+        den = obj_mask.sum()
+        acc_obj_pixels = (((preds == y_flat).float() * obj_mask).sum() / den.clamp_min(1)).unsqueeze(0)
+        acc_obj_pixels = acc_obj_pixels.masked_fill(den == 0, 0.0)  # temporary fallback: 0.0 when no object pixels. Although this should not occur with COGITAO current experiments
+
         # Store metrics in logs
         logs.update({
             "loss_no_pad": loss_no_pad,
             "acc": acc_with_pad,
             "acc_no_pad": acc_no_pad,
             "acc_grid": acc_grid_pad,
-            "acc_grid_no_pad": acc_grid_nopad
+            "acc_grid_no_pad": acc_grid_nopad,
+            "acc_obj_pixels": acc_obj_pixels
         })
 
         return loss, logs, preds
