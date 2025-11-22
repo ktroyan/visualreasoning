@@ -370,6 +370,9 @@ def get_best_model_from_training(model, callbacks):
     
     if best_model_ckpt_path == "":
         best_model = model
+        # Save this model as best model ckpt path
+        best_model_ckpt_path = callbacks['model_checkpoint'].last_model_path
+        logger.info("Somehow, no best model checkpoint found during training. Using the last model checkpoint as best model.")
     else:
         model_module = model.__class__
         best_model = model_module.load_from_checkpoint(checkpoint_path=best_model_ckpt_path)
@@ -414,6 +417,7 @@ def main(config, training_folder, datamodule, model, exp_logger=None):
             log_message += f"{k}: {v}" + "\n"
     logger.info(log_message)
 
+    # ID Validation accuracy at best epoch
     best_val_acc = np.nanmax(metrics['metrics/val_acc'] + [0])
     val_acc_best_epoch = (np.nanargmax(metrics['metrics/val_acc'] + [0]) + 1)
     logger.info(f"Best val accuracy: {best_val_acc} at epoch {val_acc_best_epoch}")
@@ -424,6 +428,7 @@ def main(config, training_folder, datamodule, model, exp_logger=None):
         'val_acc_best_epoch': val_acc_best_epoch
     }
 
+    # OOD Validation accuracy at best epoch
     if config.data.validate_in_and_out_domain:
         best_gen_val_acc = np.nanmax(metrics['metrics/gen_val_acc_epoch'] + [0])
         gen_val_acc_best_epoch = (np.nanargmax(metrics['metrics/gen_val_acc_epoch'] + [0]) + 1)
@@ -433,7 +438,18 @@ def main(config, training_folder, datamodule, model, exp_logger=None):
             'gen_val_acc_best_epoch': gen_val_acc_best_epoch
         })
 
+        if config.base.data_env in ["REARC", "BEFOREARC"]:
+            # OOD Validation grid accuracy at best epoch
+            best_gen_val_grid_acc = np.nanmax(metrics['metrics/gen_val_acc_grid_epoch'] + [0])
+            gen_val_grid_acc_best_epoch = (np.nanargmax(metrics['metrics/gen_val_acc_grid_epoch'] + [0]) + 1)
+            logger.info(f"Best OOD val grid accuracy: {best_gen_val_grid_acc} at epoch {gen_val_grid_acc_best_epoch}")
+            train_results.update({
+                'best_gen_val_grid_acc': best_gen_val_grid_acc,
+                'gen_val_grid_acc_best_epoch': gen_val_grid_acc_best_epoch
+            })
+
     if config.base.data_env in ["REARC", "BEFOREARC"]:
+        # ID Validation grid accuracy at best epoch
         best_val_grid_acc = np.nanmax(metrics['metrics/val_acc_grid_epoch'] + [0])
         val_grid_acc_best_epoch = (np.nanargmax(metrics['metrics/val_acc_grid_epoch'] + [0]) + 1)
         logger.info(f"Best val grid accuracy: {best_val_grid_acc} at epoch {val_grid_acc_best_epoch}")
