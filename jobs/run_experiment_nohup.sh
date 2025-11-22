@@ -27,6 +27,7 @@ WANDB_SWEEP_CONFIG=""
 DEV_RUN=""
 ADDI_LOG_NAME=""
 CHECK_DATA_CONTAMINATION=""
+USE_SLURM=""
 
 # Parse CLI arguments
 while [[ $# -gt 0 ]]; do
@@ -57,6 +58,7 @@ while [[ $# -gt 0 ]]; do
         --dev_run) DEV_RUN="$2"; shift 2 ;;
         --add_log_name) ADDI_LOG_NAME="$2"; shift 2 ;;
         --check_data_contamination) CHECK_DATA_CONTAMINATION="$2"; shift 2 ;;
+        --slurm) USE_SLURM="1"; shift 1 ;;
         *)
             echo "Unknown option: $1"
             exit 1
@@ -112,14 +114,16 @@ CMD="nohup uv run experiment.py"
 [[ -n "$DEV_RUN" ]] && CMD+=" experiment.dev_run=\"${DEV_RUN}\""
 [[ -n "$CHECK_DATA_CONTAMINATION" ]] && CMD+=" inference.check_data_contamination=${CHECK_DATA_CONTAMINATION}"
 
-CMD+=" > \"${LOG_FILE}\" 2>&1 &"
-
-# Echo what command we try to run
-echo "Executing command: $CMD"
-
-# Run command
-eval $CMD
-
-# Echo messages
-echo "Launched experiment with PID $!"
-echo "Logs are being written to: ${LOG_FILE}"
+# Launch either under SLURM or like before with nohup and bash script
+if [[ -n "$USE_SLURM" ]]; then
+    echo "Running under SLURM; letting SLURM assign GPUs; writing a copy of logs to: ${LOG_FILE}"
+    echo "Executing: srun -u ${LAUNCH}"
+    # We use tee so we still get our familiar log file; SLURM also captures stdout/stderr
+    srun -u bash -lc "${LAUNCH}" | tee -a "${LOG_FILE}"
+else
+    CMD="nohup ${LAUNCH} > \"${LOG_FILE}\" 2>&1 &"
+    echo "Executing command: $CMD"
+    eval $CMD
+    echo "Launched experiment with PID $!"
+    echo "Logs are being written to: ${LOG_FILE}"
+fi
