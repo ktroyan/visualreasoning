@@ -467,9 +467,10 @@ class BEFOREARCDataModule(DataModuleBase):
         val_set_df = val_set_parquet['data'].to_pandas()
         test_set_df = test_set_parquet['data'].to_pandas()
 
-        # TODO: Remove
-        # Take a subset of the dataset for testing purposes
-        # train_set_df = train_set_df.sample(n=10000, random_state=42)
+        # Possibly take a subset of the training set as per the config
+        num_train_samples = len(train_set_df)
+        if data_config.max_train_samples < num_train_samples and data_config.max_train_samples > 0:
+            train_set_df = train_set_df.sample(n=data_config.max_train_samples, random_state=42)
 
         dataset_splits = [train_set_df, val_set_df, test_set_df]
 
