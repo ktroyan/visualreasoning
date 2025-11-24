@@ -310,6 +310,7 @@ def calc_table_averages(run_data_df: pd.DataFrame, filename: str = None) -> None
 
     # Filter metrics to only those that exist in the dataframe
     available_metrics = [m for m in metrics if m in run_data_df.columns]
+
     if available_metrics:
         run_data_df = run_data_df.groupby(unique_groups)[available_metrics].mean().reset_index()
     else:
@@ -320,7 +321,7 @@ def calc_table_averages(run_data_df: pd.DataFrame, filename: str = None) -> None
     # Output values -> main table
     if available_metrics:
         aggregated = run_data_df.groupby(grouping)[available_metrics].mean().reset_index()
-        aggregated_std = run_data_df.groupby(grouping)[available_metrics].std().reset_index()
+        aggregated_std = run_data_df.groupby(grouping)[available_metrics].sem().reset_index()
 
         # Add model_definitions and exp_specifics to grouping for display if available
         display_grouping = grouping.copy()
@@ -353,7 +354,14 @@ def calc_table_averages(run_data_df: pd.DataFrame, filename: str = None) -> None
             combined_table[metric] = aggregated[metric].apply(lambda x: f"{x * 100:.1f}") + " ± " + aggregated_std[
                 metric].apply(lambda x: f"{x * 100:.1f}")
 
-        # Reorder columns: data_env, model, model_definitions, study, setting, name, exp_specifics, then metrics
+        # Add delta column ONLY to the final combined_table if exactly two metrics exist
+        delta_column_to_add = []
+        if len(available_metrics) == 2:
+            metric1, metric2 = available_metrics[0], available_metrics[1]
+            combined_table['delta'] = (aggregated[metric1] - aggregated[metric2]).apply(lambda x: f"{x * 100:.1f}")
+            delta_column_to_add.append('delta')
+
+        # Reorder columns
         column_order = []
         if 'data_env' in combined_table.columns:
             column_order.append('data_env')
@@ -369,8 +377,9 @@ def calc_table_averages(run_data_df: pd.DataFrame, filename: str = None) -> None
             column_order.append('name')
         if 'exp_specifics' in combined_table.columns:
             column_order.append('exp_specifics')
-        # Add metrics at the end
+
         column_order.extend(available_metrics)
+        column_order.extend(delta_column_to_add)
 
         combined_table = combined_table[column_order]
 
@@ -395,7 +404,7 @@ def calc_table_averages(run_data_df: pd.DataFrame, filename: str = None) -> None
             display_grouping_exp.append('exp_specifics')
 
         aggregated = run_data_df.groupby(display_grouping_exp)[available_metrics].mean().reset_index()
-        aggregated_std = run_data_df.groupby(display_grouping_exp)[available_metrics].std().reset_index()
+        aggregated_std = run_data_df.groupby(display_grouping_exp)[available_metrics].sem().reset_index()
 
         # Sort by the specified order
         aggregated = aggregated.sort_values(sort_cols).reset_index(drop=True)
@@ -407,7 +416,14 @@ def calc_table_averages(run_data_df: pd.DataFrame, filename: str = None) -> None
             combined_table[metric] = aggregated[metric].apply(lambda x: f"{x * 100:.1f}") + " ± " + aggregated_std[
                 metric].apply(lambda x: f"{x * 100:.1f}")
 
-        # Reorder columns: data_env, model, model_definitions, study, setting, name, exp_specifics, then metrics
+        # Add delta column to per experiment table AFTER aggregation
+        delta_column_to_add = []  # reset the list
+        if len(available_metrics) == 2:
+            metric1, metric2 = available_metrics[0], available_metrics[1]
+            combined_table['delta'] = (aggregated[metric1] - aggregated[metric2]).apply(lambda x: f"{x * 100:.1f}")
+            delta_column_to_add.append('delta')
+
+        # Reorder columns
         column_order = []
         if 'data_env' in combined_table.columns:
             column_order.append('data_env')
@@ -423,8 +439,9 @@ def calc_table_averages(run_data_df: pd.DataFrame, filename: str = None) -> None
             column_order.append('name')
         if 'exp_specifics' in combined_table.columns:
             column_order.append('exp_specifics')
-        # Add metrics at the end
+
         column_order.extend(available_metrics)
+        column_order.extend(delta_column_to_add)
 
         combined_table = combined_table[column_order]
 
