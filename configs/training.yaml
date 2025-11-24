@@ -6,7 +6,7 @@ training:
   # Callbacks
   metrics_callback_verbose: 1 # verbosity level: 0 for no verbose, 1 for more verbose, 2 for most verbose
   early_stopping:
-    enabled: true
+    enabled: false
     monitored_metric: ${resolve_if_then_else_validate_in_and_out_domain:${data.validate_in_and_out_domain}, gen_val_loss, val_loss}  # choices: 'val_acc', 'val_loss'
     es_patience: ${resolve_if_then_else:${training.early_stopping.enabled},10} # number of epochs for patience of early stopping
   progress_bar:
