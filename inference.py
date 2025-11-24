@@ -163,41 +163,47 @@ def main(config, inference_folder, datamodule, model=None, model_ckpt_path=None,
     else:
         test_dl, gen_test_dl = tdls, None
 
-    # Collect ALL inputs from each dataloader
+    ## Save inputs/targets/predictions as lists of batches
+    # Collect all input batches
     with torch.inference_mode():
-        test_inputs = torch.cat([batch[0].detach().cpu() for batch in test_dl], dim=0)
+        test_inputs_batches = [batch[0].detach().cpu() for batch in test_dl]
         if gen_test_dl is not None:
-            gen_test_inputs = torch.cat([batch[0].detach().cpu() for batch in gen_test_dl], dim=0)
+            gen_test_inputs_batches = [batch[0].detach().cpu() for batch in gen_test_dl]
 
-    # Save the model inputs, test predictions and targets as torch tensors
-    test_inputs_path  = os.path.join(inference_folder, "test_inputs.pt")
-    test_targets_path = os.path.join(inference_folder, "test_targets.pt")
-    test_preds_path   = os.path.join(inference_folder, "test_predictions.pt")
+    # Ensure model.* lists are CPU tensors and lists
+    test_targets_batches = [t.detach().cpu() if isinstance(t, torch.Tensor) else t for t in model.test_targets]
+    test_preds_batches   = [p.detach().cpu() if isinstance(p, torch.Tensor) else p for p in model.test_preds]
 
-    torch.save(test_inputs, test_inputs_path)
-    torch.save(torch.as_tensor(model.test_targets).detach().cpu(), test_targets_path)
-    torch.save(torch.as_tensor(model.test_preds).detach().cpu(),   test_preds_path)
+    test_inputs_path  = os.path.join(inference_folder, "test_inputs_batches.pt")
+    test_targets_path = os.path.join(inference_folder, "test_targets_batches.pt")
+    test_preds_path   = os.path.join(inference_folder, "test_predictions_batches.pt")
+
+    # Save lists directly. Note that torch.save handles arbitrary Python objects
+    torch.save(test_inputs_batches, test_inputs_path)
+    torch.save(test_targets_batches, test_targets_path)
+    torch.save(test_preds_batches, test_preds_path)
 
     if config.data.use_gen_test_set:
-        gen_inputs_path  = os.path.join(inference_folder, "gen_test_inputs.pt")
-        gen_targets_path = os.path.join(inference_folder, "gen_test_targets.pt")
-        gen_preds_path   = os.path.join(inference_folder, "gen_test_predictions.pt")
+        gen_targets_batches = [t.detach().cpu() if isinstance(t, torch.Tensor) else t for t in model.gen_test_targets]
+        gen_preds_batches   = [p.detach().cpu() if isinstance(p, torch.Tensor) else p for p in model.gen_test_preds]
 
-        torch.save(gen_test_inputs, gen_inputs_path)
-        torch.save(torch.as_tensor(model.gen_test_targets).detach().cpu(), gen_targets_path)
-        torch.save(torch.as_tensor(model.gen_test_preds).detach().cpu(),   gen_preds_path)
+        gen_inputs_path  = os.path.join(inference_folder, "gen_test_inputs_batches.pt")
+        gen_targets_path = os.path.join(inference_folder, "gen_test_targets_batches.pt")
+        gen_preds_path   = os.path.join(inference_folder, "gen_test_predictions_batches.pt")
 
-        if exp_logger is not None:
-            exp_logger.experiment.save(gen_inputs_path)
-            exp_logger.experiment.save(gen_targets_path)
-            exp_logger.experiment.save(gen_preds_path)
+        torch.save(gen_test_inputs_batches, gen_inputs_path)
+        torch.save(gen_targets_batches, gen_targets_path)
+        torch.save(gen_preds_batches, gen_preds_path)
 
-
-    # Also upload them to W&B
+    # Save to WandB (if enabled)
     if exp_logger is not None:
         exp_logger.experiment.save(test_inputs_path)
         exp_logger.experiment.save(test_targets_path)
         exp_logger.experiment.save(test_preds_path)
+        if config.data.use_gen_test_set:
+            exp_logger.experiment.save(gen_inputs_path)
+            exp_logger.experiment.save(gen_targets_path)
+            exp_logger.experiment.save(gen_preds_path)
 
     # Update all_test_results with input, target and prediction file paths
     all_test_results.update({
