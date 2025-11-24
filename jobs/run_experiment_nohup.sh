@@ -66,12 +66,12 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Set CUDA device only if provided
-if [[ -n "$GPU_ID" ]]; then
+# Only set CUDA_VISIBLE_DEVICES when NOT under SLURM
+if [[ -n "$GPU_ID" && -z "$USE_SLURM" ]]; then
     export CUDA_VISIBLE_DEVICES=${GPU_ID}
 fi
 
-# Generate timestamp: format day-month-hour_min
+# Generate timestamp: format day-month-hour_min_sec
 TIMESTAMP=$(date +"%d-%m-%H_%M_%S")
 
 # Determine log file name
@@ -85,40 +85,40 @@ else
     LOG_FILE="output_${DATA_ENV}_${STUDY}_${SETTING}_${EXPERIMENT}_${BACKBONE}_${HEAD}_${ADDI_LOG_NAME}_${TIMESTAMP}.log"
 fi
 
-# Construct command
-CMD="nohup uv run experiment.py"
+# Construct launch command (whether using SLURM or nohup) 
+LAUNCH="uv run experiment.py"
 
-[[ -n "$SEED" ]] && CMD+=" base.seed=${SEED}"    # seed is int, so no quotes
-[[ -n "$GPU_ID" ]] && CMD+=" base.gpu_id=${GPU_ID}"  # gpu_id is int, so no quotes
-[[ -n "$DATA_ENV" ]] && CMD+=" base.data_env=\"${DATA_ENV}\""
-[[ -n "$STUDY" ]] && CMD+=" experiment.study=\"${STUDY}\""
-[[ -n "$SETTING" ]] && CMD+=" experiment.setting=\"${SETTING}\""
-[[ -n "$EXPERIMENT" ]] && CMD+=" experiment.name=\"${EXPERIMENT}\""
-[[ -n "$USE_GEN_TEST_SET" ]] && CMD+=" data.use_gen_test_set=\"${USE_GEN_TEST_SET}\""
-[[ -n "$VALIDATE_IN_AND_OUT_DOMAIN" ]] && CMD+=" data.validate_in_and_out_domain=\"${VALIDATE_IN_AND_OUT_DOMAIN}\""
-[[ -n "$MAX_EPOCHS" ]] && CMD+=" training.max_epochs=${MAX_EPOCHS}" # max_epochs is int, so no quotes
-[[ -n "$BACKBONE" ]] && CMD+=" model.backbone=\"${BACKBONE}\""
-[[ -n "$HEAD" ]] && CMD+=" model.head=\"${HEAD}\""
-[[ -n "$VISUAL_TOKENS_ENABLED" ]] && CMD+=" model.visual_tokens.enabled=\"${VISUAL_TOKENS_ENABLED}\""
-[[ -n "$APE_ENABLED" ]] && CMD+=" model.ape.enabled=\"${APE_ENABLED}\""
-[[ -n "$APE_TYPE" ]] && CMD+=" model.ape.ape_type=\"${APE_TYPE}\""
-[[ -n "$APE_MIXER" ]] && CMD+=" model.ape.mixer=\"${APE_MIXER}\""
-[[ -n "$OPE_ENABLED" ]] && CMD+=" model.ope.enabled=\"${OPE_ENABLED}\""
-[[ -n "$RPE_ENABLED" ]] && CMD+=" model.rpe.enabled=\"${RPE_ENABLED}\""
-[[ -n "$RPE_TYPE" ]] && CMD+=" model.rpe.rpe_type=\"${RPE_TYPE}\""
-[[ -n "$NUM_REG_TOKENS" ]] && CMD+=" model.num_reg_tokens=${NUM_REG_TOKENS}"    # num_reg_tokens is int, so no quotes
-[[ -n "$USE_TASK_EMBEDDING" ]] && CMD+=" model.task_embedding.enabled=\"${USE_TASK_EMBEDDING}\""
-[[ -n "$WANDB_PROJECT_NAME" ]] && CMD+=" wandb.wandb_project_name=\"${WANDB_PROJECT_NAME}\""
-[[ -n "$WANDB_SWEEP_ENABLED" ]] && CMD+=" wandb.sweep.enabled=\"${WANDB_SWEEP_ENABLED}\""
-[[ -n "$WANDB_SWEEP_CONFIG" ]] && CMD+=" wandb.sweep.config=\"${WANDB_SWEEP_CONFIG}\""
-[[ -n "$DEV_RUN" ]] && CMD+=" experiment.dev_run=\"${DEV_RUN}\""
-[[ -n "$CHECK_DATA_CONTAMINATION" ]] && CMD+=" inference.check_data_contamination=${CHECK_DATA_CONTAMINATION}"
+[[ -n "$SEED" ]] && LAUNCH+=" base.seed=${SEED}"
+[[ -n "$GPU_ID" ]] && LAUNCH+=" base.gpu_id=${GPU_ID}"
+[[ -n "$DATA_ENV" ]] && LAUNCH+=" base.data_env=\"${DATA_ENV}\""
+[[ -n "$STUDY" ]] && LAUNCH+=" experiment.study=\"${STUDY}\""
+[[ -n "$SETTING" ]] && LAUNCH+=" experiment.setting=\"${SETTING}\""
+[[ -n "$EXPERIMENT" ]] && LAUNCH+=" experiment.name=\"${EXPERIMENT}\""
+[[ -n "$USE_GEN_TEST_SET" ]] && LAUNCH+=" data.use_gen_test_set=\"${USE_GEN_TEST_SET}\""
+[[ -n "$VALIDATE_IN_AND_OUT_DOMAIN" ]] && LAUNCH+=" data.validate_in_and_out_domain=\"${VALIDATE_IN_AND_OUT_DOMAIN}\""
+[[ -n "$MAX_EPOCHS" ]] && LAUNCH+=" training.max_epochs=${MAX_EPOCHS}"
+[[ -n "$BACKBONE" ]] && LAUNCH+=" model.backbone=\"${BACKBONE}\""
+[[ -n "$HEAD" ]] && LAUNCH+=" model.head=\"${HEAD}\""
+[[ -n "$VISUAL_TOKENS_ENABLED" ]] && LAUNCH+=" model.visual_tokens.enabled=\"${VISUAL_TOKENS_ENABLED}\""
+[[ -n "$APE_ENABLED" ]] && LAUNCH+=" model.ape.enabled=\"${APE_ENABLED}\""
+[[ -n "$APE_TYPE" ]] && LAUNCH+=" model.ape.ape_type=\"${APE_TYPE}\""
+[[ -n "$APE_MIXER" ]] && LAUNCH+=" model.ape.mixer=\"${APE_MIXER}\""
+[[ -n "$OPE_ENABLED" ]] && LAUNCH+=" model.ope.enabled=\"${OPE_ENABLED}\""
+[[ -n "$RPE_ENABLED" ]] && LAUNCH+=" model.rpe.enabled=\"${RPE_ENABLED}\""
+[[ -n "$RPE_TYPE" ]] && LAUNCH+=" model.rpe.rpe_type=\"${RPE_TYPE}\""
+[[ -n "$NUM_REG_TOKENS" ]] && LAUNCH+=" model.num_reg_tokens=${NUM_REG_TOKENS}"
+[[ -n "$USE_TASK_EMBEDDING" ]] && LAUNCH+=" model.task_embedding.enabled=\"${USE_TASK_EMBEDDING}\""
+[[ -n "$WANDB_PROJECT_NAME" ]] && LAUNCH+=" wandb.wandb_project_name=\"${WANDB_PROJECT_NAME}\""
+[[ -n "$WANDB_SWEEP_ENABLED" ]] && LAUNCH+=" wandb.sweep.enabled=\"${WANDB_SWEEP_ENABLED}\""
+[[ -n "$WANDB_SWEEP_CONFIG" ]] && LAUNCH+=" wandb.sweep.config=\"${WANDB_SWEEP_CONFIG}\""
+[[ -n "$DEV_RUN" ]] && LAUNCH+=" experiment.dev_run=\"${DEV_RUN}\""
+[[ -n "$CHECK_DATA_CONTAMINATION" ]] && LAUNCH+=" inference.check_data_contamination=${CHECK_DATA_CONTAMINATION}"
 
-# Launch either under SLURM or like before with nohup and bash script
+# Launch either under SLURM or like before with nohup
 if [[ -n "$USE_SLURM" ]]; then
-    echo "Running under SLURM; letting SLURM assign GPUs; writing a copy of logs to: ${LOG_FILE}"
+    echo "Running under SLURM; writing a copy of logs to: ${LOG_FILE}"
     echo "Executing: srun -u ${LAUNCH}"
-    # We use tee so we still get our familiar log file; SLURM also captures stdout/stderr
+    # SLURM manages the process; tee also writes a copy to your familiar log file
     srun -u bash -lc "${LAUNCH}" | tee -a "${LOG_FILE}"
 else
     CMD="nohup ${LAUNCH} > \"${LOG_FILE}\" 2>&1 &"
