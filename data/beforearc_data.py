@@ -136,7 +136,8 @@ class BEFOREARCDataset(Dataset):
                                                             'translate_right': max_token_id + 18,
                                                             'fill_holes_same_color': max_token_id + 19,
                                                             'empty_inside_pixels': max_token_id + 20,
-                                                            'double_down': max_token_id + 21
+                                                            'double_down': max_token_id + 21,
+                                                            'translate_left': max_token_id + 22
                                                             }
 
             logger.info(f"The token IDs for the transformations are:\n{self.elementary_transformations_to_token_ids}")
@@ -435,8 +436,11 @@ class BEFOREARCDataModule(DataModuleBase):
         if "compositionality" in study:  # to match the local naming convention of the studies
             study = study.replace('compositionality', 'CompGen')
         
-        if ('CompGen' in study or 'EnvGen' in study) and data_config.dataset_specifics != '':
+        if ('CompGen' in study or 'EnvGen' in study) and 'grid_size' in data_config.dataset_specifics:
             study = study + "_GridSize"
+
+        if ('CompGen' in study) and 'scaling' in data_config.dataset_specifics:
+            study = study + "_Scaling"
 
         if "sample-efficiency" in study:
             study = study.replace('sample-efficiency', 'Sample_Efficiency')
@@ -446,21 +450,29 @@ class BEFOREARCDataModule(DataModuleBase):
 
         # Get experiment name from path
         exp_name = data_config.dataset_dir.split('/')[-1]
-        if data_config.dataset_specifics != '':
+        if ('CompGen' in study or 'EnvGen' in study) and 'grid_size' in data_config.dataset_specifics:
             exp_name = exp_name + f"/{data_config.dataset_specifics}"
 
         # Dataset path (using HuggingFace datasets)
-        if "Sample_Efficiency" in study or "GridSize" in study or "CompGen_ScalingSamples" in study:
+        # Examples:
+        # - For the original experiments: yassinetb/COGITAO/tree/main/CompGen/exp_setting_1/experiment_1
+        # - For CompGen scaling experiments: yassinetb/COGITAO/tree/main/supplementary/CompGen_Scaling/exp_setting_1/experiment_0_100k
+        # - For CompGen grid size experiments: yassinetb/COGITAO/tree/main/supplementary/CompGen_GridSize/exp_setting_1/experiment_1/grid_size_30
+        # - For Sample-Efficiency experiments: yassinetb/COGITAO/tree/main/supplementary/Sample_Efficiency/exp_setting_1/experiment_1
+        if "Sample_Efficiency" in study or "GridSize" in study or "CompGen_Scaling" in study:
             dataset_path = f"supplementary/{study}/{setting}/{exp_name}"
         else:
             dataset_path = f"{study}/{setting}/{exp_name}"
 
-        # HF base path
-        base_repo = "yassinetb/COGITAO" # HF repo
+        # HuggingFace dataset path
+        base_repo = "yassinetb/COGITAO"  # HF repo
+        hf_path   = f"hf://datasets/{base_repo}/{dataset_path}"
+        logger.info(f"Loading dataset from HuggingFace at path: {hf_path}")
 
-        train_set_parquet = load_dataset(base_repo, data_files={"data": f"{dataset_path}/train.parquet"})
-        val_set_parquet = load_dataset(base_repo, data_files={"data": f"{dataset_path}/val.parquet"})
-        test_set_parquet = load_dataset(base_repo, data_files={"data": f"{dataset_path}/test.parquet"})
+        # Load from subfolders in a dataset repo
+        train_set_parquet = load_dataset("parquet", data_files={"data": f"{hf_path}/train.parquet"})
+        val_set_parquet   = load_dataset("parquet", data_files={"data": f"{hf_path}/val.parquet"})
+        test_set_parquet  = load_dataset("parquet", data_files={"data": f"{hf_path}/test.parquet"})
 
         # Convert parquet to pandas dataframe
         train_set_df = train_set_parquet['data'].to_pandas()
@@ -475,12 +487,12 @@ class BEFOREARCDataModule(DataModuleBase):
         dataset_splits = [train_set_df, val_set_df, test_set_df]
 
         if data_config.use_gen_test_set:
-            gen_test_set_parquet = load_dataset(base_repo, data_files={"data": f"{dataset_path}/test_ood.parquet"})
+            gen_test_set_parquet = load_dataset("parquet", data_files={"data": f"{hf_path}/test_ood.parquet"})
             gen_test_set_df = gen_test_set_parquet['data'].to_pandas()
             dataset_splits.append(gen_test_set_df)
 
             if data_config.validate_in_and_out_domain:
-                gen_val_set_parquet = load_dataset(base_repo, data_files={"data": f"{dataset_path}/val_ood.parquet"})
+                gen_val_set_parquet = load_dataset("parquet", data_files={"data": f"{hf_path}/val_ood.parquet"})
                 gen_val_set_df = gen_val_set_parquet['data'].to_pandas()
                 dataset_splits.append(gen_val_set_df)
 
@@ -523,7 +535,7 @@ class BEFOREARCDataModule(DataModuleBase):
 
         if model_config.ope.enabled:
             use_grid_object_ids = True
-            logger.info(f"OPE enabled. We will create grid object ids for the input grid.")
+            logger.info("OPE enabled. We will create grid object ids for the input grid.")
         else:
             use_grid_object_ids = False
 
