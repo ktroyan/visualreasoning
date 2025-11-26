@@ -37,7 +37,7 @@ class ReconstructionLoss(nn.Module):
             p_t = p_list[t].unsqueeze(-1)
             loss_t = (p_t * self.loss_fn(logits_t, y, reduction='none')).mean()
             total_loss += loss_t
-
+        
         return total_loss
 
 class RegularizationLoss(nn.Module):
@@ -49,7 +49,7 @@ class RegularizationLoss(nn.Module):
         That is, the model is incentivized to perform 1/lambda_p steps since we attribute non-zero probabilities for all steps.
         """
         super().__init__()
-
+        
         # Build (truncated) geometric prior: p_g[k] = (1-lambda_p)^k * lambda_p
         p_g = torch.zeros(max_steps)
         not_halted = 1.0    # for (1-lambda_p)^k, so start with 1.0 at k=0 for full mass
@@ -61,21 +61,45 @@ class RegularizationLoss(nn.Module):
             else:
                 p_g[k] = not_halted * lambda_p
                 not_halted *= (1 - lambda_p)
-
+        
         self.register_buffer('p_g', nn.Parameter(p_g, requires_grad=False))
         self.kld = nn.KLDivLoss(reduction='batchmean')
 
     def forward(self, p_list):
         p = torch.stack(p_list).transpose(0, 1)  # [B, T], where T is the actual number of steps/iterations performed; transpose for batch first
         p = p.clamp(min=1e-6, max=1-1e-6)   # clamping to avoid log(0); only used if p is used as input and not target below in kld
-
+        
         # Geometric distribution prior p_g
         p_g = self.p_g[:p.shape[1]].unsqueeze(0).expand_as(p)   # [B, T] <-- [T] <-- [max_steps]
 
         # TODO: See comment NOTE below about log-space of input and target.
-        #       Not sure whether to use p_g.log() or p.log() as "input" since different sources do different things.
+        #       Not sure whether to use p_g.log() or p.log() as "input" since different sources do different things. 
         return self.kld(p_g.log(), p)    # NOTE: the input should be in log-space for this KL divergence loss function; the target can be in the log-space too if the argument log_target=True; See https://docs.pytorch.org/docs/stable/generated/torch.nn.KLDivLoss.html
         # return self.kl_div(p.log(), p_g)
+
+def safe_multinomial(p, num_samples=1, dim=-1):
+    """
+    Robust multinomial sampling from probabilities to avoid NaN/Inf/negatives.
+    Use uniform fallback when a row sums to 0.
+    Returns (idx, probs_used)
+    """
+    q = p.float()
+    q = torch.nan_to_num(q, nan=0.0, posinf=0.0, neginf=0.0)
+    q = torch.clamp(q, min=0.0)
+
+    row_sum = q.sum(dim=dim, keepdim=True)
+    zero = row_sum.le(1e-12)
+
+    if zero.any():
+        # Only replace rows that sum to 0
+        uniform_row = torch.full_like(q, 1.0 / q.size(dim))
+        q = torch.where(zero, uniform_row, q)
+        row_sum = q.sum(dim=dim, keepdim=True)
+
+    q = q / row_sum
+    idx = torch.multinomial(q, num_samples=num_samples)
+
+    return idx, q
 
 class VisReasModel(pl.LightningModule):
     """
@@ -145,6 +169,7 @@ class VisReasModel(pl.LightningModule):
             if data_config.validate_in_and_out_domain:
                 self.gen_val_attention_scores = []
 
+        # --- PonderNet ---
         if self.model_config.pondernet.enabled:
             raise NotImplementedError("This is not yet implemented on this branch. Please switch to main.")
 
@@ -185,7 +210,7 @@ class VisReasModel(pl.LightningModule):
 
     def shared_step(self, batch):
         """
-        The same processing is performed during training, validation and test steps.
+        The same processing is performed during training, validation and test steps. 
         """
 
         x, y, task_tokens, example_in_context, y_true_size, x_grid_object_ids, special_grid_tokens_dict = batch   # [B, H, W], [B, H, W], [B], [B, 2], [B, seq_len], Dict
@@ -246,7 +271,7 @@ class VisReasModel(pl.LightningModule):
 
         # probabilities = F.softmax(y_hat, dim=1)  # compute the probabilities (normalized logits) of the model for each sample of the batch
 
-        # TODO: 
+        # TODO:
         # See exactly how we want to compute the loss and metrics. What types of tokens we want to consider.
         # Also, convert the non-data tokens to background tokens (i.e., 0) when computing the loss and metrics, no?
         # Also, consider weighting the tokens (e.g., there are many more bakground tokens) differently when computing the loss for grid with padding.
@@ -286,10 +311,24 @@ class VisReasModel(pl.LightningModule):
             # Grid accuracy (only count as correct if entire non-padding grid is correct)
             acc_grid_no_pad = torch.all((preds == y) | ~true_size_mask, dim=1).float().mean().unsqueeze(0)   # | ~mask ensures automatically count as correct the padding tokens
 
+            # Per-pixel accuracy on object cells (i.e., only cells with values in {1, ..., 9})
+            # A cell part of an object is a value between 1 and 9. Anything different is background (0.) or Visual Tokens (VTs) (10.+)
+            # TODO: If a ground-truth grid contains no object cells (i.e., y_flat has no values in 1..9),
+            #       this metric becomes poorly defined. Currently, we force accuracy to be 0.0 in such cases,
+            #       but this can bias averages downward when such cases occur.
+            #       In the future, either:
+            #           (1) skip such samples when aggregating (use NaN here and remove them when computing the batch average); or
+            #           (2) accumulate numerator/denominator across steps and compute a ratio-of-sums.
+            obj_mask = ((y >= 1) & (y <= 9)).float()
+            den = obj_mask.sum()
+            acc_obj_pixels = (((preds == y).float() * obj_mask).sum() / den.clamp_min(1)).unsqueeze(0)
+            acc_obj_pixels = acc_obj_pixels.masked_fill(den == 0, 0.0)  # temporary fallback: 0.0 when no object pixels. Although this should not occur with COGITAO current experiments
+
         else:
             # Does not make that much sense when using a random masking...
             acc_grid_with_pad = torch.tensor([0.0], device=acc_symbol_with_pad.device)
             acc_grid_no_pad = torch.tensor([0.0], device=acc_symbol_with_pad.device)
+            acc_obj_pixels = torch.tensor([0.0], device=acc_symbol_with_pad.device)
 
 
         logs = {'loss': loss_symbol_with_pad,
@@ -297,9 +336,10 @@ class VisReasModel(pl.LightningModule):
                 'acc': acc_symbol_with_pad,
                 'acc_no_pad': acc_symbol_no_pad,
                 'acc_grid': acc_grid_with_pad,
-                'acc_grid_no_pad': acc_grid_no_pad
+                'acc_grid_no_pad': acc_grid_no_pad,
+                "acc_obj_pixels": acc_obj_pixels
                 }
-        
+
         loss = loss_symbol_with_pad
 
         return loss, logs, preds_orig
@@ -311,14 +351,16 @@ class VisReasModel(pl.LightningModule):
         """
         x, y, task_tokens, example_in_context, y_true_size, x_grid_object_ids, special_grid_tokens_dict = batch
 
+        B, H, W = x.shape
+
         loss, logs, preds = self.step(batch, batch_idx)
 
         # Logging
-        self.log_dict({f"metrics/train_{k}": v for k,v in logs.items()},
-                      prog_bar=True,
-                      logger=True,
-                      on_step=True,
-                      on_epoch=True,
+        self.log_dict({f"metrics/train_{k}": v for k,v in logs.items()}, 
+                      prog_bar=True, 
+                      logger=True, 
+                      on_step=True, 
+                      on_epoch=True, 
                       add_dataloader_idx=False
                       )
         
@@ -344,11 +386,11 @@ class VisReasModel(pl.LightningModule):
         self.train_grid_acc_step.append(logs['acc_grid'])
 
         # Log the current learning rate
-        self.log_dict({"learning_rate": self.lr_schedulers().get_last_lr()[-1]},
-                    prog_bar=True,
-                    logger=True,
-                    on_step=True,
-                    on_epoch=True,
+        self.log_dict({"learning_rate": self.lr_schedulers().get_last_lr()[-1]}, 
+                    prog_bar=True, 
+                    logger=True, 
+                    on_step=True, 
+                    on_epoch=True, 
                     )
 
         return loss
@@ -363,14 +405,16 @@ class VisReasModel(pl.LightningModule):
 
         x, y, task_tokens, example_in_context, y_true_size, x_grid_object_ids, special_grid_tokens_dict = batch
 
+        B, H, W = x.shape
+
         loss, logs, preds = self.step(batch, batch_idx)
 
         if dataloader_idx == 0:
             # Logging
-            self.log_dict({f"metrics/val_{k}": v for k, v in logs.items()},
-                          prog_bar=True,
-                          logger=True,
-                          on_step=True,
+            self.log_dict({f"metrics/val_{k}": v for k, v in logs.items()}, 
+                          prog_bar=True, 
+                          logger=True, 
+                          on_step=True, 
                           on_epoch=True,
                           add_dataloader_idx=False
                           )    # NOTE: this is monitored for best checkpoint and early stopping
@@ -382,7 +426,7 @@ class VisReasModel(pl.LightningModule):
 
             # For the first and last validation batch of the epoch
             if (batch_idx == 0) or (batch_idx == self.trainer.num_val_batches[0] - 1):
-
+                
                 # Store batch (of inputs, preds, targets) for current epoch for plotting
                 self.val_inputs.append(x)
                 self.val_preds.append(preds)
@@ -396,13 +440,13 @@ class VisReasModel(pl.LightningModule):
                             self.val_attention_scores.append(attn_scores)
                         else:
                             logger.warning(f"Attention scores were None for val epoch {self.current_epoch} and batch {batch_idx}.")
-
+            
         elif dataloader_idx == 1:
             # Logging
-            self.log_dict({f"metrics/gen_val_{k}": v for k, v in logs.items()},
-                          prog_bar=True,
-                          logger=True,
-                          on_step=True,
+            self.log_dict({f"metrics/gen_val_{k}": v for k, v in logs.items()}, 
+                          prog_bar=True, 
+                          logger=True, 
+                          on_step=True, 
                           on_epoch=True,
                           add_dataloader_idx=False
                           )
@@ -414,7 +458,7 @@ class VisReasModel(pl.LightningModule):
 
             # For the first and last validation batch of the epoch
             if (batch_idx == 0) or (batch_idx == self.trainer.num_val_batches[1] - 1):
-
+                
                 # Store batch (of inputs, preds, targets) for current epoch for plotting
                 self.gen_val_inputs.append(x)
                 self.gen_val_preds.append(preds)
@@ -443,23 +487,23 @@ class VisReasModel(pl.LightningModule):
         # Plot attention maps if attention maps are enabled and exist
         if self.model_config.attention_map.enabled and hasattr(self.encoder, 'get_attention_scores'):
             # Plot attention maps of some training and validation samples of the first and last batch seen during the epoch
-
+            
             for batch_index, split in zip([0, -1], ["train", "val"]):
                 # Plot attention maps of some training and validation samples of the first and last batch seen during the epoch
                 fig_paths = plot_attention_scores(self.save_folder,
-                                                  split,
-                                                  self.train_inputs,self.train_targets,
+                                                  split, 
+                                                  self.train_inputs,self.train_targets, 
                                                   self.train_attention_scores,
-                                                  self.model_config.attention_map.layer,
-                                                  self.backbone_network_config.num_heads,
-                                                  self.image_size,
-                                                  self.encoder.num_extra_tokens,
-                                                  self.encoder.seq_len,
-                                                  n_samples=self.model_config.attention_map.n_samples,
-                                                  epoch=self.current_epoch,
+                                                  self.model_config.attention_map.layer, 
+                                                  self.backbone_network_config.num_heads, 
+                                                  self.image_size, 
+                                                  self.encoder.num_extra_tokens, 
+                                                  self.encoder.seq_len, 
+                                                  n_samples=self.model_config.attention_map.n_samples, 
+                                                  epoch=self.current_epoch, 
                                                   batch_index=batch_index
                                                   )
-
+                
                 figs_to_log.append(fig_paths)
 
             # Log the figures to wandb
@@ -483,14 +527,14 @@ class VisReasModel(pl.LightningModule):
                                                    batch_index=batch_index,
                                                    epoch=self.current_epoch
                                                    )
-
+                
                 figs_to_log.append(fig_paths)
 
             # Plot a few validation samples (inputs, predictions, targets) of the first and last batch seen during the epoch
             for batch_index in [0, -1]:
                 fig_paths = plot_image_predictions(self.save_folder,
                                                    "val",
-                                                   self.val_inputs,
+                                                   self.val_inputs, 
                                                    self.val_preds,
                                                    self.val_targets,
                                                    self.image_size,
@@ -498,7 +542,7 @@ class VisReasModel(pl.LightningModule):
                                                    batch_index=batch_index,
                                                    epoch=self.current_epoch
                                                    )
-
+                
                 figs_to_log.append(fig_paths)
 
             if self.data_config.validate_in_and_out_domain:
@@ -506,7 +550,7 @@ class VisReasModel(pl.LightningModule):
                     # Plot a few validation samples (inputs, predictions, targets) of the first and last batch seen during the epoch
                     fig_paths = plot_image_predictions(self.save_folder,
                                                     "gen_val",
-                                                    self.gen_val_inputs,
+                                                    self.gen_val_inputs, 
                                                     self.gen_val_preds,
                                                     self.gen_val_targets,
                                                     self.image_size,
@@ -514,7 +558,7 @@ class VisReasModel(pl.LightningModule):
                                                     batch_index=batch_index,
                                                     epoch=self.current_epoch
                                                     )
-
+                
                 figs_to_log.append(fig_paths)
 
             # Log the figures to wandb
@@ -563,7 +607,7 @@ class VisReasModel(pl.LightningModule):
             prefix = "test"
         elif dataloader_idx == 1:
             prefix = "gen_test"
-
+        
         test_results = {f"{prefix}_{k}": v for k, v in logs.items()}
 
         # Log the results to WandB
@@ -575,7 +619,7 @@ class VisReasModel(pl.LightningModule):
             self.test_inputs.append(x)
             self.test_preds.append(preds)
             self.test_targets.append(y.view(B, -1))   # flatten y for consistency
-
+        
         elif dataloader_idx == 1:
             self.gen_test_step_results.append(test_results)
             self.gen_test_inputs.append(x)
@@ -591,6 +635,8 @@ class VisReasModel(pl.LightningModule):
         """
 
         figs_to_log = []
+
+        log_message = ""
 
         if len(self.test_step_results) != 0:
             test_step_results = self.test_step_results
@@ -629,7 +675,7 @@ class VisReasModel(pl.LightningModule):
                     log_message += f"{k}: {v} \n"
 
                 logger.info(log_message)
-
+                
                 self.gen_test_results = gen_test_results
 
                 # Plot a few test samples (inputs, predictions, targets) of the first and last batch of testing (single epoch)
@@ -792,7 +838,7 @@ class BEFOREARCModel(VisReasModel):
                                                    network_config=backbone_network_config, 
                                                    image_size=self.image_size,
                                                    num_channels=self.num_channels,
-                                                   num_classes=self.num_classes
+                                                   num_classes=self.num_classes 
                                                    )
             self.bb_embed_dim = backbone_network_config.embed_dim   # embedding dimension backbone model
             
@@ -920,6 +966,8 @@ class BEFOREARCModel(VisReasModel):
 
 
     def forward(self, x, y, task_tokens=None, example_in_context=None, x_grid_object_ids=None):
+        B, H, W = x.shape
+        B, seq_len = y.shape
 
         device = x.device
 
@@ -933,6 +981,8 @@ class BEFOREARCModel(VisReasModel):
         if not (self.model_config.ope.enabled and (x_grid_object_ids is not None) and self.model_config.backbone in ["vit", "looped_vit", "transformer", "llada"]):
             x_grid_object_ids = None
 
+
+        # --- PonderNet ---
         if self.model_config.pondernet.enabled:
             raise NotImplementedError("This is not yet implemented on this branch. Please switch to main.")
 
@@ -1001,9 +1051,9 @@ class BEFOREARCModel(VisReasModel):
 
         elif self.model_config.head in ["mlp"]:
             # MLP Decoder/Head
-    
+
             # Forward pass through the model head
-            # We can treat each pixel/token independently as part of a sequence, so we can directly apply a Linear layer 
+            # We can treat each pixel/token independently as part of a sequence, so we can directly apply a Linear layer
             # where the last dimension is the features dimension, instead of reshaping the tensor
             logits = self.decoder(x_encoded)   # [B, seq_len, num_classes] <-- [B, seq_len=H*W, C=self.network_config.embed_dim]
 

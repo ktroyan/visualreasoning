@@ -1108,6 +1108,10 @@ class LoopedVisionTransformer(nn.Module):
         for step_t in range(max_steps):
             # Single Transformer step with residual connection
             h_t = self.transformer_step(x + h_t, num_appended_extra_tokens) # [B, seq_len, embed_dim]; compute hidden state features
+
+            # TODO: Check how to improve this
+            # Add fix to keep valid for Bernoulli sampling
+            h_t = torch.nan_to_num(h_t)  # keep hidden state finite
             
             # Store encoded input (i.e., predicted features, hidden state) for this step
             x_features_list.append(h_t)
@@ -1125,11 +1129,20 @@ class LoopedVisionTransformer(nn.Module):
                 # Compute conditional halting probability lambda_t using the halting MLP node
                 lambda_t = self.halting_mlp(x_hidden_vector).squeeze(-1)  # [B]; lambda_n in the paper
                 
+                # TODO: Check how to improve this
+                # Add fix to keep valid for Bernoulli sampling
+                lambda_t = torch.nan_to_num(lambda_t, nan=0.0, posinf=1.0, neginf=0.0).clamp_(0.0, 1.0)
+
                 # Update halting mass for this step based on a geometric distribution
                 p_t = p_unhalted * lambda_t
                 
                 # Update remaining probability mass for the next step/iteration
                 p_unhalted = p_unhalted * (1 - lambda_t)
+
+                # TODO: Check how to improve this
+                # Add fix to keep valid for Bernoulli sampling
+                p_t = torch.nan_to_num(p_t, nan=0.0, posinf=1.0, neginf=0.0).clamp_(0.0, 1.0)
+                p_unhalted = torch.nan_to_num(p_unhalted, nan=0.0, posinf=1.0, neginf=0.0).clamp_(0.0, 1.0)
 
             p_list.append(p_t)
 
@@ -1147,12 +1160,25 @@ class LoopedVisionTransformer(nn.Module):
                 # Note that on the last step we can skip sampling since every sample must halt
                 if step_t < max_steps - 1:
                     to_sample = (~halted).float()  # [B]
-                    to_halt = torch.bernoulli(lambda_t * to_sample).bool()  # [B]
-                    halted = halted | to_halt  # halt is 1; mark newly halted samples
 
-                    # Store at what step samples first halted
-                    newly_halted = (~halt_step.bool()) & halted
+                    # TODO: Check how to improve this
+                    # Add fix to keep valid for Bernoulli sampling
+                    probs = (lambda_t * to_sample).to(torch.float32)
+                    probs = torch.nan_to_num(probs, nan=0.0, posinf=1.0, neginf=0.0).clamp_(0.0, 1.0)
+                    to_halt = torch.bernoulli(probs).bool()  # [B]
+
+                    # TODO: Check how to improve this
+                    # Fix possible issue in saving first halting step
+                    newly_halted = (halt_step == -1) & to_halt                                              # CHANGED
                     halt_step[newly_halted] = step_t
+                    halted = halted | to_halt
+
+                    # # to_halt = torch.bernoulli(lambda_t * to_sample).bool()  # [B]
+                    # halted = halted | to_halt  # halt is 1; mark newly halted samples
+
+                    # # Store at what step samples first halted
+                    # newly_halted = (~halt_step.bool()) & halted
+                    # halt_step[newly_halted] = step_t
                 
                 # If all samples have halted, finish processing the batch of samples with the network
                 if halted.all():

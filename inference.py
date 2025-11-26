@@ -20,8 +20,8 @@ from utility.rearc.utils import observe_rearc_input_output_images, check_train_t
 from utility.custom_logging import logger
 
 
-torch.set_float32_matmul_precision('medium')    # 'high'
-torch.backends.cudnn.benchmark = True
+torch.set_float32_matmul_precision('medium')
+torch.backends.cudnn.benchmark = False
 torch.backends.cudnn.deterministic = True
 
 
@@ -54,7 +54,14 @@ def write_inference_results_logs(config, inference_folder, all_test_results, pap
 
         # Log test results
         f.write("*** Test Results ***\n")
-        for result_set_name, result_dict in all_test_results.items():
+        metric_blocks = ("test_results", "gen_test_results")
+        for result_set_name in metric_blocks:
+            if result_set_name not in all_test_results:
+                continue
+            result_dict = all_test_results[result_set_name]
+            if not isinstance(result_dict, dict):
+                continue
+
             f.write(f"{result_set_name}:\n")
             for metric_name, metric_values in result_dict.items():
                 values = np.array(metric_values)
@@ -79,7 +86,7 @@ def main(config, inference_folder, datamodule, model=None, model_ckpt_path=None,
     inference_start_time = time.time()
 
     # Trainer (for inference/testing)
-    trainer = pl.Trainer(num_nodes=1,   # number of gpu nodes for distributed training
+    trainer = pl.Trainer(num_nodes=1,   # number of gpu nodes for distributed training; NOTE: if more than one GPU is used, need to update how we save inputs, targets, etc. so that they stay aligned. This can be done within test_step()
                          logger=exp_logger,
                          devices=config.base.n_gpus,
                          accelerator='auto',
@@ -90,7 +97,7 @@ def main(config, inference_folder, datamodule, model=None, model_ckpt_path=None,
     if model is not None:
         log_message = f"A specific (most likely trained) model instance from class {model.__class__} was given for inference.\n\n"
         # log_message += f"Model: {model}\n"
-        log_message += "No model checkpoint was given directly."
+        log_message += "The model instance given was used instead of a checkpoint."
         logger.info(log_message)
     
     elif model_ckpt_path is not None:
@@ -122,7 +129,6 @@ def main(config, inference_folder, datamodule, model=None, model_ckpt_path=None,
 
     # Testing
     trainer.test(model=model, datamodule=datamodule, verbose=True)  # NOTE: if more than one val/test dataloader was created in the datamodule, all the val/test dataloaders will be used for validation/testing
-   
 
     # Additional logging and plotting if needed
     if config.inference.inference_verbose == 1 and config.base.data_env in ["REARC", "BEFOREARC"]:
@@ -153,6 +159,73 @@ def main(config, inference_folder, datamodule, model=None, model_ckpt_path=None,
     if config.data.use_gen_test_set:
         gen_test_results = model.gen_test_results
         all_test_results.update({'gen_test_results': gen_test_results})
+
+    # Get the test (and optional gen-test) inputs from the dataloaders
+    tdls = datamodule.test_dataloader()
+    if isinstance(tdls, list):
+        test_dl, gen_test_dl = tdls[0], tdls[1]
+    else:
+        test_dl, gen_test_dl = tdls, None
+
+    ## Save inputs/targets/predictions as lists of batches
+    # Collect all input batches
+    with torch.inference_mode():
+        test_inputs_batches = [batch[0].detach().cpu() for batch in test_dl]
+        if gen_test_dl is not None:
+            gen_test_inputs_batches = [batch[0].detach().cpu() for batch in gen_test_dl]
+
+    # Ensure model.* lists are CPU tensors and lists
+    test_targets_batches = [t.detach().cpu() if isinstance(t, torch.Tensor) else t for t in model.test_targets]
+    test_preds_batches   = [p.detach().cpu() if isinstance(p, torch.Tensor) else p for p in model.test_preds]
+
+    test_inputs_path  = os.path.join(inference_folder, "test_inputs_batches.pt")
+    test_targets_path = os.path.join(inference_folder, "test_targets_batches.pt")
+    test_preds_path   = os.path.join(inference_folder, "test_predictions_batches.pt")
+
+    # Save lists directly. Note that torch.save handles arbitrary Python objects
+    torch.save(test_inputs_batches, test_inputs_path)
+    torch.save(test_targets_batches, test_targets_path)
+    torch.save(test_preds_batches, test_preds_path)
+
+    if config.data.use_gen_test_set:
+        gen_targets_batches = [t.detach().cpu() if isinstance(t, torch.Tensor) else t for t in model.gen_test_targets]
+        gen_preds_batches   = [p.detach().cpu() if isinstance(p, torch.Tensor) else p for p in model.gen_test_preds]
+
+        gen_inputs_path  = os.path.join(inference_folder, "gen_test_inputs_batches.pt")
+        gen_targets_path = os.path.join(inference_folder, "gen_test_targets_batches.pt")
+        gen_preds_path   = os.path.join(inference_folder, "gen_test_predictions_batches.pt")
+
+        torch.save(gen_test_inputs_batches, gen_inputs_path)
+        torch.save(gen_targets_batches, gen_targets_path)
+        torch.save(gen_preds_batches, gen_preds_path)
+
+    # Save to WandB (if enabled)
+    if exp_logger is not None:
+        exp_logger.experiment.save(test_inputs_path)
+        exp_logger.experiment.save(test_targets_path)
+        exp_logger.experiment.save(test_preds_path)
+        if config.data.use_gen_test_set:
+            exp_logger.experiment.save(gen_inputs_path)
+            exp_logger.experiment.save(gen_targets_path)
+            exp_logger.experiment.save(gen_preds_path)
+
+    # Update all_test_results with input, target and prediction file paths
+    all_test_results.update({
+        "test_files": {
+            "inputs":  os.path.basename(test_inputs_path),
+            "targets": os.path.basename(test_targets_path),
+            "preds":   os.path.basename(test_preds_path),
+        }
+    })
+    if config.data.use_gen_test_set:
+        all_test_results.update({
+            "gen_test_files": {
+                "inputs":  os.path.basename(gen_inputs_path),
+                "targets": os.path.basename(gen_targets_path),
+                "preds":   os.path.basename(gen_preds_path),
+            }
+        })
+
 
     paper_model_name = get_paper_model_name(config)
 
