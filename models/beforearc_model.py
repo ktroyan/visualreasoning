@@ -322,14 +322,14 @@ class VisReasModel(pl.LightningModule):
             obj_mask = ((y >= 1) & (y <= 9)).float()
             den = obj_mask.sum()
             acc_obj_pixels = (((preds == y).float() * obj_mask).sum() / den.clamp_min(1)).unsqueeze(0)
-            acc_obj_pixels = acc_obj_pixels.masked_fill(den == 0, 0.0)  # temporary fallback: 0.0 when no object pixels. Although this should not occur with COGITAO current experiments
+            acc_obj_pixels = acc_obj_pixels.masked_fill(den == 0,
+                                                        0.0)  # temporary fallback: 0.0 when no object pixels. Although this should not occur with COGITAO current experiments
 
         else:
             # Does not make that much sense when using a random masking...
             acc_grid_with_pad = torch.tensor([0.0], device=acc_symbol_with_pad.device)
             acc_grid_no_pad = torch.tensor([0.0], device=acc_symbol_with_pad.device)
             acc_obj_pixels = torch.tensor([0.0], device=acc_symbol_with_pad.device)
-
 
         logs = {'loss': loss_symbol_with_pad,
                 'loss_no_pad': loss_symbol_no_pad,
@@ -760,7 +760,7 @@ class VisReasModel(pl.LightningModule):
             scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=10)
         
         elif self.model_config.training_hparams.scheduler.type == 'CosineAnnealingLR':
-            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=20, eta_min=1e-6)
+            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=self.model_config.training_hparams.scheduler.t_max, eta_min=1e-6)
 
         elif self.model_config.training_hparams.scheduler.type == 'StepLR':
             scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.1)
