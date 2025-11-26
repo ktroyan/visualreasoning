@@ -34,18 +34,17 @@ parameters:
       setting:
         values: ['exp_setting_1', 'exp_setting_2', 'exp_setting_3']
       name:
-        # values: ['experiment_0_1M', 'experiment_1_1M']
-        values: ['experiment_0_1M']
-        # values: ['experiment_1_1M']
+        # values: ['experiment_0_500k', 'experiment_1_500k']
+        values: ['experiment_0_500k']
       exp_specifics:
-        values: ['scaling_1M']
+        values: ['scaling_500k']
 
   data:
     parameters:
       max_train_samples:
-        values: [1000000] # set the maximum number of training samples
+        values: [500000] # set the maximum number of training samples
   
   training:
     parameters:
       max_epochs:
-        values: [10]  # set the maximum number of training epochs
+        values: [20]  # set the maximum number of training epochs

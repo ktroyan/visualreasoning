@@ -33,19 +33,19 @@ parameters:
         values: ['compositionality']
       setting:
         values: ['exp_setting_1', 'exp_setting_2', 'exp_setting_3']
+        # values: ['exp_setting_2', 'exp_setting_3']
       name:
-        # values: ['experiment_0_250k', 'experiment_1_250k']
-        values: ['experiment_0_250k']
-        # values: ['experiment_1_250k']
+        # values: ['experiment_0_1M', 'experiment_1_1M']
+        values: ['experiment_1_1M']
       exp_specifics:
-        values: ['scaling_250k']
+        values: ['scaling_1M']
 
   data:
     parameters:
       max_train_samples:
-        values: [250000] # set the maximum number of training samples
+        values: [1000000] # set the maximum number of training samples
   
   training:
     parameters:
       max_epochs:
-        values: [50]  # set the maximum number of training epochs
+        values: [10]  # set the maximum number of training epochs
