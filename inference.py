@@ -20,6 +20,20 @@ torch.set_float32_matmul_precision('medium')
 torch.backends.cudnn.benchmark = False
 torch.backends.cudnn.deterministic = True
 
+def get_model_param_stats(model):
+    trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    non_trainable = sum(p.numel() for p in model.parameters() if not p.requires_grad)
+    total = trainable + non_trainable
+    size_mb_fp32 = total * 4 / (1024 ** 2)
+    size_mb_fp16 = total * 2 / (1024 ** 2)
+
+    return {
+        "trainable_params": trainable,
+        "non_trainable_params": non_trainable,
+        "total_params": total,
+        "size_mb_fp32": size_mb_fp32,
+        "size_mb_fp16": size_mb_fp16,
+    }
 
 def write_inference_results_logs(config, inference_folder, all_test_results, paper_model_name):
     # Format filename
@@ -105,6 +119,11 @@ def main(config, inference_folder, datamodule, model=None, model_ckpt_path=None,
     else:
         raise ValueError("No model instance or model checkpoint path was given for inference.")
 
+    # Get model size (i.e., #parameters)
+    param_stats = get_model_param_stats(model)
+    logger.info(f"Model parameter stats:\n{param_stats}")
+    if exp_logger is not None:
+        exp_logger.experiment.log(param_stats)  # log the full dict of parameter info to WandB
 
     logger.info(f"All hyperparameters of the model module used for inference:\n{model.hparams} \n")
 
