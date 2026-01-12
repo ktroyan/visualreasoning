@@ -5,15 +5,18 @@
 #SBATCH --time=24:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
+# #SBATCH --mem-per-cpu=64G   # I added this after the OOM RAM error
+#SBATCH --mem=128G          # I added this after the OOM RAM error; 256G is not possible
 #SBATCH --gres=gpu:rtx3090:1
 #SBATCH --export=ALL,SRC_DIR=/cluster/raid/data/ktroyan
 # #SBATCH --partition=gpu              # does the site require one to be specified?
 # #SBATCH --account=MY_PROJECT         # does the site require one to be specified?
+# #SBATCH --nodelist=node04
 
 # Activate environment
 source .venv/bin/activate 2>/dev/null || true
 
-# Debug info
+# Info
 echo "Running on node: $(hostname)"
 echo "CUDA_VISIBLE_DEVICES from SLURM: $CUDA_VISIBLE_DEVICES"
 nvidia-smi || true
