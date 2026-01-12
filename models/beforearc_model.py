@@ -21,6 +21,11 @@ from utility.custom_logging import logger
 
 
 class ReconstructionLoss(nn.Module):
+    """
+    TODO: check if we do: 
+    \sum_{t} E_{b,i}\[p_{t}^{(b)} \cdot l_{CE}(y_{b,i}, \hat{y}_{b,i}^{(t)})\]
+    """
+
     def __init__(self, loss_fn):
         super().__init__()
         self.loss_fn = loss_fn
@@ -61,7 +66,8 @@ class RegularizationLoss(nn.Module):
                 p_g[k] = not_halted * lambda_p
                 not_halted *= (1 - lambda_p)
         
-        self.register_buffer('p_g', nn.Parameter(p_g, requires_grad=False))
+        # self.register_buffer('p_g', nn.Parameter(p_g, requires_grad=False))
+        self.register_buffer('p_g', p_g)
         self.kld = nn.KLDivLoss(reduction='batchmean')
 
     def forward(self, p_list):
@@ -268,7 +274,7 @@ class VisReasModel(pl.LightningModule):
 
         # --- PonderNet ---
         if self.model_config.pondernet.enabled:
-            logits_list, p_list, halt_step, y_flat, mask, special_grid_tokens_dict = self.shared_step(batch)
+            logits_list, p_list, halt_step, y_flat, mask, special_grid_tokens_dict = self.shared_step(batch)    # list of T elements of shape [B, seq_len, num_classes], list of T elements of shape [B], [B], [B, seq_len], [B, seq_len], Dict
             
             ## Loss computation
             # Reconstruction loss
@@ -280,6 +286,7 @@ class VisReasModel(pl.LightningModule):
             
             # PonderNet objective loss (using Reconstruction and Regularization losses)
             obj_loss = rec_loss + beta * reg_loss
+            # TODO: Check if OK to unsqueeze here since the loss would be a tensor of shape [1] instead of a scalar and BP might expect a scalar?
             loss = obj_loss.unsqueeze(0) # loss returned for backpropagation; convert to 1-element tensor so that it can be concatenated properly when storing metrics later
 
             # Convert to 1-element tensors so that they can be concatenated properly when storing metrics later
@@ -291,20 +298,35 @@ class VisReasModel(pl.LightningModule):
             # During training, the output is sampled using a multinomial sampling for the halting probability distribution obtained
             # During evaluation, the output is the output obtained at the step at which the model halted (following the Bernoulli sampling with probability lambda_t)
             
-            all_logits = torch.stack(logits_list, dim=1)    # stack all logits along the steps dimension into [B, T, seq_len, num_classes]
-            B, seq_len, num_classes = y_flat.shape[0], y_flat.shape[1], all_logits.shape[3]
+            ## TODO 1: Optimize this part to avoid stacking all logits if unnecessary
+            # all_logits = torch.stack(logits_list, dim=1)    # stack all logits along the steps dimension into [B, T, seq_len, num_classes]
+            # B, seq_len, num_classes = y_flat.shape[0], y_flat.shape[1], all_logits.shape[3]
+            B, seq_len = y_flat.shape[0], y_flat.shape[1]
             
             if self.training:
                 # Get training prediction logits
 
                 # We probabilistically sample a halting step per batch element to get the logits of that step
                 p = torch.stack(p_list, dim=1).clamp(min=1e-6, max=1-1e-6)  # [B, T]; stack the probabilities of halting p_list into [B, T]
+                # NOTE: this part is not differentiable since we sample discrete steps here, so no training signal from sampled logits I think, but it matches PonderNet
                 # sampled_step = torch.multinomial(p, num_samples=1)  # [B, 1]; sample one step to use per batch element
                 sampled_step, _ = safe_multinomial(p.float(), num_samples=1, dim=1)  # [B, 1]; sample one step to use per batch element
 
+                # Commented out; see TODO 1 above
                 # Get the per‐token class‐scores from the sampled halting step for each element in the batch
-                step_indices = sampled_step.view(B, 1, 1, 1).expand(-1, 1, seq_len, num_classes) # build gather index of shape [B, 1, seq_len, 1]
-                logits = all_logits.gather(1, step_indices).squeeze(1)  # gather the sampled-step logits to [B, seq_len, num_classes] <-- [B, 1, seq_len, num_classes]; along the T dimension of all_logits, gather takes the index given by step_indices[b, 0, i, j] at every (sequence, class) position (i,j)
+                # step_indices = sampled_step.view(B, 1, 1, 1).expand(-1, 1, seq_len, num_classes) # build gather index of shape [B, 1, seq_len, 1]
+                # logits = all_logits.gather(1, step_indices).squeeze(1)  # gather the sampled-step logits to [B, seq_len, num_classes] <-- [B, 1, seq_len, num_classes]; along the T dimension of all_logits, gather takes the index given by step_indices[b, 0, i, j] at every (sequence, class) position (i,j)
+
+                ### Instead we do the following:
+                # sampled_step: [B, 1]
+                sampled_step = sampled_step.squeeze(1)  # [B]
+
+                # Select logits directly from logits_list
+                logits = torch.stack(
+                    [logits_list[sampled_step[b]][b] for b in range(B)],
+                    dim=0
+                )  # [B, seq_len, num_classes]
+                # until here
 
             else:
                 # Get evaluation prediction logits
@@ -312,12 +334,26 @@ class VisReasModel(pl.LightningModule):
                 # Note that this assumes that the feature states has been preserved by being stored in all subsequent steps since the sample has halted
                 # logits = logits_list[-1]  # this would work if we stored the feature state of a sample that just halted through all the subsequent steps
 
+                # Commented out; see TODO 1 above
                 # Get the per‐token class‐scores from the halting step at which each element in the batch first halted
-                step_indices = halt_step.view(B, 1, 1, 1).expand(-1, 1, seq_len, num_classes)
-                logits = all_logits.gather(1, step_indices).squeeze(1)
+                # step_indices = halt_step.view(B, 1, 1, 1).expand(-1, 1, seq_len, num_classes)
+                # logits = all_logits.gather(1, step_indices).squeeze(1)
+
+                # Instead we do the following:
+                # halt_step: [B]
+                logits = torch.stack(
+                    [logits_list[halt_step[b]][b] for b in range(B)],
+                    dim=0
+                )  # [B, seq_len, num_classes]
+                # until here
             
-            selected_step = step_indices[:, 0, 0, 0]   # allows to observe how many steps were taken for each sample; [B]
+            # Commented out; see TODO 1 above
+            # selected_step = step_indices[:, 0, 0, 0]   # allows to observe how many steps were taken for each sample; [B]
             
+            # Instead we do the following:
+            selected_step = sampled_step if self.training else halt_step   # allows to observe how many steps were taken for each sample; [B]
+
+
             logs = {"loss": loss, "ponder_rec_loss": rec_loss, "ponder_reg_loss": reg_loss}
 
         # --- Standard ---
@@ -400,23 +436,23 @@ class VisReasModel(pl.LightningModule):
         # For the first and last training batch of the epoch
         if (batch_idx == 0) or (batch_idx == self.trainer.num_training_batches - 1):
             # Save batch (of inputs, preds, targets) for current epoch for plotting
-            self.train_inputs.append(x)
-            self.train_preds.append(preds)
-            self.train_targets.append(y)
+            self.train_inputs.append(x.detach().cpu())
+            self.train_preds.append(preds.detach().cpu())
+            self.train_targets.append(y.detach().cpu())
 
             if self.model_config.attention_map.enabled:
                 # Store attention scores
                 if hasattr(self.encoder, 'get_attention_scores'):
                     attn_scores = self.encoder.get_attention_scores()
                     if attn_scores is not None:
-                        self.train_attention_scores.append(attn_scores)
+                        self.train_attention_scores.append(attn_scores.detach().cpu())
                     else:
                         logger.warning(f"Attention scores were None for train epoch {self.current_epoch} and batch {batch_idx}.")
 
         # Store to plot locally
-        self.train_loss_step.append(logs['loss'])
-        self.train_acc_step.append(logs['acc'])
-        self.train_grid_acc_step.append(logs['acc_grid'])
+        self.train_loss_step.append(logs['loss'].detach().cpu())
+        self.train_acc_step.append(logs['acc'].detach().cpu())
+        self.train_grid_acc_step.append(logs['acc_grid'].detach().cpu())
 
         # Log the current learning rate
         self.log_dict({"learning_rate": self.lr_schedulers().get_last_lr()[-1]}, 
@@ -453,24 +489,24 @@ class VisReasModel(pl.LightningModule):
                           )    # NOTE: this is monitored for best checkpoint and early stopping
 
             # Save to plot locally
-            self.val_loss_step.append(logs['loss'])
-            self.val_acc_step.append(logs['acc'])
-            self.val_grid_acc_step.append(logs['acc_grid'])
+            self.val_loss_step.append(logs['loss'].detach().cpu())
+            self.val_acc_step.append(logs['acc'].detach().cpu())
+            self.val_grid_acc_step.append(logs['acc_grid'].detach().cpu())
 
             # For the first and last validation batch of the epoch
             if (batch_idx == 0) or (batch_idx == self.trainer.num_val_batches[0] - 1):
                 
                 # Store batch (of inputs, preds, targets) for current epoch for plotting
-                self.val_inputs.append(x)
-                self.val_preds.append(preds)
-                self.val_targets.append(y)
+                self.val_inputs.append(x.detach().cpu())
+                self.val_preds.append(preds.detach().cpu())
+                self.val_targets.append(y.detach().cpu())
 
                 if self.model_config.attention_map.enabled:
                     # Store attention scores
                     if hasattr(self.encoder, 'get_attention_scores'):
                         attn_scores = self.encoder.get_attention_scores()
                         if attn_scores is not None:
-                            self.val_attention_scores.append(attn_scores)
+                            self.val_attention_scores.append(attn_scores.detach().cpu())
                         else:
                             logger.warning(f"Attention scores were None for val epoch {self.current_epoch} and batch {batch_idx}.")
             
@@ -485,24 +521,24 @@ class VisReasModel(pl.LightningModule):
                           )
 
             # Save to plot locally
-            self.gen_val_loss_step.append(logs['loss'])
-            self.gen_val_acc_step.append(logs['acc'])
-            self.gen_val_grid_acc_step.append(logs['acc_grid'])
+            self.gen_val_loss_step.append(logs['loss'].detach().cpu())
+            self.gen_val_acc_step.append(logs['acc'].detach().cpu())
+            self.gen_val_grid_acc_step.append(logs['acc_grid'].detach().cpu())
 
             # For the first and last validation batch of the epoch
             if (batch_idx == 0) or (batch_idx == self.trainer.num_val_batches[1] - 1):
                 
                 # Store batch (of inputs, preds, targets) for current epoch for plotting
-                self.gen_val_inputs.append(x)
-                self.gen_val_preds.append(preds)
-                self.gen_val_targets.append(y)
+                self.gen_val_inputs.append(x.detach().cpu())
+                self.gen_val_preds.append(preds.detach().cpu())
+                self.gen_val_targets.append(y.detach().cpu())
 
                 if self.model_config.attention_map.enabled:
                     # Store attention scores
                     if hasattr(self.encoder, 'get_attention_scores'):
                         attn_scores = self.encoder.get_attention_scores()
                         if attn_scores is not None:
-                            self.gen_val_attention_scores.append(attn_scores)
+                            self.gen_val_attention_scores.append(attn_scores.detach().cpu())
                         else:
                             logger.warning(f"Attention scores were None for gen val epoch {self.current_epoch} and batch {batch_idx}.")
 
